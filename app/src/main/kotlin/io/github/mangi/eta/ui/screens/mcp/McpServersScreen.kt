@@ -53,6 +53,17 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.Switch
 
 @Composable
 internal fun McpServersScreen(
@@ -307,9 +318,8 @@ internal fun McpServerDetailScreen(
                 } else {
                     server.tools.forEach { tool ->
                         val checked = tool.name in server.enabledToolNames
-                        SwitchPreference(
-                            title = tool.title.ifBlank { tool.name },
-                            summary = toolSummary(tool),
+                        McpToolRow(
+                            tool = tool,
                             checked = checked,
                             onCheckedChange = { enabled ->
                                 if (enabled && tool.readOnlyHint != true) {
@@ -422,4 +432,54 @@ internal fun McpServerDetailScreen(
 private fun toolSummary(tool: McpToolDefinition): String = when {
     tool.readOnlyHint == true -> tool.description.ifBlank { stringResource(R.string.mcp_read_only_tool) }
     else -> tool.description.ifBlank { stringResource(R.string.mcp_may_modify_data) }
+}
+
+@Composable
+private fun McpToolRow(
+    tool: McpToolDefinition,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val summary = toolSummary(tool)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = tool.title.ifBlank { tool.name },
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = 16.sp,
+            )
+            Text(
+                text = summary,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 13.sp,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ExpandMore,
+                contentDescription = stringResource(
+                    if (expanded) R.string.overlay_collapse else R.string.overlay_expand,
+                ),
+                modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
 }
