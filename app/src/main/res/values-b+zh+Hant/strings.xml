@@ -1094,6 +1094,7 @@
   <string name="attachment_file">檔案</string>
   <string name="attachment_folder">資料夾</string>
   <string name="attachment_enter_path">輸入路徑</string>
+  <string name="attachment_camera">相機</string>
   <string name="attachment_add">新增</string>
   <string name="suggestion_analyze_screen_prompt">擷取螢幕畫面並描述目前內容</string>
   <string name="suggestion_open_wechat_prompt">幫我開啟微信</string>

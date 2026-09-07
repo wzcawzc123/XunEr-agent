@@ -253,6 +253,152 @@ class AgentImageCodecTest {
         }
     }
 
+    @Test
+    fun userAttachmentKeepsSmallFileOriginalBytesAndDimensions() {
+        val context = RuntimeEnvironment.getApplication()
+        val sourceFile = File(context.cacheDir, "small-attach-${System.nanoTime()}.jpg")
+        val bitmap = patternedBitmap(width = 640, height = 480)
+        FileOutputStream(sourceFile).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
+        }
+        bitmap.recycle()
+
+        try {
+            val image = AgentImageCodec.fromUserAttachment(
+                context = context,
+                value = sourceFile.absolutePath,
+                source = "user_attach",
+            ) ?: error("无法读取小图附件")
+
+            assertEquals("image/jpeg", image.mimeType)
+            assertEquals(640, image.width)
+            assertEquals(480, image.height)
+        } finally {
+            sourceFile.delete()
+        }
+    }
+
+    @Test
+    fun userAttachmentDownscalesOversizedFileToVisionProfile() {
+        val context = RuntimeEnvironment.getApplication()
+        val sourceFile = File(context.cacheDir, "oversized-attach-${System.nanoTime()}.png")
+        val bitmap = patternedNoiseBitmap(width = 3_000, height = 2_000)
+        FileOutputStream(sourceFile).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        bitmap.recycle()
+
+        try {
+            assertTrue(
+                "前置条件：噪声 PNG 应超过 12MiB，实际 ${sourceFile.length()}",
+                sourceFile.length() > MAX_AGENT_IMAGE_BYTES,
+            )
+            val image = AgentImageCodec.fromUserAttachment(
+                context = context,
+                value = sourceFile.absolutePath,
+                source = "user_attach",
+            ) ?: error("超大图附件必须采样降级成功")
+            val width = image.width ?: error("缺少图片宽度")
+            val height = image.height ?: error("缺少图片高度")
+
+            assertEquals("image/jpeg", image.mimeType)
+            assertTrue("长边 $width x $height 应 ≤1600", maxOf(width, height) <= 1_600)
+            assertTrue("像素量 $width x $height 应 ≤1.5M", width.toLong() * height <= 1_500_000L)
+        } finally {
+            sourceFile.delete()
+        }
+    }
+
+    @Test
+    fun userAttachmentReadsContentUriThroughFallbackStreams() {
+        val context = RuntimeEnvironment.getApplication()
+        val sourceFile = File(context.cacheDir, "typed-user-attach-${System.nanoTime()}.jpg")
+        val bitmap = patternedBitmap(width = 873, height = 1_920)
+        FileOutputStream(sourceFile).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
+        }
+        bitmap.recycle()
+        val authority = "io.github.mangi.eta.test.user.attach.${System.nanoTime()}"
+        val provider = TypedImageProvider(sourceFile)
+        provider.attachInfo(
+            context,
+            ProviderInfo().apply { this.authority = authority },
+        )
+        ShadowContentResolver.registerProviderInternal(authority, provider)
+
+        try {
+            val uri = Uri.parse("content://$authority/image")
+            val image = AgentImageCodec.fromUserAttachment(
+                context = context,
+                value = uri.toString(),
+                source = "user_attach",
+            ) ?: error("无法通过 typed asset 读取用户附件")
+
+            assertEquals("image/jpeg", image.mimeType)
+            assertEquals(873, image.width)
+            assertEquals(1_920, image.height)
+        } finally {
+            sourceFile.delete()
+        }
+    }
+
+    @Test
+    fun userAttachmentForwardsRemoteUrlsAndFileUris() {
+        val context = RuntimeEnvironment.getApplication()
+        val sourceFile = File(context.cacheDir, "file-uri-attach-${System.nanoTime()}.jpg")
+        val bitmap = patternedBitmap(width = 320, height = 240)
+        FileOutputStream(sourceFile).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
+        }
+        bitmap.recycle()
+
+        try {
+            val remote = AgentImageCodec.fromUserAttachment(
+                context = context,
+                value = "https://example.com/photo.jpg",
+                source = "user_attach",
+            ) ?: error("远程 URL 应回退 fromReference")
+
+            assertEquals("image/*", remote.mimeType)
+            assertEquals("https://example.com/photo.jpg", remote.reference)
+
+            val fileUri = AgentImageCodec.fromUserAttachment(
+                context = context,
+                value = Uri.fromFile(sourceFile).toString(),
+                source = "user_attach",
+            ) ?: error("file:// URI 应能读取")
+
+            assertEquals("image/jpeg", fileUri.mimeType)
+            assertEquals(320, fileUri.width)
+            assertEquals(240, fileUri.height)
+        } finally {
+            sourceFile.delete()
+        }
+    }
+
+    @Test
+    fun userAttachmentEncoderDownscalesOversizedBytes() {
+        val bitmap = patternedNoiseBitmap(width = 3_000, height = 2_000)
+        val bytes = ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            output.toByteArray()
+        }
+        bitmap.recycle()
+        assertTrue(
+            "前置条件：噪声 PNG 应超过 12MiB，实际 ${bytes.size}",
+            bytes.size > MAX_AGENT_IMAGE_BYTES,
+        )
+
+        val image = AgentModelImageEncoder.userAttachment(bytes, source = "user_attach")
+            ?: error("超大字节附件必须降级成功")
+        val width = image.width ?: error("缺少图片宽度")
+        val height = image.height ?: error("缺少图片高度")
+
+        assertEquals("image/jpeg", image.mimeType)
+        assertTrue(maxOf(width, height) <= 1_600)
+        assertTrue(width.toLong() * height <= 1_500_000L)
+    }
+
     private fun patternedBitmap(width: Int, height: Int): Bitmap =
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
             val canvas = Canvas(bitmap)
@@ -265,6 +411,36 @@ class AgentImageCodecTest {
             for (offset in 0 until maxOf(width, height) step step) {
                 canvas.drawLine(0f, offset.toFloat(), width.toFloat(), (offset / 2).toFloat(), paint)
                 canvas.drawLine(offset.toFloat(), 0f, (offset / 2).toFloat(), height.toFloat(), paint)
+            }
+        }
+
+    /** 生成 4x4 随机色块噪声图：PNG 无损编码几乎无法压缩，可稳定构造超过 12MiB 的附件。 */
+    private fun patternedNoiseBitmap(width: Int, height: Int): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val random = java.util.Random(42)
+            val paint = Paint()
+            val block = 4
+            var row = 0
+            while (row < height) {
+                var col = 0
+                while (col < width) {
+                    paint.color = Color.rgb(
+                        random.nextInt(256),
+                        random.nextInt(256),
+                        random.nextInt(256),
+                    )
+                    canvas.drawRect(
+                        col.toFloat(),
+                        row.toFloat(),
+                        (col + block).toFloat(),
+                        (row + block).toFloat(),
+                        paint,
+                    )
+                    col += block
+                }
+                row += block
             }
         }
 

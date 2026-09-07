@@ -79,6 +79,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -110,6 +111,8 @@ internal class AgentAppState(
     private val persistenceLock = Any()
     private var persistenceJob: Job? = null
     private val runtimeRecoveryInProgress = AtomicBoolean(false)
+    /** 多选图片时的全局选择顺序计数器，用于恢复并发 attachImage 的乱序。 */
+    private val nextImageSelectionIndex = AtomicInteger(0)
     private val defaultThinkingEnabled = agentBooleanForUi(Prefs.Keys.AGENT_THINKING_ENABLED)
     private val initialConversations = AgentConversationStore.load(appContext)
     private var skillNoticeSequence = 0L
@@ -1152,7 +1155,7 @@ internal class AgentAppState(
     }
 
     private fun List<PendingImageUi>.toHistoryImages(): List<AgentModelClient.ModelImage> =
-        map { image ->
+        sortedBy { it.selectionIndex }.map { image ->
             AgentModelClient.ModelImage(
                 reference = image.dataUrl,
                 mimeType = image.mimeType,
@@ -1192,9 +1195,10 @@ internal class AgentAppState(
     }
 
     fun attachImage(uri: String) {
+        val selectionIndex = nextImageSelectionIndex.getAndIncrement()
         scope.launch(Dispatchers.IO) {
             try {
-                val image = AgentImageCodec.fromReference(
+                val image = AgentImageCodec.fromUserAttachment(
                     context = appContext,
                     value = uri,
                     source = "user_attach",
@@ -1216,6 +1220,7 @@ internal class AgentAppState(
                     uri = image.reference,
                     dataUrl = preview.reference,
                     mimeType = image.mimeType,
+                    selectionIndex = selectionIndex,
                 )
                 withContext(Dispatchers.Main) {
                     updateCurrentConversation(homeState.copy(pendingImages = homeState.pendingImages + pending))

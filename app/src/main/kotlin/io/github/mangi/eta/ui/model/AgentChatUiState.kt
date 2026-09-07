@@ -146,6 +146,8 @@ data class PendingImageUi(
     val uri: String,
     val dataUrl: String,
     val mimeType: String,
+    /** 用户多选图片时的选择顺序，用于打乱后恢复。默认 0 对应编辑/恢复场景。 */
+    val selectionIndex: Int = 0,
 )
 
 @Immutable

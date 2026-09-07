@@ -75,6 +75,79 @@ internal object AgentImageCodec {
         AgentModelImageEncoder.toolVision(file.readBytesLimited(), source)
     }.getOrNull()
 
+    /**
+     * 用户附件（相机/相册）统一入口：读取后按需采样降级到视觉尺寸发送档（1600px），
+     * 不再因原图超过 12MiB 整张放弃。非 content/file 来源回退到 [fromReference]。
+     */
+    fun fromUserAttachment(
+        context: Context?,
+        value: String,
+        source: String,
+    ): AgentModelClient.ModelImage? {
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) return null
+        if (
+            context == null ||
+            trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("data:image/", ignoreCase = true)
+        ) {
+            return fromReference(context, trimmed, source)
+        }
+        val uri = Uri.parse(trimmed)
+        return when {
+            uri.scheme == "content" ->
+                readUserAttachmentContentUri(context, uri, source)
+            uri.scheme == "file" ->
+                uri.path?.let(::File)?.let { readUserAttachmentFile(it, source) }
+            else -> File(trimmed).takeIf(File::isFile)?.let { readUserAttachmentFile(it, source) }
+                ?: fromReference(context, trimmed, source)
+        }
+    }
+
+    private fun readUserAttachmentContentUri(
+        context: Context,
+        uri: Uri,
+        source: String,
+    ): AgentModelClient.ModelImage? {
+        val resolver = context.contentResolver
+        val bytes = runCatching {
+            resolver.openInputStream(uri)?.use { it.readUserAttachmentBytes() }
+        }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
+            ?: runCatching {
+                resolver.openTypedAssetFileDescriptor(uri, "image/*", null)?.use { descriptor ->
+                    descriptor.createInputStream().use { it.readUserAttachmentBytes() }
+                }
+            }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
+            ?: runCatching {
+                resolver.openFileDescriptor(uri, "r")?.let { descriptor ->
+                    ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readUserAttachmentBytes() }
+                }
+            }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
+            ?: return null
+        val mimeHint = runCatching { resolver.getType(uri) }.getOrNull().orEmpty()
+        return runCatching {
+            if (bytes.size <= MAX_AGENT_IMAGE_BYTES) {
+                fromBytes(bytes, source, mimeHint)
+            } else {
+                AgentModelImageEncoder.userAttachment(bytes, source, mimeHint)
+            }
+        }.getOrNull()
+    }
+
+    private fun readUserAttachmentFile(
+        file: File,
+        source: String,
+    ): AgentModelClient.ModelImage? = runCatching {
+        if (!file.isFile) return@runCatching null
+        val bytes = file.readUserAttachmentBytes()
+        if (bytes.size <= MAX_AGENT_IMAGE_BYTES) {
+            fromBytes(bytes, source)
+        } else {
+            AgentModelImageEncoder.userAttachment(bytes, source)
+        }
+    }.getOrNull()
+
     fun fromReference(context: Context?, value: String, source: String): AgentModelClient.ModelImage? {
         val trimmed = value.trim()
         if (trimmed.isBlank()) return null
@@ -260,6 +333,26 @@ internal object AgentImageCodec {
             output.write(buffer, 0, read)
         }
         return output.toByteArray()
+    }
+
+    /** 用户附件读取允许超过 12MiB（相机原图常超限），直到安全输入上限。 */
+    private fun java.io.InputStream.readUserAttachmentBytes(): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= MAX_USER_ATTACHMENT_INPUT_BYTES) { "图片数据过大：$total" }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    private fun File.readUserAttachmentBytes(): ByteArray {
+        require(length() <= MAX_USER_ATTACHMENT_INPUT_BYTES.toLong()) { "图片文件过大：${length()}" }
+        return readBytes()
     }
 
     private fun String.looksLikeBase64(): Boolean {

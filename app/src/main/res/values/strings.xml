@@ -1111,6 +1111,7 @@
   <string name="attachment_file">File</string>
   <string name="attachment_folder">Folder</string>
   <string name="attachment_enter_path">Enter path</string>
+  <string name="attachment_camera">Camera</string>
   <string name="attachment_add">Add</string>
   <string name="suggestion_analyze_screen_prompt">Take a screenshot and describe the current screen</string>
   <string name="suggestion_open_wechat_prompt">Open WeChat</string>

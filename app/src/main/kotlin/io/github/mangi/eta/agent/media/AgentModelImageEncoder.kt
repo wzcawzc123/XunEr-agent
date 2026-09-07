@@ -18,6 +18,7 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 internal const val MAX_AGENT_IMAGE_BYTES = 12 * 1024 * 1024
+internal const val MAX_USER_ATTACHMENT_INPUT_BYTES = 40 * 1024 * 1024
 
 /** 仅负责为工具截图和聊天预览生成独立的图片副本。 */
 internal object AgentModelImageEncoder {
@@ -101,6 +102,25 @@ internal object AgentModelImageEncoder {
             bytes = bytes,
             source = source,
             bounds = inspectBounds(bytes, mimeHint),
+            profile = toolVisionProfile,
+        )
+    }.getOrNull()
+
+    /**
+     * 用户附件（相机/相册）统一走视觉尺寸发送档：输入可能超过 12MiB，按需采样解码到 1600px，
+     * 避免超大原图撑大请求体，也避免因单张超过 12MiB 而整张失败。
+     */
+    fun userAttachment(
+        bytes: ByteArray,
+        source: String,
+        mimeHint: String = "image/jpeg",
+    ): AgentModelClient.ModelImage? = runCatching {
+        if (bytes.isEmpty()) return@runCatching null
+        if (!bytes.hasSupportedImageMagic()) return@runCatching null
+        transcodeBytes(
+            bytes = bytes,
+            source = source,
+            bounds = inspectBoundsLoose(bytes, mimeHint),
             profile = toolVisionProfile,
         )
     }.getOrNull()
@@ -216,6 +236,20 @@ internal object AgentModelImageEncoder {
             )
             output.setHasAlpha(false)
         }
+    }
+
+    private fun inspectBoundsLoose(bytes: ByteArray, mimeHint: String): ImageBounds {
+        require(bytes.isNotEmpty()) { "图片内容为空" }
+        require(bytes.size <= MAX_USER_ATTACHMENT_INPUT_BYTES) { "图片数据过大：${bytes.size}" }
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return ImageBounds(
+            width = options.outWidth,
+            height = options.outHeight,
+            mimeType = options.outMimeType
+                ?.takeIf { it.isNotBlank() }
+                ?: mimeHint.normalizedAgentImageMimeType(),
+        )
     }
 
     private fun inspectBounds(bytes: ByteArray, mimeHint: String): ImageBounds {
