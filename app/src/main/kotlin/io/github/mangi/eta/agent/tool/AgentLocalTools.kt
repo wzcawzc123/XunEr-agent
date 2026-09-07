@@ -32,6 +32,8 @@ import io.github.mangi.eta.agent.skill.GitHubSkillRepository
 import io.github.mangi.eta.agent.skill.GitHubSkillSourceException
 import io.github.mangi.eta.agent.skill.PublicGitHubSkillSource
 import io.github.mangi.eta.agent.terminal.AlpineEnvironmentPaths
+import io.github.mangi.eta.agent.terminal.InstallerShellRunner
+import io.github.mangi.eta.agent.terminal.TerminalEnvironment
 import io.github.mangi.eta.agent.terminal.DetachedTaskSupervisor
 import io.github.mangi.eta.agent.terminal.LinuxEnvironmentPaths
 import io.github.mangi.eta.agent.terminal.terminalEnvironment
@@ -203,6 +205,7 @@ internal class AgentLocalTools(
                 "read_file" -> textResult(terminalTool { readFile(args) })
                 "write_file" -> textResult(terminalTool { writeFile(args) })
                 "list_directory" -> textResult(terminalTool { listDirectory(args) })
+                "androguard_analyze" -> textResult(terminalTool { androguardAnalyze(args) })
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
                 "skills_list" -> textResult(skillsList(args))
@@ -276,6 +279,48 @@ internal class AgentLocalTools(
             content = errorResult("MEMORY_DISABLED", "记忆已在设置中关闭"),
             sensitive = true,
         )
+    }
+
+    private fun androguardAnalyze(args: JSONObject): String {
+        val apkPath = args.optString("apk_path")
+        if (apkPath.isBlank()) return errorResult("MISSING_APK", "缺少 apk_path 参数")
+        val operation = args.optString("operation", "axml")
+        val extraArgs = args.optString("args")
+        val rootfsPath = AlpineEnvironmentPaths.rootfsDir(context).absolutePath
+        if (!AlpineEnvironmentPaths.androguardReady(rootfsPath)) {
+            return errorResult(
+                "ANDROGUARD_NOT_READY",
+                "Linux 工具环境未安装 Androguard，请先在工具环境页安装 Androguard 工具后再调用。",
+            )
+        }
+        val command = when {
+            AndroguardCommand.isDexScan(operation) ->
+                AndroguardCommand.buildDexScan(
+                    apkPath,
+                    Regex("limit=(\\d+)").find(extraArgs)?.groupValues?.get(1)?.toIntOrNull() ?: 50,
+                )
+            operation.trim().lowercase() == "sign" && extraArgs.isBlank() ->
+                AndroguardCommand.build("sign", apkPath, "-a")
+            else -> AndroguardCommand.build(operation, apkPath, extraArgs)
+        }
+        val result = runBlocking {
+            InstallerShellRunner.run(
+                command = command,
+                timeoutSeconds = 300L,
+                environment = TerminalEnvironment.ALPINE,
+                linuxRootfsPath = rootfsPath,
+            )
+        }
+        val output = result.output.ifBlank { "(no output)" }
+        if (result.exitCode != 0) {
+            return errorResult("ANDROGUARD_FAILED", "exit=${result.exitCode}:\n${output.take(2000)}")
+        }
+        return JSONObject()
+            .put("ok", true)
+            .put("operation", operation)
+            .put("exit_code", result.exitCode)
+            .put("output", output.take(4000))
+            .toString()
     }
 
     private fun memoryGet(args: JSONObject): String = try {
