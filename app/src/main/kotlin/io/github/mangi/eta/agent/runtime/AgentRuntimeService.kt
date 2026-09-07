@@ -122,6 +122,48 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         return START_NOT_STICKY
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val wm = windowManager ?: return
+
+        // glow：真实屏幕高度（含状态栏 + 导航栏）
+        glowView?.let { view ->
+            glowParams?.let { lp ->
+                val realHeight = runCatching {
+                    val point = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    wm.defaultDisplay.getRealSize(point)
+                    point.y
+                }.getOrDefault(WindowManager.LayoutParams.MATCH_PARENT)
+                lp.height = realHeight
+                runCatching { wm.updateViewLayout(view, lp) }
+            }
+        }
+
+        // orb / bubble：跟随屏幕高度 60%
+        val newY = (resources.displayMetrics.heightPixels * 0.6f).toInt()
+        orbView?.let { view ->
+            orbParams?.let { lp ->
+                lp.y = newY
+                runCatching { wm.updateViewLayout(view, lp) }
+            }
+        }
+        bubbleView?.let { view ->
+            bubbleParams?.let { lp ->
+                lp.y = newY
+                runCatching { wm.updateViewLayout(view, lp) }
+            }
+        }
+
+        // resultCard：半屏高度
+        resultCardView?.let { view ->
+            resultCardParams?.let { lp ->
+                lp.height = resultCardWindowHeightPx()
+                runCatching { wm.updateViewLayout(view, lp) }
+            }
+        }
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
         if (activeSession?.isTerminal == false) {
             AndroidAgentLogger.debug {
