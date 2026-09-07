@@ -34,6 +34,9 @@ internal fun AgentChatScreen(
             messageEdit = state.messageEdit,
             onReasoningEffortChange = { onAction(AgentChatAction.ReasoningEffortChanged(it)) },
             onModelSelected = { onAction(AgentChatAction.ModelSelected(it)) },
+            onVisionToggled = { providerId, modelId, vision ->
+                onAction(AgentChatAction.VisionToggled(providerId, modelId, vision))
+            },
             onSubmit = { text -> onAction(AgentChatAction.SubmitMessage(text)) },
             onStop = { onAction(AgentChatAction.StopRun) },
             onAttachImage = { uri -> onAction(AgentChatAction.ImageAttached(uri)) },

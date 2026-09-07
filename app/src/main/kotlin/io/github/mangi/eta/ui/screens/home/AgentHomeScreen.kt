@@ -37,6 +37,9 @@ internal fun AgentHomeScreen(
             messageEdit = state.messageEdit,
             onReasoningEffortChange = { onAction(AgentHomeAction.ReasoningEffortChanged(it)) },
             onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
+            onVisionToggled = { providerId, modelId, vision ->
+                onAction(AgentHomeAction.VisionToggled(providerId, modelId, vision))
+            },
             onSubmit = { text -> onAction(AgentHomeAction.SubmitMessage(text)) },
             onStop = { onAction(AgentHomeAction.StopRun) },
             onAttachImage = { uri -> onAction(AgentHomeAction.ImageAttached(uri)) },

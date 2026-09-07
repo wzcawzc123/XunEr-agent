@@ -39,11 +39,13 @@ import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.safeLogType
+import io.github.mangi.eta.data.model.Model
 import io.github.mangi.eta.data.model.ModelReasoningCapabilities
 import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
 import io.github.mangi.eta.data.repository.EtaBackupRepository
 import io.github.mangi.eta.data.repository.EtaBackupSummary
+import io.github.mangi.eta.data.repository.ModelRepository
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
@@ -734,6 +736,37 @@ internal class AgentAppState(
             )
         )
         if (selectedConversationId != null) persistConversations()
+    }
+
+    /**
+     * 切换模型的图片输入能力声明（attachment / inputModalities ± "image"）。
+     * 关闭后运行时按纯文本处理：工具截图不进入会话、read_image 拒绝、observe_screen 强制去截图。
+     */
+    fun setModelVision(providerId: String, modelId: String, vision: Boolean) {
+        if (homeState.isStreaming) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val provider = ProviderRepository.providerById(providerId) ?: return@launch
+                val model = provider.models.firstOrNull { it.id == modelId } ?: return@launch
+                ModelRepository.saveModel(
+                    provider.id,
+                    model.copy(
+                        attachment = vision,
+                        inputModalities = if (vision) {
+                            (model.inputModalities + Model.IMAGE_MODALITY).distinct()
+                        } else {
+                            model.inputModalities.filterNot {
+                                it.equals(Model.IMAGE_MODALITY, ignoreCase = true)
+                            }
+                        },
+                    ),
+                )
+                RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     fun selectModel(modelId: String) {

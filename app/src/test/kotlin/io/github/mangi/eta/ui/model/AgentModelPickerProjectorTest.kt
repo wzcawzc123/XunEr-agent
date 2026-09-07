@@ -80,6 +80,7 @@ class AgentModelPickerProjectorTest {
             modelId = "model",
             displayName = "Model",
             contextWindow = null,
+            supportsVision = true,
         )
         val expanded = defaultExpandedModelProviderIds(selected)
 
@@ -96,6 +97,7 @@ class AgentModelPickerProjectorTest {
             modelId = "model",
             displayName = "Model",
             contextWindow = 100_000,
+            supportsVision = true,
         )
         val messages = listOf(
             AgentMessageUi(id = "first", content = "one", usage = TokenUsageUi(contextTokens = 10_000)),

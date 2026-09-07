@@ -268,7 +268,12 @@ internal class AgentLoop(
             messages.put(AgentConversationCodec.toolResultMessage(outcome.call, outcome.result))
         }
 
-        val imageOutcomes = outcomes.filter { outcome -> outcome.result.images.isNotEmpty() }
+        // 纯文本模型（supportsVision=false）：工具截图不进入会话，模型只依赖 UI 树文本。
+        val imageOutcomes = if (config.supportsVision) {
+            outcomes.filter { outcome -> outcome.result.images.isNotEmpty() }
+        } else {
+            emptyList()
+        }
         if (imageOutcomes.isEmpty()) return
 
         // 工具截图是瞬时观察，不是会话资产。下一次推理消费后立即删除。

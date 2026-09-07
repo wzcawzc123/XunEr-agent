@@ -78,6 +78,7 @@ internal class AgentLocalTools(
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },
+    private val supportsVision: () -> Boolean = { true },
     private val screenObservationProvider: (
         (AgentScreenObservationContract.Options) -> RootShellDeviceController.Observation
     )? = null,
@@ -270,6 +271,14 @@ internal class AgentLocalTools(
         if (!terminalToolsEnabled()) {
             return textResult(errorResult("TERMINAL_TOOLS_DISABLED", "请先启用终端/文件工具"))
         }
+        if (!supportsVision()) {
+            return textResult(
+                errorResult(
+                    "VISION_DISABLED",
+                    "当前模型不支持图片输入（supportsVision=false），read_image 不可用",
+                )
+            )
+        }
         return block()
     }
 
@@ -409,11 +418,13 @@ internal class AgentLocalTools(
         publishedObservation.set(PublishedObservation())
         val startedAt = SystemClock.elapsedRealtime()
         val options = AgentScreenObservationContract.resolve(args)
-        val observation = screenObservationProvider?.invoke(options)
+        val visionDisabled = !supportsVision() && options.includeScreenshot
+        val effectiveOptions = if (visionDisabled) options.copy(includeScreenshot = false) else options
+        val observation = screenObservationProvider?.invoke(effectiveOptions)
             ?: deviceController.observe(
-                includeScreenshot = options.includeScreenshot,
-                includeUiTree = options.includeUiTree,
-                maxNodes = options.maxNodes,
+                includeScreenshot = effectiveOptions.includeScreenshot,
+                includeUiTree = effectiveOptions.includeUiTree,
+                maxNodes = effectiveOptions.maxNodes,
             )
         publishedObservation.set(
             PublishedObservation(
@@ -429,7 +440,12 @@ internal class AgentLocalTools(
                 "coordinate=${observation.coordinateSpace?.summary()}"
         }
         return AgentModelClient.ToolResult(
-            content = observation.content,
+            content = if (visionDisabled) {
+                observation.content +
+                    "\n\n[模型不支持视觉：截图已跳过，请基于 UI 树文本操作，不要请求截图]"
+            } else {
+                observation.content
+            },
             images = listOfNotNull(observation.image)
         )
     }

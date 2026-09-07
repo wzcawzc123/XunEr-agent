@@ -102,6 +102,7 @@ internal object AgentRuntimeWire {
     private const val KEY_EXTRA_BODY_JSON = "extra_body_json"
     private const val KEY_CUSTOM_HEADERS_JSON = "custom_headers_json"
     private const val KEY_CUSTOM_BODY_JSON = "custom_body_json"
+    private const val KEY_SUPPORTS_VISION = "supports_vision"
     private const val KEY_IMAGES = "images"
     private const val KEY_HISTORY = "history"
     private const val KEY_CONTENT_JSON = "content_json"
@@ -266,6 +267,7 @@ internal object AgentRuntimeWire {
         putString(KEY_EXTRA_BODY_JSON, request.config.extraBodyJson)
         putString(KEY_CUSTOM_HEADERS_JSON, json.encodeToString(request.config.customHeaders))
         putString(KEY_CUSTOM_BODY_JSON, json.encodeToString(request.config.customBody))
+        putBoolean(KEY_SUPPORTS_VISION, request.config.supportsVision)
         request.handoff?.let { putBundle(KEY_HANDOFF, toBundle(it)) }
         putParcelableArrayList(
             KEY_HISTORY,
@@ -395,7 +397,12 @@ internal object AgentRuntimeWire {
                 ),
                 extraBodyJson = bundle.getString(KEY_EXTRA_BODY_JSON).orEmpty(),
                 customHeaders = decodeCustomHeaders(bundle.getString(KEY_CUSTOM_HEADERS_JSON)),
-                customBody = decodeCustomBody(bundle.getString(KEY_CUSTOM_BODY_JSON))
+                customBody = decodeCustomBody(bundle.getString(KEY_CUSTOM_BODY_JSON)),
+                supportsVision = if (bundle.containsKey(KEY_SUPPORTS_VISION)) {
+                    bundle.getBoolean(KEY_SUPPORTS_VISION)
+                } else {
+                    true
+                }
             ),
             history = bundle.getParcelableArrayList(KEY_HISTORY, Bundle::class.java).orEmpty().map { message ->
                 AgentModelClient.ConversationMessage(

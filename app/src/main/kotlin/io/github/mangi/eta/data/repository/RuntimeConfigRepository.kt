@@ -131,6 +131,7 @@ internal object RuntimeConfigRepository {
             reasoningCapabilities = reasoningCapabilities,
             customHeaders = provider.customHeaders + model.customHeaders,
             customBody = provider.customBody + model.customBody,
+            supportsVision = model.supportsVision,
         )
     }
 

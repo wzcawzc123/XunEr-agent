@@ -122,6 +122,16 @@ internal object AgentPromptBuilder {
                 )
             )
         }
+        if (!config.supportsVision) {
+            messages.put(
+                systemMessage(
+                    "当前模型不支持图片输入（supportsVision=false）：observe_screen 的 include_screenshot 无效且已被忽略，" +
+                        "read_image 不可用，禁止请求截图或图片内容。完全依赖 UI 树文本（节点 text/content-desc/bounds）进行页面感知；" +
+                        "点击优先用 tap_element/tap_area，或使用 coordinate_space=screen 的坐标。" +
+                        "若任务必须视觉验证（颜色、美观度、Canvas 绘制内容等），明确告知用户当前模型无法完成该步骤。"
+                )
+            )
+        }
         buildMemorySystemMessage(memoryContext)?.let(messages::put)
         buildSkillSystemMessage(skillContext)?.let(messages::put)
         return messages
