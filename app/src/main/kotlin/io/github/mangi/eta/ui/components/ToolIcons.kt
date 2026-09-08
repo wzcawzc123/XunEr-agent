@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ScreenshotMonitor
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.Smartphone
@@ -87,6 +88,7 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "press_key" -> Icons.Rounded.KeyboardCommandKey
     "open_system_panel" -> Icons.Rounded.WebAsset
     "read_image" -> Icons.Rounded.Image
+    "androguard_analyze" -> Icons.Rounded.Security
     "skills_list", "skills_read", "skills_read_resource",
     "skills_list_curated", "skills_inspect_github", "skills_install_from_github",
         -> Icons.Rounded.Extension
