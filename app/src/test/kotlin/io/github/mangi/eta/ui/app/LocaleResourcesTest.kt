@@ -35,12 +35,12 @@ class LocaleResourcesTest {
 
     @Suppress("DEPRECATION")
     private fun localizedString(languageTag: String, resourceId: Int): String {
-        val resources = context.resources
-        val configuration = Configuration(resources.configuration).apply {
+        val configuration = Configuration(context.resources.configuration).apply {
             setLocale(Locale.forLanguageTag(languageTag))
         }
-        resources.updateConfiguration(configuration, resources.displayMetrics)
-        return resources.getString(resourceId)
+        // createConfigurationContext 隔离按目标 locale 解析资源；不用 deprecated 的
+        // updateConfiguration（Robolectric 下会被 manifest localeConfig 干扰回退行为）。
+        return context.createConfigurationContext(configuration).resources.getString(resourceId)
     }
 
     @Suppress("DEPRECATION")
