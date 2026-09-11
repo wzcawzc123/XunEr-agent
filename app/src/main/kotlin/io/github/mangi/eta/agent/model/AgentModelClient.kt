@@ -93,6 +93,7 @@ internal object AgentModelClient {
         memoryContext: AgentMemoryContext = AgentMemoryContext.DISABLED,
         additionalTools: JSONArray = JSONArray(),
         capabilitiesProvider: () -> AgentToolCapabilities = { AgentToolCapabilities(rootAvailable = false) },
+        sessionId: String = java.util.UUID.randomUUID().toString(),
         onEvent: (AgentEvent) -> Unit = {}
     ): ModelResponse.Text {
         config.validate()
@@ -138,6 +139,7 @@ internal object AgentModelClient {
         )
         var promptRootAvailable = initialCapabilities.rootAvailable
         val loop = AgentLoop(
+            sessionId = sessionId,
             config = config,
             messages = messages,
             tools = tools,
