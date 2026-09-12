@@ -214,7 +214,7 @@ internal fun AgentChatBody(
         scrollState = scrollState,
         input = input,
         modelPickerState = modelPickerState,
-                isCompacting = isCompacting,
+        isCompacting = isCompacting,
         contextUsage = contextUsage,
         isStreaming = isStreaming,
         reasoningEffort = reasoningEffort,
