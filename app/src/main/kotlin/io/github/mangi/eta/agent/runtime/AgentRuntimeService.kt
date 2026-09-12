@@ -396,10 +396,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             if (request.handoff?.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
                 val payload = AgentUiHandoffPayload.from(request.handoff.payload)
                 activeSupplements += payload.supplements
-                nextSupplementIndex = (
-                    listOfNotNull(payload.promptSupplement?.index) +
-                        payload.supplements.map { it.index }
-                    ).maxOrNull()?.plus(1) ?: 1
+                nextSupplementIndex = payload.lastSupplementIndex + 1
             }
         }
 
@@ -817,7 +814,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         }
 
         val completed = lastCompletedRunContext ?: return
-        if (completed.request.handoff?.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
+        if (completed.request.operation != AgentRuntimeWire.OP_CHAT ||
+            completed.request.handoff?.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
             state.value = state.value.copy(status = AgentOverlayStatus.ContinuationUnavailable)
             return
         }

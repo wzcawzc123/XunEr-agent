@@ -149,9 +149,12 @@ internal fun AgentChatBody(
     onCancelMessageEdit: () -> Unit,
     onDeleteMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
+    onSelectReplyCandidate: (String, Int) -> Unit,
     onSuggestionClick: (String) -> Unit,
     onRunTraceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
+    characterName: String? = null,
+    characterAvatarPath: String? = null,
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -165,10 +168,10 @@ internal fun AgentChatBody(
         latestContextUsage(messages, modelPickerState.selectedModel)
     }
 
-    val visibleMessages = remember(messages, messageEdit?.targetMessageId) {
+    val visibleMessages = remember(messages, messageEdit?.targetMessageId, messageEdit?.preserveFollowingMessages) {
         AgentConversationRevisionReducer.visibleMessagesForEdit(
             messages = messages,
-            targetMessageId = messageEdit?.targetMessageId,
+            targetMessageId = messageEdit?.takeUnless { it.preserveFollowingMessages }?.targetMessageId,
         ).filterNot { message ->
             message is AgentMessageUi && message.content.isBlank()
         }
@@ -223,6 +226,8 @@ internal fun AgentChatBody(
         pendingFileReferences = pendingFileReferences,
         messageEdit = messageEdit,
         showEmptySuggestions = !isKeyboardVisible,
+        characterName = characterName,
+        characterAvatarPath = characterAvatarPath,
         keepBottomAnchored = keepBottomAnchored,
         onBottomAnchorChanged = { keepBottomAnchored = it },
         onSubmit = { text ->
@@ -248,6 +253,7 @@ internal fun AgentChatBody(
         onCancelMessageEdit = onCancelMessageEdit,
         onDeleteMessage = onDeleteMessage,
         onRegenerateMessage = onRegenerateMessage,
+        onSelectReplyCandidate = onSelectReplyCandidate,
         onSuggestionClick = onSuggestionClick,
         onRunTraceClick = onRunTraceClick,
         onOpenBrowser = onOpenBrowser,
@@ -273,6 +279,8 @@ private fun AgentChatScaffold(
     pendingFileReferences: List<PendingFileReferenceUi>,
     messageEdit: MessageEditUiState?,
     showEmptySuggestions: Boolean,
+    characterName: String?,
+    characterAvatarPath: String?,
     keepBottomAnchored: Boolean,
     onBottomAnchorChanged: (Boolean) -> Unit,
     onSubmit: (String) -> Unit,
@@ -292,6 +300,7 @@ private fun AgentChatScaffold(
     onCancelMessageEdit: () -> Unit,
     onDeleteMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
+    onSelectReplyCandidate: (String, Int) -> Unit,
     onSuggestionClick: (String) -> Unit,
     onRunTraceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
@@ -350,6 +359,8 @@ private fun AgentChatScaffold(
         if (!hasMessages) {
             EmptyChatState(
                 showSuggestions = showEmptySuggestions,
+                characterName = characterName,
+                characterAvatarPath = characterAvatarPath,
                 onSuggestionClick = onSuggestionClick,
                 modifier = Modifier
                     .fillMaxSize()
@@ -369,6 +380,7 @@ private fun AgentChatScaffold(
                 onEditMessage = onEditMessage,
                 onDeleteMessage = onDeleteMessage,
                 onRegenerateMessage = onRegenerateMessage,
+                onSelectReplyCandidate = onSelectReplyCandidate,
                 messageActionsEnabled = !isStreaming && messageEdit == null,
                 editTargetMessageId = messageEdit?.targetMessageId,
                 currentBrowserMessageId = currentBrowserMessageId,
@@ -395,6 +407,7 @@ internal fun AgentConversationMessages(
     onEditMessage: (String) -> Unit = {},
     onDeleteMessage: (String) -> Unit = {},
     onRegenerateMessage: (String) -> Unit = {},
+    onSelectReplyCandidate: (String, Int) -> Unit = { _, _ -> },
     messageActionsEnabled: Boolean = false,
     editTargetMessageId: String? = null,
     currentBrowserMessageId: String? = null,
@@ -633,13 +646,15 @@ internal fun AgentConversationMessages(
                                 message.toolName == "browser_use" &&
                                 message.id == currentBrowserMessageId,
                             showCopyAction = message !is AgentMessageUi ||
-                                message.id in finalResultMessageIds,
-                            showMessageActions = message.id in finalResultMessageIds,
+                                message.characterEditable || message.id in finalResultMessageIds,
+                            showMessageActions = message.id in finalResultMessageIds ||
+                                (message is AgentMessageUi && message.characterEditable),
                             messageActionsEnabled = messageActionsEnabled,
                             isEditing = message.id == editTargetMessageId,
                             onEditMessage = onEditMessage,
                             onDeleteMessage = onDeleteMessage,
                             onRegenerateMessage = onRegenerateMessage,
+                            onSelectReplyCandidate = onSelectReplyCandidate,
                             modifier = itemModifier,
                         )
                     }
@@ -917,6 +932,7 @@ private fun AgentChatBottomBar(
                 pendingFileReferences = pendingFileReferences,
                 isEditingMessage = messageEdit != null,
                 editHasLaterTurns = messageEdit?.hasLaterTurns == true,
+                preserveFollowingMessages = messageEdit?.preserveFollowingMessages == true,
                 onSubmit = onSubmit,
                 onReasoningEffortChange = onReasoningEffortChange,
                 onCompactContext = onCompactContext,
@@ -972,9 +988,12 @@ internal fun shouldRequestInitialBottom(
 @Composable
 private fun EmptyChatState(
     showSuggestions: Boolean,
+    characterName: String?,
+    characterAvatarPath: String?,
     onSuggestionClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isCharacterConversation = characterName != null
     val suggestions = listOf(
         SuggestionItem(
             title = stringResource(R.string.ui_analyze_current_screen_ebf08f),
@@ -1005,16 +1024,36 @@ private fun EmptyChatState(
                 .padding(bottom = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                text = stringResource(R.string.ui_how_can_i_help_you_e75391),
-                style = MiuixTheme.textStyles.headline1,
-                color = MiuixTheme.colorScheme.onSurface,
-            )
+            if (isCharacterConversation) {
+                CharacterAvatar(
+                    name = characterName.orEmpty(),
+                    path = characterAvatarPath,
+                    size = 76.dp,
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                Text(
+                    text = characterName.orEmpty(),
+                    style = MiuixTheme.textStyles.title2,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "故事从这里开始",
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.ui_how_can_i_help_you_e75391),
+                    style = MiuixTheme.textStyles.headline1,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+            }
 
             Spacer(modifier = Modifier.height(30.dp))
 
             AnimatedVisibility(
-                visible = showSuggestions,
+                visible = showSuggestions && !isCharacterConversation,
                 enter = fadeIn(
                     animationSpec = tween(durationMillis = 220)
                 ) + slideInVertically(
