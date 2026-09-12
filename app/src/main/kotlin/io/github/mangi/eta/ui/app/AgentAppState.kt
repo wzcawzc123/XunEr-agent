@@ -2535,7 +2535,6 @@ internal class AgentAppState(
                     updatedAtMillis = conversationUpdatedAt[id] ?: 0L,
                     mode = ConversationModeUi.Chat,
                     characterName = state.roleplay?.characterName,
-                    avatarPath = state.roleplay?.avatarPath,
                     isActiveRun = state.isStreaming,
                 )
             }
