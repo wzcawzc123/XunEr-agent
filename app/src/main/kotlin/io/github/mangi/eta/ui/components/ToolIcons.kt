@@ -11,6 +11,7 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AdsClick
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ChatBubble
@@ -85,6 +86,7 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "image_generation", "image_generation_call", "图像生成" -> Icons.Rounded.Image
     "mcp_call", "MCP 工具" -> Icons.Rounded.Extension
     "memory_get", "memory_write" -> Icons.Rounded.Psychology
+    "character_memory_get", "character_memory_write" -> Icons.Rounded.AutoStories
     "press_key" -> Icons.Rounded.KeyboardCommandKey
     "open_system_panel" -> Icons.Rounded.WebAsset
     "read_image" -> Icons.Rounded.Image

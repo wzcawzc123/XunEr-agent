@@ -79,7 +79,15 @@ internal object AgentToolRequirements {
         }
     }
 
-    val toolNames: Set<String> get() = definitions.keys
+    /**
+     * 角色会话专用的 character_memory_* 由 CharacterMemoryTools 按 run 注入，与 MCP、
+     * 对话历史等动态工具一样不属于静态模型目录；它们仍保留在 definitions 中，供工具卡与
+     * 执行边界查询，但不参与静态目录一致性校验。
+     */
+    private val runInjectedToolNames = setOf("character_memory_get", "character_memory_write")
+
+    /** 静态模型目录中的工具名。 */
+    val toolNames: Set<String> get() = definitions.keys - runInjectedToolNames
 
     fun find(name: String): LocalToolRequirement? = definitions[name]
 
