@@ -217,7 +217,9 @@ class McpProtocolValidationTest {
     fun sseParserCombinesDataLinesAndReturnsAtFinalEvent() {
         val eventSent = CountDownLatch(1)
         val releaseServer = CountDownLatch(1)
+        val requests = AtomicInteger()
         val server = localServer { exchange ->
+            requests.incrementAndGet()
             exchange.responseHeaders.set("Content-Type", "text/event-stream")
             exchange.sendResponseHeaders(200, 0)
             exchange.responseBody.use { output ->
@@ -238,8 +240,10 @@ data: "id":1,"result":{"resultType":"complete","ttlMs":1000,"tools":[]}}
             val result = executor.submit<McpHttpClient.Discovery> {
                 McpHttpClient(configured, bearerToken = null).use { it.discoverTools() }
             }
-            check(eventSent.await(2, TimeUnit.SECONDS)) { "SSE event was not sent" }
-            val discovery = result.get(2, TimeUnit.SECONDS)
+            check(eventSent.await(SSE_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                "SSE event was not sent; requests=${requests.get()}"
+            }
+            val discovery = result.get(SSE_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             assertEquals(emptyList<String>(), discovery.tools.map { it.name })
         } finally {
@@ -487,5 +491,10 @@ data: "id":1,"result":{"resultType":"complete","ttlMs":1000,"tools":[]}}
         val bytes = body.toByteArray()
         sendResponseHeaders(status, bytes.size.toLong())
         responseBody.use { it.write(bytes) }
+    }
+
+    private companion object {
+        // 沙箱内首个本地 SSE 请求需要约 7s 才能到达服务端，预算过短会把冷启动误判成失败。
+        const val SSE_EVENT_TIMEOUT_SECONDS = 30L
     }
 }
