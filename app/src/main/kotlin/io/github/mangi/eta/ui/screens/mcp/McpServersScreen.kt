@@ -471,7 +471,7 @@ private fun McpToolRow(
             Icon(
                 imageVector = Icons.Rounded.ExpandMore,
                 contentDescription = stringResource(
-                    if (expanded) R.string.overlay_collapse else R.string.overlay_expand,
+                    if (expanded) R.string.mcp_tool_collapse else R.string.mcp_tool_expand,
                 ),
                 modifier = Modifier.rotate(if (expanded) 180f else 0f),
                 tint = MiuixTheme.colorScheme.onSurfaceVariantActions,

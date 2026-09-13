@@ -1161,6 +1161,8 @@
   <string name="mcp_update_token">Authentication</string>
   <string name="mcp_token_configured">Bearer token configured</string>
   <string name="mcp_no_authentication">No authentication</string>
+  <string name="mcp_tool_expand">Expand</string>
+  <string name="mcp_tool_collapse">Collapse</string>
   <string name="mcp_tools_count">Tools · %1$d</string>
   <string name="mcp_no_tools">No compatible tools</string>
   <string name="mcp_refresh_tools_hint">Refresh after the server publishes tools</string>

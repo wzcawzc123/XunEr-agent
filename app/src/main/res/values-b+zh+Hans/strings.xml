@@ -1137,6 +1137,8 @@
   <string name="mcp_update_token">身份认证</string>
   <string name="mcp_token_configured">已配置 Bearer Token</string>
   <string name="mcp_no_authentication">未配置身份认证</string>
+  <string name="mcp_tool_expand">展开</string>
+  <string name="mcp_tool_collapse">收起</string>
   <string name="mcp_tools_count">工具 · %1$d</string>
   <string name="mcp_no_tools">没有兼容工具</string>
   <string name="mcp_refresh_tools_hint">服务器发布工具后可在此刷新</string>

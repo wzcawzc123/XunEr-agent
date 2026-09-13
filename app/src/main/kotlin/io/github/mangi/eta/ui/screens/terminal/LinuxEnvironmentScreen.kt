@@ -529,6 +529,7 @@ internal fun LinuxEnvironmentScreen(
                             )
                         },
                     )
+                    HorizontalDivider()
                     BasicComponent(
                         title = stringResource(R.string.ui_androguard_2b8d4f),
                         summary = androguardProgress?.summary(context) ?: if (androguardReady) {
@@ -536,37 +537,31 @@ internal fun LinuxEnvironmentScreen(
                         } else {
                             context.getString(R.string.linux_androguard_tools_summary)
                         },
-                        bottomAction = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(
-                                    text = when {
-                                        androguardReady -> context.getString(R.string.linux_installed)
-                                        busyTarget == InstallTarget.ANDROGUARD -> context.getString(R.string.linux_installing)
-                                        else -> context.getString(R.string.linux_install)
-                                    },
-                                    enabled = busyTarget == null && !requiresRoot && !androguardReady,
-                                    onClick = {
-                                        if (busyTarget != null || androguardReady) return@TextButton
-                                        busyTarget = InstallTarget.ANDROGUARD
-                                        resultMessage = null
-                                        launchInstallation {
-                                            val result = androguardInstaller.install { update ->
-                                                withContext(Dispatchers.Main.immediate) {
-                                                    androguardProgress = update
-                                                }
+                        endActions = {
+                            TextButton(
+                                text = when {
+                                    androguardReady -> context.getString(R.string.linux_installed)
+                                    busyTarget == InstallTarget.ANDROGUARD -> context.getString(R.string.linux_installing)
+                                    else -> context.getString(R.string.linux_install)
+                                },
+                                enabled = busyTarget == null && !requiresRoot && !androguardReady,
+                                onClick = {
+                                    if (busyTarget != null || androguardReady) return@TextButton
+                                    busyTarget = InstallTarget.ANDROGUARD
+                                    resultMessage = null
+                                    launchInstallation {
+                                        val result = androguardInstaller.install { update ->
+                                            withContext(Dispatchers.Main.immediate) {
+                                                androguardProgress = update
                                             }
-                                            androguardReady = androguardInstaller.isReady()
-                                            androguardProgress = null
-                                            busyTarget = null
-                                            resultMessage = result.toMessage(context)
                                         }
-                                    },
-                                )
-                            }
+                                        androguardReady = androguardInstaller.isReady()
+                                        androguardProgress = null
+                                        busyTarget = null
+                                        resultMessage = result.toMessage(context)
+                                    }
+                                },
+                            )
                         },
                     )
                 }
