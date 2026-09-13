@@ -564,6 +564,72 @@ class AgentModelClientLoopTest {
     }
 
     @Test
+    fun emptyRoundIsNudgedWithTransientMessageBeforeFinalAnswer() {
+        val provider = ScriptedProvider(
+            responses = listOf(
+                { _, _ -> assistant(finishReason = "stop", reasoning = "只想没写") },
+                { _, _ -> assistant(content = "补上的正文", finishReason = "stop") },
+            )
+        )
+        val messages = JSONArray().put(AgentConversationCodec.userTextMessage("开始"))
+        val events = mutableListOf<AgentEvent>()
+
+        val result = loopOf(provider = provider, messages = messages, events = events).run()
+
+        assertEquals("补上的正文", result.content)
+        assertEquals(2, provider.requests.size)
+        assertFalse(provider.requests[0].toString().contains("只产生了思考内容"))
+        assertTrue(provider.requests[1].toString().contains("只产生了思考内容"))
+        // 纠偏只存在于第二轮请求里，不写回会话记录。
+        assertFalse(messages.toString().contains("只产生了思考内容"))
+        assertEquals(listOf("user", "assistant", "assistant"), messages.roleSuffix(3))
+        assertTrue(events.none { it is AgentEvent.RunFailed })
+    }
+
+    @Test
+    fun consecutiveEmptyRoundsFinishWithoutTextInsteadOfFailing() {
+        val provider = ScriptedProvider(
+            responses = List<(ProviderRequest, AgentRunController) -> JSONObject>(3) {
+                { _, _ -> assistant(finishReason = "stop", reasoning = "一直空转") }
+            }
+        )
+        val events = mutableListOf<AgentEvent>()
+
+        val result = loopOf(provider = provider, events = events).run()
+
+        assertEquals("", result.content)
+        // 首次空回合加两次纠偏，之后自然收尾，不再抛错。
+        assertEquals(3, provider.requests.size)
+        assertTrue(provider.requests[1].toString().contains("只产生了思考内容"))
+        assertTrue(provider.requests[2].toString().contains("只产生了思考内容"))
+        assertTrue(events.filterIsInstance<AgentEvent.RunFinished>().any { it.contentChars == 0 })
+    }
+
+    @Test
+    fun emptyRoundNudgeBudgetResetsAfterToolProgress() {
+        val provider = ScriptedProvider(
+            responses = listOf(
+                { _, _ -> assistant(finishReason = "stop", reasoning = "空回合一") },
+                { _, _ ->
+                    assistant(
+                        finishReason = "tool_calls",
+                        toolCalls = listOf(toolCall("call-1", "get_current_context", "{}")),
+                    )
+                },
+                { _, _ -> assistant(finishReason = "stop", reasoning = "空回合二") },
+                { _, _ -> assistant(content = "最终答复", finishReason = "stop") },
+            )
+        )
+
+        val result = loopOf(provider = provider).run()
+
+        assertEquals("最终答复", result.content)
+        assertEquals(4, provider.requests.size)
+        assertTrue(provider.requests[1].toString().contains("只产生了思考内容"))
+        assertTrue(provider.requests[3].toString().contains("只产生了思考内容"))
+    }
+
+    @Test
     fun retryPreservesToolResultsAndImagesWithoutReplayingToolsOrFailedReasoning() {
         val requests = mutableListOf<String>()
         val events = mutableListOf<AgentEvent>()
@@ -653,6 +719,25 @@ class AgentModelClientLoopTest {
             return ProviderResponse(response(request, runController))
         }
     }
+
+    /** 单次 run 的测试入口：只暴露本用例需要的参数，其余保持生产默认。 */
+    private fun loopOf(
+        provider: AgentProviderClient,
+        events: MutableList<AgentEvent> = mutableListOf(),
+        messages: JSONArray = JSONArray().put(AgentConversationCodec.userTextMessage("开始")),
+    ): AgentLoop =
+        AgentLoop(
+            config = modelConfig(),
+            messages = messages,
+            tools = AgentToolCatalog.build(terminalTools = false, browserTools = false),
+            provider = provider,
+            toolExecutor = AgentModelClient.ToolExecutor {
+                AgentModelClient.ToolResult(JSONObject().put("ok", true).toString())
+            },
+            runController = AgentRunController(),
+            traceFormatter = AgentTraceFormatter(),
+            onEvent = { events += it },
+        )
 
     private fun modelConfig(): AgentModelClient.ModelConfig =
         AgentModelClient.ModelConfig(
