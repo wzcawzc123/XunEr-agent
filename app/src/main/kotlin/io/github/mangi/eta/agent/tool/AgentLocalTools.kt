@@ -416,6 +416,7 @@ internal class AgentLocalTools(
                     width = image.width,
                     height = image.height,
                     source = "agent_browser",
+                    preserveOriginal = true,
                 )
             },
         )

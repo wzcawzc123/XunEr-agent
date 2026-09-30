@@ -13,9 +13,6 @@ import org.json.JSONObject
  * 一次 assistant 响应及其完整工具批次构成一个 turn；
  * steering 只在 turn 结束后注入，不能用取消网络或关闭工具资源来模拟。循环不设置本地轮次上限，
  * 由模型自然结束、取消或错误终止。
- *
- * 模型自然结束却没有正文时，先按 [MAX_EMPTY_ROUND_NUDGES] 纠偏重试，
- * 用尽后以空正文结果收尾（由上层呈现为「没有返回文字」），不判死整次运行。
  */
 internal class AgentLoop(
     private val config: AgentModelClient.ModelConfig,
@@ -53,14 +50,15 @@ internal class AgentLoop(
     private val accumulatedReasoning = StringBuilder()
     private val sensitiveToolCallIds = linkedSetOf<String>()
     private var pendingToolImageMessage: JSONObject? = null
-    private var emptyRoundStreak = 0
-    private var pendingEmptyRoundNudge: String? = null
     private val context = AgentContextSession(
         config, messages, systemCount, operationId, provider, runController,
         { sensitiveToolCallIds }, onEvent, onContextSnapshot, { transcript.length() },
         roleplay = roleplayContext != null,
     )
     private var supplementIndex = initialSupplementIndex
+    /** 连续空回合的纠偏计数；出现工具进展会复位。 */
+    private var emptyRoundStreak = 0
+    private var pendingEmptyRoundNudge: String? = null
 
     fun contextSnapshot(): AgentContextSnapshot? = context.snapshot()
 
@@ -88,16 +86,27 @@ internal class AgentLoop(
 
     fun run(): Result {
         var round = 1
+        var precedingTools: JSONArray? = null
 
         while (true) {
             runController.throwIfCancelled()
             if (purpose.allowsTools) appendPendingSteeringMessage()
 
-            val roundTools = if (purpose.allowsTools) toolsForRound?.invoke() ?: tools else JSONArray()
+            // Anthropic 思考签名绑定发出工具调用时的 system 与 tools；工具结果回传后再刷新目录。
+            val roundTools = if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
+                precedingTools ?: tools
+            } else if (purpose.allowsTools) {
+                toolsForRound?.invoke() ?: tools
+            } else {
+                JSONArray()
+            }
+            precedingTools = roundTools
             toolCallValidator = AgentToolCallValidator(roundTools)
             publishTranscript()
             context.compact(roundTools)
-            var requestMessages = roleplayContext?.projectMessages(messages, roundTools) ?: messages
+            var requestMessages = AssistantScreenContextProjection.project(
+                roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+            )
             var requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
             var roundInputTokens: Int? = null
             var overflowAttempts = 0
@@ -108,12 +117,13 @@ internal class AgentLoop(
                     try {
                         val response = modelRetry.complete(
                             initialRound = round,
-                            request = ProviderRequest(
-                                config, roundRequestMessages(requestMessages), roundTools, sessionId, purpose,
-                            ),
+                            request = ProviderRequest(config, roundRequestMessages(requestMessages), roundTools, sessionId, purpose),
                             provider = provider,
                             controller = runController,
-                            onEvent = onEvent,
+                            onEvent = { event ->
+                                if (event is AgentEvent.RoundStarted) roundInputTokens = null
+                                onEvent(event)
+                            },
                             onProviderEvent = { attemptRound, providerEvent ->
                                 if (!purpose.allowsTools && (providerEvent is ProviderEvent.HostedToolStarted ||
                                         providerEvent is ProviderEvent.BlockStart && providerEvent.kind == AssistantBlockKind.TOOL_CALL)) {
@@ -131,6 +141,7 @@ internal class AgentLoop(
                             },
                             discardAttemptReasoning = { accumulatedReasoning.setLength(reasoningLengthBeforeRound) },
                         )
+                        if (purpose == ProviderRequestPurpose.CHAT) validateChatResponse(response, roundInputTokens)
                         completedResponse = response
                         break
                     } catch (failure: AgentModelFailure) {
@@ -138,8 +149,11 @@ internal class AgentLoop(
                             overflowAttempts >= AgentContextBudget.MAX_OVERFLOW_ATTEMPTS) throw failure
                         overflowAttempts++
                         accumulatedReasoning.setLength(reasoningLengthBeforeRound)
+                        context.budget.observe(roundInputTokens?.let { AgentTokenUsage(inputTokens = it) }, requestEstimate)
                         context.compact(roundTools, force = true)
-                        requestMessages = roleplayContext?.projectMessages(messages, roundTools) ?: messages
+                        requestMessages = AssistantScreenContextProjection.project(
+                            roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+                        )
                         requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
                         roundInputTokens = null
                         round++
@@ -223,21 +237,25 @@ internal class AgentLoop(
 
             val content = assistantMessage.optString("content").trim()
             if (content.isBlank() || content == "null") {
-                // 自然结束却没有正文：本回合没有任何工作成果，先纠偏重试；
-                // 连续多次仍为空就按「运行已完成，但没有返回文字」收尾，
-                // 而不是让整次运行失败、丢掉此前已经完成的工具工作。
-                emptyRoundStreak += 1
-                if (emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES) {
-                    pendingEmptyRoundNudge = EMPTY_ROUND_NUDGE
-                    round += 1
-                    continue
+                val reasoned = assistantMessage.optString("reasoning_content").isNotBlank()
+                if (reasoned) {
+                    // 产生了思考却没有正文：本回合没有产出，先纠偏重试；预算用尽后按
+                    // 「运行已完成但没有返回文字」收尾，而不是让整次运行失败、丢掉已做的工具工作。
+                    emptyRoundStreak += 1
+                    if (emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES) {
+                        pendingEmptyRoundNudge = EMPTY_ROUND_NUDGE
+                        round += 1
+                        continue
+                    }
+                    onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
+                    return Result(
+                        content = "",
+                        reasoningContent = reasoningSnapshot(),
+                        sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
+                    )
                 }
-                onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
-                return Result(
-                    content = "",
-                    reasoningContent = reasoningSnapshot(),
-                    sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
-                )
+                val finishReason = assistantMessage.optString("finish_reason")
+                error("模型接口第 $round 轮返回为空${finishReason.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}")
             }
 
             publishTranscript()
@@ -253,7 +271,7 @@ internal class AgentLoop(
 
     /**
      * 本轮请求的消息视图。空回合纠偏只随下一轮请求发出，不写回 [messages]，
-     * 因此不会进入会话记录，也不会影响后续请求。[base] 是角色扮演投影后的消息视图。
+     * 因此不会进入会话记录，也不会影响后续请求。
      */
     private fun roundRequestMessages(base: JSONArray): JSONArray {
         val nudge = pendingEmptyRoundNudge ?: return base
@@ -261,6 +279,32 @@ internal class AgentLoop(
         return JSONArray().also { merged ->
             for (index in 0 until base.length()) merged.put(base.get(index))
             merged.put(AgentConversationCodec.userTextMessage(nudge))
+        }
+    }
+
+    private fun validateChatResponse(result: AgentModelRetry.Result, inputTokens: Int?) {
+        val response = result.response
+        val message = response.assistantMessage
+        if (AgentConversationCodec.parseToolCalls(message).isNotEmpty()) return
+        val content = message.optString("content").trim()
+        if (content.isNotBlank() && content != "null") return
+        // 只有「产生了思考却没有正文」的正常结束才走纠偏预算；
+        // 纯空响应（无思考）保持上游语义：按 MODEL_EMPTY_RESPONSE 失败。
+        if (response.stopReason == AssistantStopReason.END_TURN &&
+            emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES &&
+            message.optString("reasoning_content").isNotBlank()
+        ) return
+        // length 同时可能表示输出额度用尽；只有实际输入已接近已知窗口时才尝试压缩。
+        throw when (response.stopReason) {
+            AssistantStopReason.OUTPUT_LIMIT -> if (inputTokens != null && context.budget.shouldCompact(inputTokens)) {
+                AgentModelFailure("CONTEXT_OVERFLOW", false, "模型输入已接近上下文上限，未能生成完整回复。",
+                    recoveryAllowed = result.recoveryAllowed)
+            } else {
+                AgentModelFailure("MODEL_OUTPUT_LIMIT", false, "模型输出额度已耗尽但未生成正文，请检查输出上限或降低思考强度。")
+            }
+            AssistantStopReason.CONTENT_FILTER ->
+                AgentModelFailure("MODEL_CONTENT_FILTER", false, "模型回复被服务商过滤，未返回正文。")
+            else -> AgentModelFailure("MODEL_EMPTY_RESPONSE", false, "模型未返回正文或工具调用，请检查服务商状态。")
         }
     }
 
@@ -379,11 +423,7 @@ internal class AgentLoop(
         outcomes: List<ToolOutcome>,
     ) {
         // 每个已完成结果立即落盘；图片观察仍统一放在完整工具批次之后。
-        val imageOutcomes = if (config.supportsVision) {
-            outcomes.filter { outcome -> outcome.result.images.isNotEmpty() }
-        } else {
-            emptyList()
-        }
+        val imageOutcomes = outcomes.filter { outcome -> outcome.result.images.isNotEmpty() }
         if (imageOutcomes.isEmpty()) {
             return
         }
@@ -471,6 +511,7 @@ internal class AgentLoop(
             AssistantBlockKind.THINKING -> AgentEvent.AssistantBlockKind.THINKING
             AssistantBlockKind.TOOL_CALL -> AgentEvent.AssistantBlockKind.TOOL_CALL
         }
+
 
     private companion object {
         /** 连续空回合的纠偏上限；用尽后按「没有返回文字」自然收尾。 */

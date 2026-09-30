@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.components
 
+import io.github.mangi.eta.ui.voice.SpeechReadAloudButton
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.AnimatedContent
@@ -82,6 +83,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -259,6 +261,7 @@ internal fun ChatMessageItem(
     showBrowserShortcut: Boolean,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    assistantOverlay: Boolean = false,
     retainedStreamingState: StreamingMarkdownState? = null,
     showCopyAction: Boolean = true,
     showMessageActions: Boolean = false,
@@ -272,6 +275,7 @@ internal fun ChatMessageItem(
     when (message) {
         is UserMessageUi -> UserMessageBubble(
             message = message,
+            assistantOverlay = assistantOverlay,
             actionsEnabled = messageActionsEnabled,
             isEditing = isEditing,
             onEdit = { onEditMessage(message.id) },
@@ -280,6 +284,8 @@ internal fun ChatMessageItem(
         )
         is AgentMessageUi -> AgentMessageBlock(
             message = message,
+            allowSpeech = true,
+            assistantOverlay = assistantOverlay,
             retainedStreamingState = retainedStreamingState,
             showCopyAction = showCopyAction,
             showMessageActions = showMessageActions,
@@ -316,6 +322,7 @@ internal fun ChatMessageItem(
                     },
                     renderMarkdown = false,
                 ),
+                assistantOverlay = false,
                 retainedStreamingState = null,
                 showCopyAction = showCopyAction,
                 showMessageActions = showMessageActions,
@@ -351,6 +358,7 @@ internal fun ChatMessageItem(
 internal fun AgentWorkProcess(
     id: String,
     messages: List<AgentChatMessageUi>,
+    assistantOverlay: Boolean = false,
     onOpenBrowser: () -> Unit,
     currentBrowserMessageId: String?,
     retainedStreamingStates: Map<String, StreamingMarkdownState>,
@@ -376,6 +384,57 @@ internal fun AgentWorkProcess(
     }
 
     val pulseAlpha = rememberActivePulse(active = running, label = "work_pulse")
+
+    if (assistantOverlay) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .clickable {
+                        val currentlyVisible = expanded && manuallyExpanded
+                        manuallyExpanded = true
+                        expanded = !currentlyVisible
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MiuixTheme.colorScheme.onSurface)
+                        .graphicsLayer(alpha = if (running) pulseAlpha else 1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (running) stringResource(R.string.voice_reasoning)
+                        else stringResource(R.string.work_completed),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            AnimatedVisibility(visible = expanded && manuallyExpanded) {
+                Column {
+                    messages.forEach { message ->
+                        ChatMessageItem(
+                            message = message,
+                            onSuggestionClick = {},
+                            onRunTraceClick = {},
+                            onOpenBrowser = onOpenBrowser,
+                            showBrowserShortcut = message.id == currentBrowserMessageId,
+                            retainedStreamingState = retainedStreamingStates[message.id],
+                            compact = true,
+                            assistantOverlay = true,
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
 
     Column(
         modifier = modifier
@@ -500,6 +559,7 @@ internal fun AgentWorkProcess(
 @Composable
 private fun UserMessageBubble(
     message: UserMessageUi,
+    assistantOverlay: Boolean,
     actionsEnabled: Boolean,
     isEditing: Boolean,
     onEdit: () -> Unit,
@@ -515,11 +575,19 @@ private fun UserMessageBubble(
     val visiblePrompt = remember(message.content) {
         AgentFileReferencePromptCodec.parse(message.content)
     }
+    val overlayBubbleColor = if (MiuixTheme.colorScheme.background.luminance() < 0.5f) {
+        Color(0xFF37393D)
+    } else {
+        Color(0xFFE5E7EA)
+    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 7.dp),
+            .padding(
+                horizontal = if (assistantOverlay) 16.dp else 20.dp,
+                vertical = if (assistantOverlay) 4.dp else 7.dp,
+            ),
         horizontalArrangement = Arrangement.End,
     ) {
         TooltipBox(
@@ -564,12 +632,18 @@ private fun UserMessageBubble(
             Column(
                 modifier = Modifier
                     .widthIn(max = 320.dp)
-                    .squircleSurface(
-                        color = MiuixTheme.colorScheme.surfaceContainerHigh,
-                        topStart = 20.dp,
-                        topEnd = 20.dp,
-                        bottomEnd = 6.dp,
-                        bottomStart = 20.dp,
+                    .then(
+                        if (assistantOverlay) {
+                            Modifier.background(overlayBubbleColor, RoundedCornerShape(10.dp))
+                        } else {
+                            Modifier.squircleSurface(
+                                color = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                topStart = 20.dp,
+                                topEnd = 20.dp,
+                                bottomEnd = 6.dp,
+                                bottomStart = 20.dp,
+                            )
+                        }
                     )
                     .then(
                         if (isEditing) {
@@ -582,7 +656,10 @@ private fun UserMessageBubble(
                             Modifier
                         }
                     )
-                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                    .padding(
+                        horizontal = if (assistantOverlay) 12.dp else 16.dp,
+                        vertical = if (assistantOverlay) 8.dp else 11.dp,
+                    ),
             ) {
                 if (message.images.isNotEmpty()) {
                     Row(
@@ -721,6 +798,8 @@ private fun ContextCompactionMarker(
 @Composable
 private fun AgentMessageBlock(
     message: AgentMessageUi,
+    allowSpeech: Boolean = false,
+    assistantOverlay: Boolean = false,
     retainedStreamingState: StreamingMarkdownState?,
     showCopyAction: Boolean,
     showMessageActions: Boolean,
@@ -762,7 +841,10 @@ private fun AgentMessageBlock(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 7.dp),
+            .padding(
+                horizontal = if (assistantOverlay) 16.dp else 20.dp,
+                vertical = if (assistantOverlay) 8.dp else 7.dp,
+            ),
     ) {
         when {
             message.content.isBlank() && message.isStreaming -> {
@@ -834,6 +916,7 @@ private fun AgentMessageBlock(
                         },
                     )
                 }
+                if (allowSpeech) SpeechReadAloudButton(message.id, message.content)
                 if (showMessageActions) {
                     if (message.characterEditable) {
                         IconButton(onClick = onEdit, enabled = messageActionsEnabled, minWidth = 30.dp, minHeight = 30.dp) {

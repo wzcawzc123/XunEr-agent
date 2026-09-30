@@ -34,6 +34,15 @@ import io.github.mangi.eta.data.model.McpProtocolMode
 import io.github.mangi.eta.data.model.McpServerSetting
 import io.github.mangi.eta.data.model.McpToolDefinition
 import io.github.mangi.eta.data.repository.McpServerRepository
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.ListEmptyState
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
@@ -41,16 +50,10 @@ import io.github.mangi.eta.ui.navigation.AppRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import androidx.compose.foundation.clickable
@@ -94,14 +97,14 @@ internal fun McpServersScreen(
         },
     ) {
         item(key = "servers") {
-            SmallTitle(stringResource(R.string.mcp_configured_servers, servers.size))
-            Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+            EtaPreferenceGroupTitle(stringResource(R.string.mcp_configured_servers, servers.size))
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp)) {
                 if (servers.isEmpty()) {
                     ListEmptyState(
                         title = stringResource(R.string.mcp_empty_title),
                         summary = stringResource(R.string.mcp_empty_summary),
                         action = {
-                            TextButton(
+                            EtaTextButton(
                                 text = stringResource(R.string.mcp_add_server),
                                 onClick = { showAdd = true },
                             )
@@ -109,7 +112,7 @@ internal fun McpServersScreen(
                     )
                 } else {
                     servers.forEach { server ->
-                        ArrowPreference(
+                        EtaArrowPreference(
                             title = server.name,
                             summary = stringResource(
                                 R.string.mcp_server_row_summary,
@@ -124,7 +127,7 @@ internal fun McpServersScreen(
         }
     }
 
-    WindowDialog(
+    EtaWindowDialog(
         show = showAdd,
         title = stringResource(R.string.mcp_add_server),
         onDismissRequest = { if (!working) showAdd = false },
@@ -276,14 +279,14 @@ internal fun McpServerDetailScreen(
     ) {
         if (server == null) {
             item(key = "missing") {
-                BasicComponent(title = stringResource(R.string.mcp_server_missing))
+                EtaPreference(title = stringResource(R.string.mcp_server_missing))
             }
             return@MiuixScaffoldPage
         }
         item(key = "server") {
-            SmallTitle(stringResource(R.string.mcp_server_settings))
-            Card(modifier = Modifier.padding(horizontal = 12.dp)) {
-                SwitchPreference(
+            EtaPreferenceGroupTitle(stringResource(R.string.mcp_server_settings))
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp)) {
+                EtaSwitchPreference(
                     title = stringResource(R.string.mcp_enable_server),
                     summary = server.url,
                     checked = server.enabled,
@@ -294,7 +297,8 @@ internal fun McpServerDetailScreen(
                     },
                 )
 
-                ArrowPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(
                     title = stringResource(R.string.mcp_update_token),
                     summary = stringResource(
                         if (server.authorizationType == McpAuthorizationType.BEARER) {
@@ -308,8 +312,8 @@ internal fun McpServerDetailScreen(
             }
         }
         item(key = "tools") {
-            SmallTitle(stringResource(R.string.mcp_tools_count, server.tools.size))
-            Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+            EtaPreferenceGroupTitle(stringResource(R.string.mcp_tools_count, server.tools.size))
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp)) {
                 if (server.tools.isEmpty()) {
                     ListEmptyState(
                         title = stringResource(R.string.mcp_no_tools),
@@ -336,8 +340,8 @@ internal fun McpServerDetailScreen(
             }
         }
         item(key = "delete") {
-            Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                BasicComponent(
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                EtaPreference(
                     title = stringResource(R.string.mcp_delete_server),
                     summary = stringResource(R.string.mcp_delete_server_summary),
                     onClick = { showDelete = true },
@@ -347,7 +351,7 @@ internal fun McpServerDetailScreen(
     }
 
     pendingRiskyTool?.let { tool ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.mcp_enable_risky_tool),
             summary = stringResource(R.string.mcp_enable_risky_tool_summary, tool.name, server?.name.orEmpty()),
@@ -367,7 +371,7 @@ internal fun McpServerDetailScreen(
         }
     }
 
-    WindowDialog(
+    EtaWindowDialog(
         show = showToken,
         title = stringResource(R.string.mcp_update_token),
         summary = stringResource(R.string.mcp_update_token_summary),
@@ -408,7 +412,7 @@ internal fun McpServerDetailScreen(
         }
     }
 
-    WindowDialog(
+    EtaWindowDialog(
         show = showDelete,
         title = stringResource(R.string.mcp_delete_server),
         summary = stringResource(R.string.mcp_delete_confirm, server?.name.orEmpty()),
