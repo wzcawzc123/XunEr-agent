@@ -25,6 +25,10 @@ internal object AgentModelImageEncoder {
     private const val MODEL_JPEG_QUALITY = 95
     private const val PREVIEW_JPEG_QUALITY = 80
 
+    /** 用户附件的视觉发送档：长边 ≤1600px、总像素 ≤150 万（超过就按需采样降级）。 */
+    private const val VISION_MAX_LONG_EDGE = 1_600
+    private const val VISION_MAX_PIXELS = 1_500_000L
+
     private data class EncodingProfile(
         val format: Bitmap.CompressFormat,
         val mimeType: String,
@@ -59,6 +63,22 @@ internal object AgentModelImageEncoder {
         quality = PREVIEW_JPEG_QUALITY,
     )
     private val toolVisionProfile = EncodingProfile(
+        format = Bitmap.CompressFormat.JPEG,
+        mimeType = "image/jpeg",
+        quality = MODEL_JPEG_QUALITY,
+    )
+
+    /**
+     * 用户附件专用档：带 1600px / 150 万像素上限，[userAttachment] 据此按需采样。
+     *
+     * ★ 不能复用 [toolVisionProfile]：文件工具图片要求**保持原尺寸**（有回归测试断言 3200×2400 不被缩放），
+     * 而这里必须降级。历史 bug：`userAttachment()` 用的就是 [toolVisionProfile]，
+     * 而它没有 maxLongEdge/maxPixels → `targetSize()` 里 scale 恒为 1.0 → 采样比恒为 1
+     * → 文档写着"按需采样解码到 1600px"，实际从不降级（超大附件整张原样发出）。
+     */
+    private val userAttachmentProfile = EncodingProfile(
+        maxLongEdge = VISION_MAX_LONG_EDGE,
+        maxPixels = VISION_MAX_PIXELS,
         format = Bitmap.CompressFormat.JPEG,
         mimeType = "image/jpeg",
         quality = MODEL_JPEG_QUALITY,
@@ -118,7 +138,7 @@ internal object AgentModelImageEncoder {
             bytes = bytes,
             source = source,
             bounds = inspectBoundsLoose(bytes, mimeHint),
-            profile = toolVisionProfile,
+            profile = userAttachmentProfile,
         )
     }.getOrNull()
 

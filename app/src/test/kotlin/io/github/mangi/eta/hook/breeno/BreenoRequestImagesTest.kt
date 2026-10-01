@@ -1,6 +1,9 @@
 package io.github.mangi.eta.hook.breeno
 
+import android.graphics.Bitmap
+import android.util.Base64
 import io.github.mangi.eta.agent.model.AgentModelClient
+import java.io.ByteArrayOutputStream
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -258,8 +261,17 @@ class BreenoRequestImagesTest {
 
     @Test
     fun inlineImageIsNoLongerRejectedByBinderStringBudget() {
+        // 内联 data URL 必须能解码出真实图片才返回 Success（自 c15de97「统一内联图片编码路径」起），
+        // 所以不能再用任意字符充数；同时保留"超过旧 Binder 字符串预算"这个前提。
+        val png = randomNoisePng(width = 900, height = 700)
+        val encoded = Base64.encodeToString(png, Base64.NO_WRAP)
+        assertTrue(
+            "前置条件：内联 base64 应达到旧 Binder 字符串预算量级（1MiB 字符），实际 ${encoded.length}",
+            encoded.length > 1_048_576,
+        )
+
         val snapshot = BreenoRequestImages.captureText(
-            text = "data:image/png;base64," + "A".repeat(300_000),
+            text = "data:image/png;base64,$encoded",
             source = "image.data",
         )
 
@@ -392,6 +404,21 @@ class BreenoRequestImagesTest {
         val resolution = BreenoRequestImages.resolve(null, snapshot)
         assertTrue(resolution is BreenoRequestImages.Resolution.Success)
         return (resolution as BreenoRequestImages.Resolution.Success).images
+    }
+
+    /** 逐像素随机噪声 PNG：不可压缩，用来构造"体积级"的前置条件（这里要超过 1MiB 的 base64 串）。 */
+    private fun randomNoisePng(width: Int, height: Int): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val random = java.util.Random(42)
+        val pixels = IntArray(width * height) {
+            0xFF000000.toInt() or random.nextInt(1 shl 24)
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        return ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            bitmap.recycle()
+            output.toByteArray()
+        }
     }
 
     private fun imageSnapshot(suffix: String): BreenoRequestImages.Snapshot =

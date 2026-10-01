@@ -431,34 +431,21 @@ class AgentImageCodecTest {
             }
         }
 
-    /** 生成 4x4 随机色块噪声图：PNG 无损编码几乎无法压缩，可稳定构造超过 12MiB 的附件。 */
+    /**
+     * 生成逐像素随机噪声图：每个像素都与左邻、上邻不同，PNG 的无损行滤波（Sub/Up/Avg/Paeth）
+     * 完全失效，编码后体积≈原始 ARGB 大小（3000x2000 ≈ 24MB），可稳定超过 [MAX_AGENT_IMAGE_BYTES]。
+     *
+     * ★ 不要改回"大色块"写法（历史实现是 4x4 块）：块内上下行完全相同、同行相邻块只差 3 个字节，
+     * 行滤波会把它们整个压掉——实测 3000x2000 只产出 1,635,071 字节（≈原始的 1/16），
+     * 于是"前置条件：噪声 PNG 应超过 12MiB"这条断言先失败（Windows 与 Linux 表现一致）。
+     */
     private fun patternedNoiseBitmap(width: Int, height: Int): Bitmap =
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.WHITE)
             val random = java.util.Random(42)
-            val paint = Paint()
-            val block = 4
-            var row = 0
-            while (row < height) {
-                var col = 0
-                while (col < width) {
-                    paint.color = Color.rgb(
-                        random.nextInt(256),
-                        random.nextInt(256),
-                        random.nextInt(256),
-                    )
-                    canvas.drawRect(
-                        col.toFloat(),
-                        row.toFloat(),
-                        (col + block).toFloat(),
-                        (row + block).toFloat(),
-                        paint,
-                    )
-                    col += block
-                }
-                row += block
+            val pixels = IntArray(width * height) {
+                0xFF000000.toInt() or random.nextInt(1 shl 24)
             }
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         }
 
     private fun String.decodeDataUrl(): ByteArray =
