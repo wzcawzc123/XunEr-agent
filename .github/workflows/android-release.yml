@@ -7,6 +7,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "要发布的版本 tag（如 v3.4.0）。留空则只构建、不发布。"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -123,20 +128,36 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # 仅在推送 v* tag 时执行：创建 GitHub Release，并附上 CI 签名的 release APK。
+      # 两条入口：
+      #   1) 推送 v* tag（若本仓库的 push 事件能触发 workflow）；
+      #   2) 手动触发 workflow_dispatch 并填 release_tag（本仓库历史一直用手动触发，
+      #      实测 push 事件从不产生运行，所以这条是可靠入口）。
       # 正文取自仓库内的 docs/releases/<tag>.md，与历史 release 的手写风格保持一致。
       - name: 创建 GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '') }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="$RELEASE_TAG"
           notes_file="docs/releases/${tag}.md"
           asset="$RUNNER_TEMP/apks/Eta-${tag}.apk"
 
           if [[ ! -f "$notes_file" ]]; then
             echo "::error::未找到 Release 正文 $notes_file。"
             exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag 已存在。"
+            exit 1
+          fi
+
+          # 手动触发时 tag 还不存在，先在本仓建好轻量 tag（与历史 tag 类型一致）并推上去。
+          # 用 GITHUB_TOKEN 推送不会反过来再触发一次 workflow，因此不会形成循环。
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "tag ${tag} 不存在，创建并指向 ${GITHUB_SHA}"
+            git tag "${tag}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${tag}"
           fi
 
           cp "${{ steps.apk.outputs.release_path }}" "$asset"
