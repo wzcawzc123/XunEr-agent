@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-build-${{ github.ref }}
@@ -60,6 +62,11 @@ jobs:
           printf '%s' "$ETA_RELEASE_KEYSTORE_BASE64" \
             | base64 --decode \
             > "$RUNNER_TEMP/eta-release.jks"
+
+      - name: 运行单元测试
+        run: >-
+          ./gradlew --no-daemon --no-configuration-cache
+          :app:testDebugUnitTest
 
       - name: 构建 Debug 与 Release APK
         env:
@@ -115,3 +122,25 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 14
+
+      # 仅在推送 v* tag 时执行：创建 GitHub Release，并附上 CI 签名的 release APK。
+      # 正文取自仓库内的 docs/releases/<tag>.md，与历史 release 的手写风格保持一致。
+      - name: 创建 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          notes_file="docs/releases/${tag}.md"
+          asset="$RUNNER_TEMP/apks/Eta-${tag}.apk"
+
+          if [[ ! -f "$notes_file" ]]; then
+            echo "::error::未找到 Release 正文 $notes_file。"
+            exit 1
+          fi
+
+          cp "${{ steps.apk.outputs.release_path }}" "$asset"
+          gh release create "$tag" \
+            --title "Eta ${tag}" \
+            --notes-file "$notes_file" \
+            "$asset"
