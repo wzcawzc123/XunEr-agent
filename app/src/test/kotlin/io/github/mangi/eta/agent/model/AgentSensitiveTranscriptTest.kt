@@ -73,4 +73,70 @@ class AgentSensitiveTranscriptTest {
         assertFalse(encoded.contains("demo"))
         assertFalse(encoded.contains("global"))
     }
+
+    @Test
+    fun memoryResultsStayReadableWhileArgumentsAndOtherSensitiveResultsStayRedacted() {
+        val memoryCall = "call_memory"
+        val settingsCall = "call_settings"
+        val messages = JSONArray()
+            .put(
+                JSONObject()
+                    .put("role", "assistant")
+                    .put("content", JSONObject.NULL)
+                    .put(
+                        "tool_calls",
+                        JSONArray()
+                            .put(
+                                JSONObject()
+                                    .put("id", memoryCall)
+                                    .put("type", "function")
+                                    .put(
+                                        "function",
+                                        JSONObject()
+                                            .put("name", "memory_get")
+                                            .put("arguments", """{"section":"隐藏的章节名"}"""),
+                                    ),
+                            )
+                            .put(
+                                JSONObject()
+                                    .put("id", settingsCall)
+                                    .put("type", "function")
+                                    .put(
+                                        "function",
+                                        JSONObject()
+                                            .put("name", "set_setting")
+                                            .put("arguments", """{"value":"敏感值"}"""),
+                                    ),
+                            ),
+                    ),
+            )
+            .put(
+                JSONObject()
+                    .put("role", "tool")
+                    .put("tool_call_id", memoryCall)
+                    .put("content", """{"ok":true,"content":"1: # 某节\n2: Eta Agent"}"""),
+            )
+            .put(
+                JSONObject()
+                    .put("role", "tool")
+                    .put("tool_call_id", settingsCall)
+                    .put("content", """{"ok":true,"password":"secret-value"}"""),
+            )
+
+        val encoded = AgentConversationCodec.transcript(
+            messages = messages,
+            startIndex = 0,
+            sensitiveToolCallIds = setOf(memoryCall, settingsCall),
+        ).joinToString { it.content + it.toolCallsJson }
+
+        // 记忆正文保留进历史：否则模型在后续轮次看不到自己刚读到的内容，只能反复重读。
+        assertTrue(encoded.contains("Eta Agent"))
+        // memory_get 的参数仍然按形状脱敏，不泄露取值。
+        assertFalse(encoded.contains("隐藏的章节名"))
+        assertTrue(encoded.contains("_redacted"))
+        // 其它敏感工具的结果照旧被抹掉。
+        assertFalse(encoded.contains("secret-value"))
+        assertFalse(encoded.contains("敏感值"))
+        assertTrue(encoded.contains("未写入持久会话"))
+    }
 }

@@ -45,6 +45,7 @@ import io.github.mangi.eta.core.HookSupport
 import io.github.mangi.eta.data.repository.AgentMemoryException
 import io.github.mangi.eta.data.repository.AgentMemoryMutation
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
+import io.github.mangi.eta.data.repository.AgentMemoryStore
 import io.github.mangi.eta.data.repository.AgentMemoryWriteResult
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import java.util.Locale
@@ -340,16 +341,22 @@ internal class AgentLocalTools(
     }
 
     private fun memoryGet(args: JSONObject): String = try {
-        val result = AgentMemoryRepository.read(
-            query = args.optString("query").takeIf(String::isNotBlank),
-            startLine = args.optInt("start_line", 1),
-            maxChars = args.optInt("max_chars", 12_000),
-        )
+        val section = args.optString("section").takeIf(String::isNotBlank)
+        val result = if (section != null) {
+            AgentMemoryRepository.readSection(section, args.optInt("max_chars", 12_000))
+        } else {
+            AgentMemoryRepository.read(
+                query = args.optString("query").takeIf(String::isNotBlank),
+                startLine = args.optInt("start_line", 1),
+                maxChars = args.optInt("max_chars", 12_000),
+            )
+        }
         JSONObject()
             .put("ok", true)
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
             .put("line_count", result.snapshot.lineCount)
+            .put("section", result.section ?: JSONObject.NULL)
             .put("start_line", result.startLine ?: JSONObject.NULL)
             .put("end_line", result.endLine ?: JSONObject.NULL)
             .put("matched_lines", result.matchedLines)
@@ -362,7 +369,12 @@ internal class AgentLocalTools(
 
     private fun memoryWrite(args: JSONObject): String = try {
         val revision = args.getString("revision")
-        val mutation = when (args.getString("mode")) {
+        val mutation = when (val mode = args.getString("mode")) {
+            "replace_section" -> AgentMemoryMutation.ReplaceSection(
+                revision = revision,
+                section = args.optString("section"),
+                content = args.optString("content"),
+            )
             "replace_range" -> AgentMemoryMutation.ReplaceRange(
                 revision = revision,
                 startLine = args.getInt("start_line"),
@@ -373,12 +385,28 @@ internal class AgentLocalTools(
                 revision = revision,
                 content = args.getString("content"),
             )
-            "clear" -> AgentMemoryMutation.Clear(revision)
-            else -> error("不支持的记忆写入模式")
+            "clear" -> {
+                val confirmation = args.optString("content")
+                if (confirmation != AgentMemoryStore.CLEAR_CONFIRMATION) {
+                    throw AgentMemoryException(
+                        code = "MEMORY_CONFIRM_REQUIRED",
+                        message = "清空全部记忆需要在 content 里回传 \"${AgentMemoryStore.CLEAR_CONFIRMATION}\" 作为确认。",
+                    )
+                }
+                AgentMemoryMutation.Clear(revision)
+            }
+            else -> throw AgentMemoryException(
+                code = "INVALID_TOOL_ARGUMENTS",
+                message = "不支持的记忆写入模式 $mode；可用：replace_section / replace_range / append / clear。",
+            )
         }
         when (val result = AgentMemoryRepository.mutate(mutation)) {
             is AgentMemoryWriteResult.Success -> JSONObject()
                 .put("ok", true)
+                .put("changed", result.changed)
+                .apply {
+                    if (!result.changed) put("message", "内容与写入前逐字节一致，未产生任何改动。")
+                }
                 .put("revision", result.snapshot.revision)
                 .put("bytes", result.snapshot.byteSize)
                 .put("line_count", result.snapshot.lineCount)
