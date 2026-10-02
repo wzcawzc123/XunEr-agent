@@ -753,10 +753,7 @@ internal class AgentLocalTools(
         //   2) 缺失 → 仍按 android 执行，但结果里显式标注"这是默认值"。
         // 否则"模型没传 environment"和"参数在链路上被剥离"在观测上完全无法区分
         // —— 实测有会话把它误判成 harness bug，进而放弃重试、绕道手搓 zip。
-        if (requestedEnvironment.isNotEmpty() &&
-            requestedEnvironment != "android" &&
-            requestedEnvironment != "linux"
-        ) {
+        if (!isValidTerminalEnvironmentArgument(requestedEnvironment)) {
             return JSONObject()
                 .put("ok", false)
                 .put("code", "INVALID_TOOL_ARGUMENTS")
@@ -798,6 +795,18 @@ internal class AgentLocalTools(
             )
             .toString()
     }
+
+    /**
+     * `terminal` 的 environment 入参是否可用。
+     *
+     * 大小写不敏感：底层 `normalizeEnvironment()` 就是用 lowercase 解析的，
+     * 这里若做区分大小写的字面比较，模型给出的 "Linux" 会被误判成非法值
+     * —— 而 3.4.0 能正常执行。空白视为"未提供"，由调用方按默认值处理。
+     */
+    internal fun isValidTerminalEnvironmentArgument(raw: String): Boolean =
+        raw.isBlank() ||
+            raw.equals("android", ignoreCase = true) ||
+            raw.equals("linux", ignoreCase = true)
 
     private fun readFile(args: JSONObject): String =
         terminalController.readFile(
