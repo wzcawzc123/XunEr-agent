@@ -229,7 +229,8 @@ internal class AgentMemoryStore(
         val resolved = resolveSection(lines, mutation.section)
         val heading = resolved.heading
         val replacement = mutation.content.memoryLines()
-        if (heading.level == 1 && replacement.none { headingLevel(it) == 1 }) {
+        // 空 content = 删除整节（文档化的用法），所以护栏只在"有内容却没带一级标题"时生效。
+        if (heading.level == 1 && replacement.isNotEmpty() && replacement.none { headingLevel(it) == 1 }) {
             throw AgentMemoryException(
                 code = "MEMORY_SECTION_HEADING_REQUIRED",
                 message = "替换一级章节时，content 必须以同行的一级标题开头（例如 \"${heading.raw}\"）；" +

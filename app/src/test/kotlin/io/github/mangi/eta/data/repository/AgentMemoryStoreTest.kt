@@ -183,6 +183,51 @@ class AgentMemoryStoreTest {
         assertFalse(hasLoneSurrogate(page.content))
     }
 
+    @Test
+    fun ambiguousSectionReferenceIsRejectedWithCandidates() {
+        val store = store()
+        store.replaceAll("# 核心记忆\n偏好\n# 振动模块 A\n一\n# 振动模块 B\n二")
+
+        val failure = assertThrows(AgentMemoryException::class.java) {
+            store.readSection("振动模块")
+        }
+
+        assertEquals("MEMORY_SECTION_AMBIGUOUS", failure.code)
+        // 报错必须给出候选，否则调用方只能盲试。
+        assertTrue(failure.message!!.contains("振动模块 A"))
+        assertTrue(failure.message!!.contains("振动模块 B"))
+    }
+
+    @Test
+    fun replacingATopLevelSectionWithoutItsHeadingIsRejected() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好\n# 振动模块\n旧内容")
+
+        val failure = assertThrows(AgentMemoryException::class.java) {
+            store.mutate(
+                AgentMemoryMutation.ReplaceSection(initial.revision, "振动模块", "没有标题的新正文"),
+            )
+        }
+
+        assertEquals("MEMORY_SECTION_HEADING_REQUIRED", failure.code)
+        // 拒绝后文件必须原封不动
+        assertEquals("# 核心记忆\n偏好\n# 振动模块\n旧内容", store.snapshot().content)
+    }
+
+    @Test
+    fun replacingATopLevelSectionWithEmptyContentDeletesIt() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好\n# 振动模块\n旧内容")
+
+        // 空 content 是文档化的"删除整节"用法，不能被上面那条护栏误拦。
+        val deleted = store.mutate(
+            AgentMemoryMutation.ReplaceSection(initial.revision, "振动模块", ""),
+        ) as AgentMemoryWriteResult.Success
+
+        assertEquals("# 核心记忆\n偏好", deleted.snapshot.content)
+        assertTrue(deleted.changed)
+    }
+
     private fun hasLoneSurrogate(text: String): Boolean {
         var index = 0
         while (index < text.length) {
