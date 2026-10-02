@@ -15,7 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToStream
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -70,14 +70,49 @@ internal object EtaBackupRepository {
         prettyPrint = true
     }
 
+    /** 带写入量上限的 OutputStream 包装。不关闭被包装的流（由调用方负责）。 */
+    private class LimitGuardOutputStream(
+        private val delegate: OutputStream,
+        private val limitBytes: Long,
+    ) : OutputStream() {
+        private var written = 0L
+
+        private fun count(delta: Int) {
+            written += delta
+            if (written > limitBytes) {
+                throw EtaBackupException("备份文件超过 ${limitBytes / (1024L * 1024L)} MiB 限制")
+            }
+        }
+
+        override fun write(b: Int) {
+            count(1)
+            delegate.write(b)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            count(len)
+            delegate.write(b, off, len)
+        }
+
+        override fun flush() {
+            delegate.flush()
+        }
+
+        override fun close() {
+            delegate.flush()
+        }
+    }
+
     suspend fun export(context: Context, output: OutputStream): EtaBackupSummary =
         withContext(Dispatchers.IO) {
             val document = snapshot(context.applicationContext)
-            val bytes = json.encodeToString(document).toByteArray(Charsets.UTF_8)
-            if (bytes.size > MAX_BACKUP_BYTES) {
-                throw EtaBackupException("备份文件超过 64 MiB 限制")
-            }
-            output.write(bytes)
+            // ★ 流式写盘，不再先物化整份 String + byte[]：
+            //   原实现峰值约为备份体积的 2~3 倍（String + byte[] + prettyPrint），
+            //   实测在约 218 MB 的数据集上直接 OutOfMemoryError；
+            //   而且 64 MiB 上限检查发生在分配之后，那句友好报错永远不可达（OOM 抢先）。
+            //   这里边写边计数，超限立刻抛 EtaBackupException。
+            val limited = LimitGuardOutputStream(output, MAX_BACKUP_BYTES)
+            json.encodeToStream(EtaBackupDocument.serializer(), document, limited)
             output.flush()
             document.summary()
         }

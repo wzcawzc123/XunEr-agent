@@ -131,6 +131,34 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         return matches in minimum..maximum
     }
 
+    /**
+     * 报错时附上"实际收到的字段清单"。
+     *
+     * 原来只报第一个缺失字段（`缺少必填字段 revision`），无法区分两种完全不同的情况：
+     * 模型压根没生成该字段，还是链路把参数丢/串了。附带形状后可以当场判断——
+     * 已经不能用"字段缺失"这种单点信息去猜归因了。
+     * 只输出键名与各值的类型/长度，不输出取值（错误信息里不落内容）。
+     */
+    private fun describeReceivedFields(value: JSONObject): String {
+        val parts = mutableListOf<String>()
+        val keys = value.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            parts += "$key(${describeFieldValue(value.opt(key))})"
+        }
+        return if (parts.isEmpty()) "（无）" else parts.joinToString("、")
+    }
+
+    private fun describeFieldValue(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is Boolean -> "bool"
+        is Number -> "num"
+        is String -> "str:${value.length}"
+        is JSONArray -> "arr:${value.length()}"
+        is JSONObject -> "obj:${value.length()}"
+        else -> "?"
+    }
+
     private fun validateObject(
         value: JSONObject,
         schema: JSONObject,
@@ -143,9 +171,12 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         schema.optInteger("maxProperties")?.let { if (size > it) return "$path 的字段数不能超过 $it" }
 
         schema.optJSONArray("required")?.let { required ->
-            for (index in 0 until required.length()) {
-                val key = required.optString(index)
-                if (!value.has(key)) return "$path 缺少必填字段 $key"
+            val missing = (0 until required.length())
+                .map { required.optString(it) }
+                .filterNot { value.has(it) }
+            if (missing.isNotEmpty()) {
+                return "$path 缺少必填字段 ${missing.joinToString("、")}；" +
+                    "已收到字段：${describeReceivedFields(value)}"
             }
         }
 

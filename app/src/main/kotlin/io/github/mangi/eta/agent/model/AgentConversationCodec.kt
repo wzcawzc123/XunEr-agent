@@ -239,6 +239,59 @@ internal object AgentConversationCodec {
         }
     }
 
+    /**
+     * 这些键名保留原值（仅限布尔/数字/短字符串）：它们是"这轮到底成没成、返回了几条"的判断依据。
+     * 取值型字段（content / body / address / display_name / value 等，以及 revision 这类定长串）
+     * 一律只留类型与长度。
+     */
+    private val REDACTION_KEPT_KEYS = setOf(
+        "ok", "code", "tool", "action", "status", "count", "total",
+        "has_more", "matched_lines", "line_count", "start_line", "end_line",
+        "bytes", "exit_code", "timed_out",
+    )
+
+    /**
+     * 脱敏时保留"形状"，而不是整块抹成 `{"redacted":true}`。
+     *
+     * 背景：原实现让模型看不到自己上一轮调了什么参数、也看不到结果形状，
+     * 于是只能反复重试（实测同一会话里 34 次完全相同的 memory_get、1,283 次 terminal）。
+     * 这里只保留键名与各值的类型/长度，内容一律不留，既让模型能判断"这条已经做过了"，
+     * 又不泄露任何取值。解析失败时返回 null，由调用方回退到原有的整块省略文案。
+     */
+    private fun redactPayload(raw: String): String? {
+        val source = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        val summary = JSONObject()
+            .put("_redacted", true)
+            .put("_note", SENSITIVE_TOOL_OMITTED_TEXT)
+        val shape = JSONObject()
+        for (key in source.keys()) {
+            val value = source.opt(key)
+            if (key in REDACTION_KEPT_KEYS && isSafeToKeep(value)) {
+                summary.put(key, value)
+            } else {
+                shape.put(key, describeRedactedValue(value))
+            }
+        }
+        if (shape.length() > 0) summary.put("_fields", shape)
+        return summary.toString()
+    }
+
+    private fun isSafeToKeep(value: Any?): Boolean = when (value) {
+        is Boolean, is Number -> true
+        is String -> value.length <= 64
+        else -> false
+    }
+
+    private fun describeRedactedValue(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is Boolean -> "bool"
+        is Number -> "num"
+        is String -> "str:${value.length}"
+        is JSONArray -> "arr:${value.length()}"
+        is JSONObject -> "obj:${value.length()}"
+        else -> "?"
+    }
+
     private fun redactSensitiveToolData(
         source: JSONObject,
         sensitiveToolCallIds: Set<String>,
@@ -249,14 +302,25 @@ internal object AgentConversationCodec {
             copy.optString("role") == "tool" &&
             copy.optString("tool_call_id") in sensitiveToolCallIds
         ) {
-            copy.put("content", SENSITIVE_TOOL_OMITTED_TEXT)
+            copy.put(
+                "content",
+                redactPayload(copy.optString("content"))
+                    ?: JSONObject()
+                        .put("_redacted", true)
+                        .put("_note", SENSITIVE_TOOL_OMITTED_TEXT)
+                        .toString(),
+            )
         }
         val calls = copy.optJSONArray("tool_calls") ?: return copy
         for (index in 0 until calls.length()) {
             val call = calls.optJSONObject(index) ?: continue
             if (call.optString("id") !in sensitiveToolCallIds) continue
-            call.optJSONObject("function")
-                ?.put("arguments", JSONObject().put("redacted", true).toString())
+            val function = call.optJSONObject("function") ?: continue
+            function.put(
+                "arguments",
+                redactPayload(function.optString("arguments"))
+                    ?: JSONObject().put("_redacted", true).toString(),
+            )
         }
         return copy
     }

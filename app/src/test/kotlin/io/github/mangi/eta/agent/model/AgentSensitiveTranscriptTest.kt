@@ -62,5 +62,15 @@ class AgentSensitiveTranscriptTest {
         assertFalse(encoded.contains("secret-value"))
         assertTrue(encoded.contains("redacted"))
         assertTrue(encoded.contains("未写入持久会话"))
+
+        // 脱敏仍须保留"形状"：模型必须能看出自己调过哪些字段、拿到什么结构，
+        // 否则看不到调用记录就只能反复重试（真机实测：同一会话 34 次重复 memory_get）。
+        assertTrue(encoded.contains("_redacted"))
+        assertTrue(encoded.contains("_fields"))
+        assertTrue(encoded.contains("namespace"))
+        assertTrue(encoded.contains("str:"))
+        // 但取值一律不留，连长度之外的信息都没有。
+        assertFalse(encoded.contains("demo"))
+        assertFalse(encoded.contains("global"))
     }
 }

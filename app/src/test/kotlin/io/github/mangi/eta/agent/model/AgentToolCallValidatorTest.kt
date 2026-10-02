@@ -104,6 +104,43 @@ class AgentToolCallValidatorTest {
         assertNotNull(validator.validate(call("""{"blocked":1}""")))
     }
 
+    @Test
+    fun missingRequiredFieldsReportWhatWasActuallyReceived() {
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "required": ["mode", "revision"],
+                  "properties": {
+                    "mode": {"type": "string"},
+                    "revision": {"type": "string"},
+                    "content": {"type": "string"}
+                  }
+                }
+                """.trimIndent()
+            )
+        )
+
+        // 只缺 revision：报错要带上"实际收到了什么"，用于区分"模型没发"与"链路把参数丢了/串了"。
+        val missingRevision = validator.validate(call("""{"mode":"append","content":"1234567890"}"""))
+        org.junit.Assert.assertNotNull(missingRevision)
+        org.junit.Assert.assertTrue(missingRevision!!.contains("缺少必填字段 revision"))
+        org.junit.Assert.assertTrue(missingRevision.contains("已收到字段"))
+        org.junit.Assert.assertTrue(missingRevision.contains("mode"))
+        org.junit.Assert.assertTrue(missingRevision.contains("content"))
+        // 只暴露形状，不把取值写进错误信息。
+        org.junit.Assert.assertFalse(missingRevision.contains("append"))
+        org.junit.Assert.assertFalse(missingRevision.contains("1234567890"))
+
+        // 多个必填一起缺时应一次列全，而不是只报第一个。
+        val bothMissing = validator.validate(call("""{}"""))
+        org.junit.Assert.assertNotNull(bothMissing)
+        org.junit.Assert.assertTrue(bothMissing!!.contains("mode"))
+        org.junit.Assert.assertTrue(bothMissing.contains("revision"))
+        org.junit.Assert.assertTrue(bothMissing.contains("已收到字段：（无）"))
+    }
+
     private fun validator(parameters: JSONObject): AgentToolCallValidator =
         AgentToolCallValidator(
             JSONArray().put(

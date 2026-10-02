@@ -747,7 +747,23 @@ internal class AgentLocalTools(
         )
 
     private fun terminal(args: JSONObject): String {
-        return terminalController.terminalAction(
+        val requestedEnvironment = args.optString("environment").trim()
+        // ★ 不再静默兜底：
+        //   1) 非空但不可识别的值 → 明确报错（原先只在下层抛 IllegalArgumentException）；
+        //   2) 缺失 → 仍按 android 执行，但结果里显式标注"这是默认值"。
+        // 否则"模型没传 environment"和"参数在链路上被剥离"在观测上完全无法区分
+        // —— 实测有会话把它误判成 harness bug，进而放弃重试、绕道手搓 zip。
+        if (requestedEnvironment.isNotEmpty() &&
+            requestedEnvironment != "android" &&
+            requestedEnvironment != "linux"
+        ) {
+            return JSONObject()
+                .put("ok", false)
+                .put("code", "INVALID_TOOL_ARGUMENTS")
+                .put("message", "environment 仅支持 android/linux，实际收到：$requestedEnvironment")
+                .toString()
+        }
+        val result = terminalController.terminalAction(
             action = args.optString("action", "open_and_exec"),
             command = args.optString("command"),
             cwd = args.optString("cwd").ifBlank { null },
@@ -760,9 +776,27 @@ internal class AgentLocalTools(
             offsetChars = args.optInt("offset_chars", 0),
             maxChars = args.optInt("max_chars", 8_000),
             closeIfDone = args.optBoolean("close_if_done", false),
-            environment = args.optString("environment", "android"),
+            environment = requestedEnvironment.ifBlank { "android" },
             taskId = args.optString("task_id").ifBlank { null },
         )
+        return if (requestedEnvironment.isEmpty()) annotateDefaultedEnvironment(result) else result
+    }
+
+    /**
+     * 入参未提供 environment 时，在结果里标注来源是默认值。
+     *
+     * 只加字段、不改原有字段，因此显式传参的路径完全不受影响。
+     */
+    private fun annotateDefaultedEnvironment(result: String): String {
+        val parsed = runCatching { JSONObject(result) }.getOrNull() ?: return result
+        if (!parsed.has("environment")) return result
+        return parsed
+            .put("environment_source", "default")
+            .put(
+                "environment_note",
+                "未收到 environment 入参，已按 android 执行；需要 Linux 外壳请显式传 environment=linux",
+            )
+            .toString()
     }
 
     private fun readFile(args: JSONObject): String =

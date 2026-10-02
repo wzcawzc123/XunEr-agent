@@ -111,15 +111,27 @@ internal class AgentPersonalDataTools(
         args = args,
     )
 
+    /**
+     * 下载目录走 MediaStore（`content://media/external/downloads`）。
+     *
+     * 原先用的是 `content://downloads/my_downloads`（DownloadManager 的 provider），却配了
+     * MediaStore 的列名 `mime_type` / `lastmod` —— 两个 provider 的列名并不通用
+     * （DownloadManager 侧叫 `media_type` / `last_modified_timestamp`）。
+     * 投影里出现不存在的列会让 provider 抛 `Invalid column`，错误最终被
+     * `PERSONAL_DATA_UNAVAILABLE` 兜底，表现为"下载目录永远查不到"（真机已复现）。
+     * 另外 `my_downloads` 只包含本应用自己发起的下载，本来就看不到用户在别处下载的文件。
+     */
     private fun searchDownloads(args: JSONObject): AgentModelClient.ToolResult = query(
         tool = "search_downloads",
-        uri = "content://downloads/my_downloads",
-        projection = listOf("_id", "title", "description", "mime_type", "total_size", "lastmod", "status", "local_uri"),
-        sort = "lastmod DESC",
-        searchableColumns = listOf("title", "description"),
+        uri = "content://media/external/downloads",
+        projection = listOf("_id", "_display_name", "mime_type", "relative_path", "date_modified", "_size"),
+        sort = "date_modified DESC",
+        searchableColumns = listOf("_display_name", "relative_path"),
         fixedWhere = null,
         args = args,
-    )
+    ) { row ->
+        row.put("uri", "content://media/external/downloads/${row.optString("_id")}")
+    }
 
     private fun searchColorOsNotes(args: JSONObject): AgentModelClient.ToolResult = query(
         tool = "search_coloros_notes",
