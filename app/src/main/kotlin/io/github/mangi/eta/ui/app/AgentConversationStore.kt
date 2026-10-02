@@ -1,6 +1,7 @@
 package io.github.mangi.eta.ui.app
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
@@ -345,9 +346,25 @@ internal object AgentConversationStore {
             }
         }.getOrDefault(emptyList())
 
-    private fun List<ConversationMessageEntity>.toLegacyHistory(): List<AgentModelClient.ConversationMessage> =
-        mapNotNull { message ->
-            when (message.type) {
+    /**
+     * 旧数据迁移路径：检查点缺失或解码为空时，用消息表重建一份可用的 history。
+     *
+     * **必须有界。** 早期实现直接返回全部 user/assistant 正文，长会话实测可达 800 万字符；
+     * 那会让下一次 run 的 `messages` 远超模型窗口，Provider 直接拒绝，
+     * 表现为 `model_retry` / `runtime_failed`，随后压缩才把它压回来 ——
+     * 这正是"频繁压缩 + 运行失败"成对出现的根因。
+     *
+     * 因此这里从最新往回取，同时受条数与字符双重上限约束：宁可少给，不可超窗。
+     * 完整的对话记录不受影响，它们仍在 `journal` 与消息表里。
+     */
+    @VisibleForTesting
+    internal fun List<ConversationMessageEntity>.toLegacyHistory(): List<AgentModelClient.ConversationMessage> {
+        val tail = ArrayList<AgentModelClient.ConversationMessage>(LEGACY_HISTORY_MAX_MESSAGES)
+        var chars = 0
+        for (index in indices.reversed()) {
+            if (tail.size >= LEGACY_HISTORY_MAX_MESSAGES) break
+            val message = this[index]
+            val entry = when (message.type) {
                 TYPE_USER -> AgentModelClient.ConversationMessage(
                     role = "user",
                     content = message.content,
@@ -361,8 +378,14 @@ internal object AgentConversationStore {
                         )
                     }
                 else -> null
-            }
+            } ?: continue
+            if (chars + entry.content.length > LEGACY_HISTORY_MAX_CHARS) break
+            tail += entry
+            chars += entry.content.length
         }
+        tail.reverse()
+        return tail
+    }
 
     private const val TYPE_USER = "user"
     private const val TYPE_ASSISTANT = "assistant"
@@ -372,4 +395,10 @@ internal object AgentConversationStore {
     private const val TYPE_TOOL_SUMMARY = "tool_summary"
     private const val MESSAGE_LOAD_PAGE_SIZE = 128
     private const val LEGACY_UNNAMED_TITLE = "新对话"
+
+    /** 兜底 history 的条数上限。 */
+    private const val LEGACY_HISTORY_MAX_MESSAGES = 40
+
+    /** 兜底 history 的字符上限，与核心记忆预算同量级，避免把整段历史塞进模型。 */
+    private const val LEGACY_HISTORY_MAX_CHARS = 32_000
 }
