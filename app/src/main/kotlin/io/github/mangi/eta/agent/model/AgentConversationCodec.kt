@@ -222,18 +222,16 @@ internal object AgentConversationCodec {
         startIndex: Int,
         sensitiveToolCallIds: Set<String> = emptySet(),
     ): List<AgentModelClient.ConversationMessage> {
-        // 记录 id -> 工具名：结果是否保留正文取决于工具本身（见 AgentSensitiveToolPolicy.isResultVisible）。
-        // 只从 id 集合拿不到名字时用 ""，按"必须脱敏"处理（保守）。
-        val sensitiveCalls = sensitiveToolCallIds.associateWith { "" }.toMutableMap()
+        val redactedIds = sensitiveToolCallIds.toMutableSet()
         for (index in startIndex until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             parseToolCalls(message).filter { AgentSensitiveToolPolicy.isSensitive(it.name) }
-                .forEach { sensitiveCalls[it.id] = it.name }
+                .forEach { redactedIds += it.id }
         }
         return buildList {
             for (index in startIndex until messages.length()) {
                 messages.optJSONObject(index)
-                    ?.let { redactSensitiveToolData(it, sensitiveCalls) }
+                    ?.let { redactSensitiveToolData(it, redactedIds) }
                     ?.let(::fromJsonObject)
                     ?.let(::sanitizeMessage)
                     ?.let(::add)
@@ -296,27 +294,27 @@ internal object AgentConversationCodec {
 
     private fun redactSensitiveToolData(
         source: JSONObject,
-        sensitiveCalls: Map<String, String>,
+        sensitiveToolCallIds: Set<String>,
     ): JSONObject {
-        if (sensitiveCalls.isEmpty()) return source
+        if (sensitiveToolCallIds.isEmpty()) return source
         val copy = JSONObject(source.toString())
-        if (copy.optString("role") == "tool") {
-            val toolName = sensitiveCalls[copy.optString("tool_call_id")]
-            if (toolName != null && !AgentSensitiveToolPolicy.isResultVisible(toolName)) {
-                copy.put(
-                    "content",
-                    redactPayload(copy.optString("content"))
-                        ?: JSONObject()
-                            .put("_redacted", true)
-                            .put("_note", SENSITIVE_TOOL_OMITTED_TEXT)
-                            .toString(),
-                )
-            }
+        if (
+            copy.optString("role") == "tool" &&
+            copy.optString("tool_call_id") in sensitiveToolCallIds
+        ) {
+            copy.put(
+                "content",
+                redactPayload(copy.optString("content"))
+                    ?: JSONObject()
+                        .put("_redacted", true)
+                        .put("_note", SENSITIVE_TOOL_OMITTED_TEXT)
+                        .toString(),
+            )
         }
         val calls = copy.optJSONArray("tool_calls") ?: return copy
         for (index in 0 until calls.length()) {
             val call = calls.optJSONObject(index) ?: continue
-            if (call.optString("id") !in sensitiveCalls) continue
+            if (call.optString("id") !in sensitiveToolCallIds) continue
             val function = call.optJSONObject("function") ?: continue
             function.put(
                 "arguments",

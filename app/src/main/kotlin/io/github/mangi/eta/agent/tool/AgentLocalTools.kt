@@ -342,16 +342,17 @@ internal class AgentLocalTools(
 
     private fun memoryGet(args: JSONObject): String = try {
         val section = args.optString("section").takeIf(String::isNotBlank)
+        val query = args.optString("query").takeIf(String::isNotBlank)
         val result = if (section != null) {
             AgentMemoryRepository.readSection(section, args.optInt("max_chars", 12_000))
         } else {
             AgentMemoryRepository.read(
-                query = args.optString("query").takeIf(String::isNotBlank),
+                query = query,
                 startLine = args.optInt("start_line", 1),
                 maxChars = args.optInt("max_chars", 12_000),
             )
         }
-        JSONObject()
+        val payload = JSONObject()
             .put("ok", true)
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
@@ -361,8 +362,20 @@ internal class AgentLocalTools(
             .put("end_line", result.endLine ?: JSONObject.NULL)
             .put("matched_lines", result.matchedLines)
             .put("has_more", result.hasMore)
-            .put("content", result.content)
-            .toString()
+        // ★ 分页续读指引：不带 section/query 时这是"从 start_line 读一页"的分页语义。
+        //   只给 has_more 而不给出"下一段从哪读"，模型就只能用同样的参数反复重试
+        //   —— 实测某会话连续 30 次相同参数的 memory_get，每次都只拿到第 1 页。
+        if (result.hasMore && section == null && query == null) {
+            val next = (result.endLine ?: 0) + 1
+            payload
+                .put("next_start_line", next)
+                .put(
+                    "paging_hint",
+                    "已返回第 ${result.startLine}-${result.endLine} 行（共 ${result.snapshot.lineCount} 行）；" +
+                        "还有内容未返回，继续读取请传 start_line=$next",
+                )
+        }
+        payload.put("content", result.content).toString()
     } catch (failure: AgentMemoryException) {
         errorResult(failure.code, failure.message ?: "记忆读取失败")
     }
