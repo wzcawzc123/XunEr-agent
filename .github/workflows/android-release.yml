@@ -12,6 +12,11 @@ on:
         description: "要发布的版本 tag（如 v3.4.0）。留空则只构建、不发布。"
         required: false
         type: string
+      debuggable:
+        description: "出「正式签名 + debuggable」包，供 adb run-as 读取私有数据目录排查线上问题。"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -79,13 +84,23 @@ jobs:
           ETA_RELEASE_STORE_PASSWORD: ${{ secrets.ETA_RELEASE_STORE_PASSWORD }}
           ETA_RELEASE_KEY_ALIAS: ${{ secrets.ETA_RELEASE_KEY_ALIAS }}
           ETA_RELEASE_KEY_PASSWORD: ${{ secrets.ETA_RELEASE_KEY_PASSWORD }}
-        run: >-
-          ./gradlew --no-daemon --no-configuration-cache
-          :app:assembleDebug :app:assembleRelease
+        run: |
+          extra=""
+          if [[ "${{ inputs.debuggable }}" == "true" ]]; then
+            extra="-PetaDebuggable=true"
+            echo "本次 release 包将打开 debuggable —— 仅供排查线上问题，不要用于发布。"
+          fi
+          ./gradlew --no-daemon --no-configuration-cache $extra \
+            :app:assembleDebug :app:assembleRelease
 
       - name: 验证并整理 APK
         id: apk
         run: |
+          if [[ "${{ inputs.debuggable }}" == "true" && -n "${{ inputs.release_tag }}" ]]; then
+            echo "::error::debuggable 与 release_tag 不能同时使用：可调试包不得发布。"
+            exit 1
+          fi
+
           debug_apk="app/build/outputs/apk/debug/app-debug.apk"
           release_apk="app/build/outputs/apk/release/app-release.apk"
           output_dir="$RUNNER_TEMP/apks"
@@ -108,9 +123,13 @@ jobs:
           "$apksigner_path" verify "$release_apk"
           mkdir -p "$output_dir"
           cp "$debug_apk" "$output_dir/app-debug.apk"
-          cp "$release_apk" "$output_dir/app-release.apk"
+          release_name="app-release.apk"
+          if [[ "${{ inputs.debuggable }}" == "true" ]]; then
+            release_name="app-release-debuggable.apk"
+          fi
+          cp "$release_apk" "$output_dir/$release_name"
           echo "debug_path=$output_dir/app-debug.apk" >> "$GITHUB_OUTPUT"
-          echo "release_path=$output_dir/app-release.apk" >> "$GITHUB_OUTPUT"
+          echo "release_path=$output_dir/$release_name" >> "$GITHUB_OUTPUT"
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

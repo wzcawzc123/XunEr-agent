@@ -56,6 +56,10 @@ android {
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
+            // 排查线上问题专用开关：保持 release 的签名与压缩配置不变，只打开 debuggable，
+            // 使 `adb shell run-as io.github.mangi.eta` 能进入私有数据目录（databases/ 等）。
+            // 默认关闭，正式发版产物不受影响；开启：./gradlew -PetaDebuggable=true :app:assembleRelease
+            isDebuggable = providers.gradleProperty("etaDebuggable").orNull == "true"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
