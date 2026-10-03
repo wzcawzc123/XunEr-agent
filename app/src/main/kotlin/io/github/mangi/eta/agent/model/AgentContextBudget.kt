@@ -25,7 +25,8 @@ internal class AgentContextBudget(private val window: Int?) {
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
-        const val TRIGGER_RATIO = 0.85
+        /** 触发压缩的窗口占用比例。从 0.85 降到 0.75，为系统提示、工具 schema 和本轮增长留出 25% 安全余量。 */
+        const val TRIGGER_RATIO = 0.75
         const val RECENT_MESSAGES = 4
         const val RECENT_RATIO = 0.20
         const val MAX_OVERFLOW_ATTEMPTS = 3

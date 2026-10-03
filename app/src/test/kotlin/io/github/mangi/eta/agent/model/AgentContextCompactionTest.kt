@@ -62,7 +62,7 @@ class AgentContextCompactionTest {
     fun automaticCompactionPreservesIncrementalTranscriptAndLatestRequest() {
         val history = (1..8).flatMap { turn -> listOf(
             AgentModelClient.ConversationMessage("user", "第 $turn 个任务"),
-            AgentModelClient.ConversationMessage("assistant", "事实 $turn ".repeat(2200)),
+            AgentModelClient.ConversationMessage("assistant", "事实 $turn ".repeat(5000)),
         ) }
         val events = mutableListOf<AgentEvent>()
         var summaries = 0
@@ -239,8 +239,8 @@ class AgentContextCompactionTest {
     @Test
     fun budgetUsesModelWindowAndUsageCalibrationWithoutCountingImageBase64() {
         val budget = AgentContextBudget(10_000)
-        assertFalse(budget.shouldCompact(8499))
-        assertTrue(budget.shouldCompact(8500))
+        assertFalse(budget.shouldCompact(7499))
+        assertTrue(budget.shouldCompact(7500))
         assertFalse(budget.shouldCompact(0))
         assertFalse(AgentContextBudget(null).shouldCompact(Int.MAX_VALUE))
         assertEquals(4, AgentContextBudget.textTokens("中文测试"))
