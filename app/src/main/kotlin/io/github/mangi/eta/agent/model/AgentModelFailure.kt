@@ -15,6 +15,8 @@ internal class AgentModelFailure(
     val recoveryAllowed: Boolean = true,
 ) : IllegalStateException(message, cause) {
     companion object {
+        /** HTTP 标准的 Payment Required；服务商普遍用它表示余额/额度不足。 */
+        private const val PAYMENT_REQUIRED_STATUS = 402
         private val transientStatus = setOf(408, 429, 500, 502, 503, 504, 524, 529)
         private val permanentCodes = setOf(
             "insufficient_quota", "quota_exceeded", "billing_error", "usage_limit_reached",
@@ -33,12 +35,19 @@ internal class AgentModelFailure(
             if (isContextOverflow(error)) return AgentModelFailure(
                 "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。",
             )
-            val permanent = isPermanent(error, body)
+            val permanent = isPermanent(error, body) || status == PAYMENT_REQUIRED_STATUS
             return AgentModelFailure(
                 code = "HTTP_$status",
                 retryable = status in transientStatus && !permanent,
-                message = if (permanent) "模型接口额度或计费受限（HTTP $status），请检查服务商账户。"
-                else when (status) {
+                message = if (permanent) {
+                    // 402 是 HTTP 标准的 Payment Required；服务商常在此返回余额/额度不足，
+                    // 提示里必须点明"余额"，否则用户只会看到笼统的 HTTP 状态码而无从下手。
+                    if (status == PAYMENT_REQUIRED_STATUS) {
+                        "模型接口余额或额度不足（HTTP 402），请到服务商账户充值，或更换可用的 API Key。"
+                    } else {
+                        "模型接口额度或计费受限（HTTP $status），请检查服务商账户。"
+                    }
+                } else when (status) {
                     400 -> "模型请求参数无效（HTTP 400），请检查模型配置。"
                     401 -> "模型接口认证失败（HTTP 401），请检查 API Key。"
                     403 -> "模型接口拒绝访问（HTTP 403），请检查账户与模型权限。"

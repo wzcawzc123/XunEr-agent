@@ -87,6 +87,26 @@ class AgentModelRetryTest {
         assertFalse(AgentModelFailure.http(503, "secret request text").message.orEmpty().contains("secret"))
     }
 
+    @Test
+    fun paymentRequiredIsReportedAsInsufficientBalanceAndNeverRetried() {
+        // 402 是 HTTP 标准的 Payment Required；服务商普遍用它表示余额/额度不足。
+        // 真机实测：账户欠费时 run 直接以 HTTP_402 结束，而界面只显示笼统的失败，
+        // 用户无从判断该去充值。提示里必须点明"余额"，且不得重试。
+        val withBody = AgentModelFailure.http(402, """{"error":{"message":"Insufficient Balance"}}""")
+        assertEquals("HTTP_402", withBody.code)
+        assertFalse(withBody.retryable)
+        assertTrue(withBody.message.orEmpty().contains("余额"))
+
+        // 即使响应体里没有任何额度关键词，仅凭 402 状态码也要给出余额提示。
+        val bare = AgentModelFailure.http(402, "")
+        assertEquals("HTTP_402", bare.code)
+        assertFalse(bare.retryable)
+        assertTrue(bare.message.orEmpty().contains("余额"))
+
+        // 其余 4xx 的提示不受影响。
+        assertFalse(AgentModelFailure.http(404, "").message.orEmpty().contains("余额"))
+    }
+
     private fun complete(
         retry: AgentModelRetry,
         provider: AgentProviderClient,
