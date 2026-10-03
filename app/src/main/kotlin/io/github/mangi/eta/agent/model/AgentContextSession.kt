@@ -118,6 +118,7 @@ internal class AgentContextSession(
     }
 
     private companion object {
-        const val TRIGGER_RATIO = 0.85
+        /** 触发压缩的窗口占用比例。fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出 25% 安全余量。 */
+        const val TRIGGER_RATIO = 0.75
     }
 }

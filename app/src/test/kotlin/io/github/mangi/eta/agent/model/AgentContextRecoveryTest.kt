@@ -30,7 +30,8 @@ class AgentContextRecoveryTest {
 
     @Test
     fun automaticCompactionUsesOnlyActualInputUsageAndConfiguredWindow() {
-        for (input in listOf(null, 300_000, 764_999, 765_000)) {
+        // 阈值 = contextWindow(900_000) × AgentContextSession.TRIGGER_RATIO；fork 策略为 0.75 → 675_000。
+        for (input in listOf(null, 300_000, 674_999, 675_000)) {
             var summaries = 0
             val events = mutableListOf<AgentEvent>()
             val result = AgentModelClient.complete(config, "继续",
@@ -45,11 +46,11 @@ class AgentContextRecoveryTest {
                         response("完成")
                     }
                 })
-            assertEquals(if (input == 765_000) 1 else 0, summaries)
+            assertEquals(if (input == 675_000) 1 else 0, summaries)
             assertEquals("完成", result.content)
             val completed = events.filterIsInstance<AgentEvent.ContextCompaction>().lastOrNull()
-            if (input == 765_000) {
-                assertEquals(765_000, completed!!.tokensBefore)
+            if (input == 675_000) {
+                assertEquals(675_000, completed!!.tokensBefore)
                 assertNull(completed.tokensAfter)
             } else assertNull(completed)
         }
