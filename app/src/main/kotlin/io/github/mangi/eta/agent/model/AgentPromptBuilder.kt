@@ -19,7 +19,14 @@ internal object AgentPromptBuilder {
         roleplayContext: RoleplayRunContext? = null,
     ): JSONArray {
         val messages = buildSystemMessages(config, skillContext, memoryContext, rootAvailable, roleplayContext)
-        history.forEach { item ->
+        // 兜底：历史若已膨胀到接近窗口，先裁到预算内，避免带着必然失败的上下文发出。
+        // 正常规模的历史不受影响（见 AgentHistoryTrimmer）。
+        val boundedHistory = AgentHistoryTrimmer.trim(
+            history = history,
+            window = config.contextWindow,
+            systemEstimate = AgentContextBudget.rawEstimate(messages),
+        ).messages
+        boundedHistory.forEach { item ->
             runCatching { AgentConversationCodec.toJsonObject(item) }.getOrNull()?.let(messages::put)
         }
         messages.put(AgentConversationCodec.userMessage(prompt, images))
