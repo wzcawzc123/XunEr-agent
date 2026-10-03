@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.runtime
 
+import io.github.mangi.eta.agent.model.AgentHistoryTrimmer
 import io.github.mangi.eta.agent.model.AgentModelClient
 import java.util.UUID
 
@@ -20,6 +21,12 @@ internal object AgentContinuationBuilder {
                 messageId = uiPayload?.promptMessageId(request.runId) ?: "user-${request.runId}",
             ) +
             response.transcript)
+        // 防御性裁剪：续跑时 history 可能在回环中累积很大，先在这里做一次兜底，
+        // 避免跨进程 Parcel 过大，也防止后续 PromptBuilder 再次超窗。
+        val boundedHistory = AgentHistoryTrimmer.trim(
+            history = baseHistory,
+            window = request.config.contextWindow,
+        ).messages
         val handoff = request.handoff?.let { original ->
             if (original.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
                 return@let original.copy(id = newRunId)
@@ -45,7 +52,7 @@ internal object AgentContinuationBuilder {
             modelSessionId = request.effectiveModelSessionId,
             prompt = supplement,
             images = emptyList(),
-            history = baseHistory,
+            history = boundedHistory,
             handoff = handoff,
         )
     }

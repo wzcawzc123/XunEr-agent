@@ -20,8 +20,12 @@ import org.json.JSONArray
  */
 internal object AgentHistoryTrimmer {
 
-    /** 裁剪后至少要落在这个窗口比例以内，给系统提示、工具 schema 与本轮增长留出余量。 */
-    const val TARGET_RATIO = 0.80
+    /**
+     * 裁剪后至少要落在这个窗口比例以内。
+     * 这个值必须明显高于 [AgentContextBudget.TRIGGER_RATIO]，让正常的摘要压缩机制先有机会工作；
+     * 它只作为“摘要也救不回来”时的最后一道硬保险。
+     */
+    const val TARGET_RATIO = 0.95
 
     /** 工具 schema 的保守预留（实测 82 个工具约 15k token，这里按更多工具留量）。 */
     const val TOOL_SCHEMA_RESERVE_TOKENS = 24_000

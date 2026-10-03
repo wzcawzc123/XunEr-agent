@@ -108,6 +108,24 @@ internal class AgentLoop(
                 roleplayContext?.projectMessages(messages, roundTools) ?: messages,
             )
             var requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
+            // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的请求发出。
+            val window = config.contextWindow
+            if (window != null && window > 0 && requestEstimate >= window) {
+                val systemEstimate = AgentContextBudget.rawEstimate(
+                    JSONArray().apply { for (index in 0 until systemCount) put(messages.getJSONObject(index)) },
+                    JSONArray(),
+                )
+                val history = (systemCount until messages.length()).map {
+                    AgentConversationCodec.fromJsonObject(messages.getJSONObject(it))
+                }
+                val trimmed = AgentHistoryTrimmer.trim(history, window, systemEstimate).messages
+                while (messages.length() > systemCount) messages.remove(messages.length() - 1)
+                trimmed.forEach { messages.put(AgentConversationCodec.toJsonObject(it)) }
+                requestMessages = AssistantScreenContextProjection.project(
+                    roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+                )
+                requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
+            }
             var roundInputTokens: Int? = null
             var overflowAttempts = 0
             val reasoningLengthBeforeRound = accumulatedReasoning.length

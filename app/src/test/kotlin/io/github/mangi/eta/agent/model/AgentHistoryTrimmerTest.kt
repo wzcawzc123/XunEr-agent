@@ -1,7 +1,6 @@
 package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage
-import io.github.mangi.eta.agent.skill.SkillContext
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -96,33 +95,28 @@ class AgentHistoryTrimmerTest {
     }
 
     /**
-     * 决定性断言：即便 history 被撑到远超窗口，**装配出来的 messages 也必须落在窗口内**。
+     * 决定性断言：即便 history 被撑到远超窗口，**裁剪后的 messages 也必须落在窗口内**。
      * 修复前这里会得到约 2,000,000 的估算值——正是用户实测遇到的那类请求，
      * 它要么被服务商拒绝、要么让压缩做不完（摘要输入另有上限）而最终整任务失败。
      */
     @Test
-    fun assembledMessagesStayWithinTheWindowEvenWhenHistoryIsOversized() {
+    fun trimmedMessagesStayWithinTheWindowEvenWhenHistoryIsOversized() {
         val oversized = longHistory(2_000)
         assertTrue(oversized.estimate() > WINDOW)
 
-        val messages = AgentPromptBuilder.buildInitialMessages(
-            config = AgentModelClient.ModelConfig(
-                baseUrl = "https://example.invalid/v1",
-                apiKey = "test-key",
-                model = "test-model",
-                contextWindow = WINDOW,
-                systemPrompt = "你是 Eta。",
-            ),
-            prompt = "继续",
-            images = emptyList(),
-            history = oversized,
-            skillContext = SkillContext.EMPTY,
+        val systemEstimate = AgentContextBudget.rawEstimate(
+            JSONArray().put(AgentConversationCodec.userTextMessage("你是 Eta。")),
+            JSONArray(),
         )
+        val outcome = AgentHistoryTrimmer.trim(oversized, WINDOW, systemEstimate)
 
-        val estimate = AgentContextBudget.rawEstimate(messages)
-        assertTrue("装配后的上下文不得超出窗口，实际 $estimate", estimate < WINDOW)
-        // 尾部必须保留：最后一条是本次的用户提问。
-        assertTrue(messages.getJSONObject(messages.length() - 1).optString("role") == "user")
+        assertTrue("超大历史必须被裁剪", outcome.trimmed)
+        val trimmedArray = JSONArray()
+        outcome.messages.forEach { trimmedArray.put(AgentConversationCodec.toJsonObject(it)) }
+        val estimate = AgentContextBudget.rawEstimate(trimmedArray)
+        assertTrue("裁剪后的历史不得超出窗口预算，实际 $estimate", estimate < WINDOW)
+        // 尾部必须保留：最新消息仍在。
+        assertEquals(oversized.last(), outcome.messages.last())
     }
 
     private fun longHistory(count: Int): List<ConversationMessage> =

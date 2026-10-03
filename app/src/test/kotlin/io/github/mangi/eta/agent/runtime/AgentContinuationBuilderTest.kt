@@ -112,11 +112,49 @@ class AgentContinuationBuilderTest {
         assertEquals("user-run-old-supplement-7", continuation.history.single().messageId)
     }
 
-    private fun modelConfig(): AgentModelClient.ModelConfig =
+    @Test
+    fun continuationTrimsOversizedHistoryToPreventParcelAndWindowOverflow() {
+        val longHistory = List(200) { index ->
+            AgentModelClient.ConversationMessage(
+                role = if (index % 2 == 0) "user" else "assistant",
+                content = "消息内容".repeat(500),
+            )
+        }
+        val request = AgentRuntimeWire.RunRequest(
+            runId = "run-old",
+            prompt = "继续",
+            config = modelConfig(contextWindow = 200_000),
+            images = emptyList(),
+            history = longHistory,
+        )
+        val response = AgentModelClient.ModelResponse.Text(
+            content = "完成",
+            transcript = List(50) { index ->
+                AgentModelClient.ConversationMessage(
+                    role = if (index % 2 == 0) "assistant" else "user",
+                    content = "续跑内容".repeat(500),
+                )
+            },
+        )
+
+        val continuation = AgentContinuationBuilder.build(request, response, "继续跑")
+
+        // 原始 baseHistory = 200 + 1（本回合用户消息）+ 50 = 251 条
+        assertTrue(
+            "超大历史在续跑构造时应被裁剪，避免跨进程传递和后续超窗",
+            continuation.history.size < 251,
+        )
+        assertTrue("裁剪后 history 不应被清空", continuation.history.isNotEmpty())
+        // 最新消息必须保留（本回合补充 prompt 不会进入 history，最后应是 transcript 尾部）
+        assertEquals("user", continuation.history.last().role)
+    }
+
+    private fun modelConfig(contextWindow: Int? = null): AgentModelClient.ModelConfig =
         AgentModelClient.ModelConfig(
             baseUrl = "https://example.invalid/v1",
             apiKey = "test-key",
             model = "test-model",
             systemPrompt = "",
+            contextWindow = contextWindow,
         )
 }
