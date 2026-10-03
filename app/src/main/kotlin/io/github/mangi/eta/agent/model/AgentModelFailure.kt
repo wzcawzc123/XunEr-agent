@@ -12,7 +12,6 @@ internal class AgentModelFailure(
     val retryable: Boolean,
     message: String,
     cause: Throwable? = null,
-    val recoveryAllowed: Boolean = true,
 ) : IllegalStateException(message, cause) {
     companion object {
         /** HTTP 标准的 Payment Required；服务商普遍用它表示余额/额度不足。 */

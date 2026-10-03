@@ -10,7 +10,7 @@ import org.junit.Test
 class AgentModelPickerProjectorTest {
     @Test
     fun project_keepsOnlyEnabledProvidersAndModelsAndResolvesSelection() {
-        val selected = model(id = "model-selected", displayName = "GPT 5.6", contextWindow = 1_050_000)
+        val selected = model(id = "model-selected", displayName = "GPT 5.6", contextWindowOverride = 1_050_000)
         val providers = listOf(
             provider(
                 id = "disabled-provider",
@@ -126,7 +126,7 @@ class AgentModelPickerProjectorTest {
             formatContextUsage(AgentContextUsageUi(contextTokens = null, contextWindow = 100_000)),
         )
         assertEquals(
-            "12K tokens\nThis model has no context limit",
+            "Set this model's context window in Settings first",
             formatContextUsage(AgentContextUsageUi(contextTokens = 12_000, contextWindow = null)),
         )
     }
@@ -164,12 +164,12 @@ class AgentModelPickerProjectorTest {
         modelId: String = id,
         displayName: String = modelId,
         enabled: Boolean = true,
-        contextWindow: Int? = null,
+        contextWindowOverride: Int? = null,
     ) = Model(
         id = id,
         modelId = modelId,
         displayName = displayName,
         isEnabled = enabled,
-        contextWindow = contextWindow,
+        contextWindowOverride = contextWindowOverride,
     )
 }

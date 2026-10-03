@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.util.Base64
 import io.github.mangi.eta.agent.model.AgentModelClient
 import java.io.ByteArrayOutputStream
+import kotlin.random.Random
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -261,17 +262,23 @@ class BreenoRequestImagesTest {
 
     @Test
     fun inlineImageIsNoLongerRejectedByBinderStringBudget() {
-        // 内联 data URL 必须能解码出真实图片才返回 Success（自 c15de97「统一内联图片编码路径」起），
-        // 所以不能再用任意字符充数；同时保留"超过旧 Binder 字符串预算"这个前提。
-        val png = randomNoisePng(width = 900, height = 700)
-        val encoded = Base64.encodeToString(png, Base64.NO_WRAP)
-        assertTrue(
-            "前置条件：内联 base64 应达到旧 Binder 字符串预算量级（1MiB 字符），实际 ${encoded.length}",
-            encoded.length > 1_048_576,
+        val random = Random(0)
+        val bitmap = Bitmap.createBitmap(
+            IntArray(320 * 320) { random.nextInt() or 0xff000000.toInt() },
+            320, 320, Bitmap.Config.ARGB_8888,
         )
-
+        val bytes = try {
+            ByteArrayOutputStream().use { output ->
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                output.toByteArray()
+            }
+        } finally {
+            bitmap.recycle()
+        }
+        val dataUri = "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        assertTrue(dataUri.length > 300_000)
         val snapshot = BreenoRequestImages.captureText(
-            text = "data:image/png;base64,$encoded",
+            text = dataUri,
             source = "image.data",
         )
 
@@ -279,6 +286,24 @@ class BreenoRequestImagesTest {
 
         assertTrue(resolution is BreenoRequestImages.Resolution.Success)
         assertEquals(1, (resolution as BreenoRequestImages.Resolution.Success).images.size)
+        assertEquals(320, resolution.images.single().width)
+        assertEquals(320, resolution.images.single().height)
+    }
+
+    @Test
+    fun invalidInlineImageIsRejectedEvenWithinTheDataBudget() {
+        val snapshot = BreenoRequestImages.captureText(
+            text = "data:image/png;base64," + "A".repeat(300_000),
+            source = "image.data",
+        )
+
+        val resolution = BreenoRequestImages.resolve(null, snapshot)
+
+        assertTrue(resolution is BreenoRequestImages.Resolution.Failure)
+        assertEquals(
+            BreenoRequestImages.FailureCode.IMAGE_REFERENCE_UNREADABLE,
+            (resolution as BreenoRequestImages.Resolution.Failure).code,
+        )
     }
 
     @Test

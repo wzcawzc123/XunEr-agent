@@ -1271,6 +1271,10 @@ internal class AgentAppState(
         operation: String = AgentRuntimeWire.OP_CHAT,
         rewriteTargetMessageId: String? = null,
     ) {
+        if (modelPickerState.selectedModel?.contextWindow == null && modelPickerState.selectedModel != null) {
+            Toast.makeText(appContext, appContext.getString(R.string.context_no_model_limit), Toast.LENGTH_LONG).show()
+            return
+        }
         runConversationIds[runId] = conversationId
         currentRunId = runId
 
@@ -2605,7 +2609,6 @@ internal class AgentAppState(
         const val LEGACY_STOPPED_ERROR = "已停止"
         const val SYNTHETIC_STATUS_STOPPED = "eta_status:stopped"
         // 数据状态以较粗粒度发布，文字显现由独立的帧时钟连续推进。
-        // 这与 Kimi 将流式数据和视觉动画分层的做法一致。
         const val STREAM_UI_UPDATE_INTERVAL_MS = 80L
 
         fun emptyChatState(thinkingEnabled: Boolean): AgentChatHomeUiState =

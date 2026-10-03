@@ -54,7 +54,7 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
             )
             .build()
 
-        val call = AgentHttpClient.modelClient.newCall(httpRequest)
+        val call = AgentHttpClient.modelClient(request.purpose).newCall(httpRequest)
         val binding = runController.register { call.cancel() }
         try {
             runController.throwIfCancelled()

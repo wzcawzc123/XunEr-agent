@@ -114,9 +114,7 @@ internal sealed interface ProviderEvent {
 
     data class Usage(
         val usage: AgentTokenUsage,
-        val contextInputTokens: Int? = usage.inputTokens ?: usage.contextTokens?.let {
-            (it - (usage.outputTokens ?: 0)).coerceAtLeast(0)
-        },
+        val contextInputTokens: Int? = usage.inputTokens,
     ) : ProviderEvent
 
     data class HostedToolStarted(

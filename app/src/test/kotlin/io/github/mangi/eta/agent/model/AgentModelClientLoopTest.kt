@@ -792,6 +792,7 @@ class AgentModelClientLoopTest {
             baseUrl = "https://example.invalid/v1",
             apiKey = "test-key",
             model = "test-model",
+            contextWindow = 128_000,
             systemPrompt = "",
             browserTools = false,
         )

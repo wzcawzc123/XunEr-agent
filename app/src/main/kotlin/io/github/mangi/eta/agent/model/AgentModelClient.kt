@@ -50,6 +50,7 @@ internal object AgentModelClient {
                         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
                     thinkingEnabled = effort.enablesReasoning,
                     reasoningEffort = effort,
+                    autoCompactionEnabled = Prefs.isEnabled(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
                 )
             }
         }
@@ -67,6 +68,7 @@ internal object AgentModelClient {
             model = "gpt-5.5",
             modelDisplayName = "GPT-5.5",
             systemPrompt = BuiltinProviders.DEFAULT_SYSTEM_PROMPT,
+            autoCompactionEnabled = Prefs.isEnabled(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
             terminalTools = Prefs.isEnabled(Prefs.Keys.AGENT_TERMINAL_TOOLS),
             browserTools = Prefs.isEnabled(Prefs.Keys.AGENT_BROWSER_TOOLS),
             deviceDirectTools = Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_DIRECT_TOOLS),
@@ -227,6 +229,7 @@ internal object AgentModelClient {
         require(baseUrl.isNotBlank()) { "请先配置 API 地址" }
         require(apiKey.isNotBlank()) { "请先配置 API Key" }
         require(model.isNotBlank()) { "请先配置模型名" }
+        requireContextWindow()
         require(
             reasoningCapabilities?.mandatory != true ||
                 effectiveReasoningEffort != ReasoningEffort.OFF
@@ -281,10 +284,17 @@ internal object AgentModelClient {
         val reasoningCapabilities: ModelReasoningCapabilities? = null,
         val extraBodyJson: String = "",
         val customHeaders: List<CustomHeader> = emptyList(),
-        val customBody: List<CustomBody> = emptyList()
+        val customBody: List<CustomBody> = emptyList(),
+        val autoCompactionEnabled: Boolean = Prefs.Keys.BOOLEAN_DEFAULTS.getValue(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
     ) {
         val effectiveReasoningEffort: ReasoningEffort
             get() = reasoningEffort ?: ReasoningEffort.fromLegacy(thinkingEnabled)
+
+        fun requireContextWindow(): Int = contextWindow?.takeIf { it > 0 }
+            ?: throw AgentModelFailure(
+                "CONTEXT_WINDOW_REQUIRED", false,
+                "请先到设置 → 模型提供商，填写当前模型「${modelDisplayName.ifBlank { model }}」的上下文窗口大小（tokens）。",
+            )
     }
 
     @Serializable
