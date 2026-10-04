@@ -117,8 +117,8 @@ internal class AgentContextSession(
         return AgentConversationCodec.transcript(durable, 0, sensitiveIds())
     }
 
-    private companion object {
-        /** 触发压缩的窗口占用比例。fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出 25% 安全余量。 */
+    companion object {
+        /** 触发压缩的窗口占用比例。fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出 25% 安全余量。internal 供档位关系锁测试读取。 */
         const val TRIGGER_RATIO = 0.75
     }
 }

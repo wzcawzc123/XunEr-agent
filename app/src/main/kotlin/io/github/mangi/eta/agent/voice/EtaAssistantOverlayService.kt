@@ -536,6 +536,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         var status = state.status
         var phase = state.phase
         when (event) {
+            is AgentEvent.HistoryTrimmed -> Unit
             is AgentEvent.AssistantBlockStart -> {
                 messages = runMessageProjector.startAssistantBlock(runId, event, messages)
             }

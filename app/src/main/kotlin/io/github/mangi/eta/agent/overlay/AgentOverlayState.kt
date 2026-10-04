@@ -29,6 +29,7 @@ internal data class AgentOverlayState(
  */
 internal fun AgentOverlayState.applyEvent(event: AgentEvent): AgentOverlayState = when (event) {
     is AgentEvent.ContextCompaction -> copy(status = AgentOverlayStatus.RequestingModel, detailText = event.displayMessage)
+    is AgentEvent.HistoryTrimmed -> copy(detailText = "上下文已硬裁剪：丢弃 ${event.droppedMessages} 条较旧消息")
     is AgentEvent.RunStarted -> copy(
         phase = AgentOverlayPhase.RUNNING,
         status = AgentOverlayStatus.PreparingTools(event.toolCount),

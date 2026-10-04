@@ -11,7 +11,7 @@
 - [x] 补 F7 测试锁（AgentImageToolsTest：image_width/height + 坐标警告）
 
 ## M1 去掉负收益手段 + 失败可恢复性
-- [ ] M1.2 压缩失败可恢复：compact→trim→`CONTEXT_EXHAUSTED`；trim 触发发 `history_trimmed` 事件；TRIGGER_RATIO 与 Trimmer 0.95 档位关系用单测锁
+- [x] M1.2 压缩失败可恢复：compact 失败降级硬裁（不再整 run 毙命）→ 裁后仍超窗抛可恢复 `CONTEXT_EXHAUSTED`（带下一步指引）；新事件 `HistoryTrimmed`（wire 序列化+解析+UI 系统通知）；档位关系锁 TRIGGER 0.75 < TARGET 0.95 单测通过
 - [x] M1.3 memory_get 重复页拦截：同参同 revision 分页重读返回 `DUPLICATE_PAGE` + 强制 next_start_line；只比对最后一页（读其他页解锁）+ revision 进 key（写入解锁）
 - [ ] M1.4 敏感策略表单一真源 —— **⏸ 等用户确认产品立场**（会推翻"功能优先于隐私"取舍）
 - [ ] M1.1 删 6%/PIL 文案 —— **⏸ 按方案时序等 OCR 落地**（现为 locate 优先、像素分析后备）

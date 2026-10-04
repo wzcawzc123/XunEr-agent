@@ -2166,6 +2166,17 @@ internal class AgentAppState(
                 }
             }
 
+            is AgentEvent.HistoryTrimmed -> {
+                updateMessages(runId) { messages ->
+                    val id = "assistant-$runId-trim-${event.operationId}"
+                    messages.filterNot { it.id == id } + SystemNoticeMessageUi(
+                        id = id,
+                        code = SystemNoticeCode.ContextCompaction,
+                        detail = "上下文超出窗口：已硬裁剪丢弃 ${event.droppedMessages} 条较旧消息（摘要压缩未能完成或仍不足）。",
+                    )
+                }
+            }
+
             is AgentEvent.ModelRetryScheduled -> {
                 updateRunTrace(runId) { messages ->
                     runMessageProjector.scheduleModelRetry(runId, event, messages)

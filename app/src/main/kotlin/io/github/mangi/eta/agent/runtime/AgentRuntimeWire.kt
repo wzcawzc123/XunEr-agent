@@ -654,6 +654,12 @@ internal object AgentRuntimeWire {
                 putString("reason_code", event.reasonCode)
             }
 
+            is AgentEvent.HistoryTrimmed -> {
+                putString(KEY_TYPE, "history_trimmed")
+                putString("operation_id", event.operationId)
+                putInt("dropped_messages", event.droppedMessages)
+            }
+
             is AgentEvent.ModelRetryScheduled -> {
                 putString(KEY_TYPE, "model_retry_scheduled")
                 putInt("round", event.round)
@@ -799,6 +805,10 @@ internal object AgentRuntimeWire {
             tokensBefore = bundle.optionalInt("tokens_before"),
             tokensAfter = bundle.optionalInt("tokens_after"),
             reasonCode = bundle.getString("reason_code").orEmpty(),
+        )
+        "history_trimmed" -> AgentEvent.HistoryTrimmed(
+            operationId = bundle.getString("operation_id").orEmpty(),
+            droppedMessages = bundle.getInt("dropped_messages"),
         )
         "model_retry_scheduled" -> AgentEvent.ModelRetryScheduled(
             round = bundle.getInt("round"),

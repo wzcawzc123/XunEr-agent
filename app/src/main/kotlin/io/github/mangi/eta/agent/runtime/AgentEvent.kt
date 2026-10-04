@@ -34,6 +34,14 @@ internal sealed interface AgentEvent {
         }
     }
 
+    /** M1.2：窗口级硬裁剪(AgentHistoryTrimmer)真的丢了历史时必须可观测。 */
+    data class HistoryTrimmed(
+        val operationId: String,
+        val droppedMessages: Int,
+    ) : AgentEvent {
+        override fun toLogLine(): String = "history_trimmed dropped=$droppedMessages"
+    }
+
     data class RunStarted(
         val initialImages: Int,
         val initialImageBytes: Int,

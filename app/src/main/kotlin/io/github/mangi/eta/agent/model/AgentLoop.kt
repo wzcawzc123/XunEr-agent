@@ -104,7 +104,17 @@ internal class AgentLoop(
             precedingTools = roundTools
             toolCallValidator = AgentToolCallValidator(roundTools)
             publishTranscript()
-            if (purpose.allowsTools) context.compact()
+            if (purpose.allowsTools) {
+                try {
+                    context.compact()
+                } catch (failure: AgentModelFailure) {
+                    // M1.2 可恢复性：摘要压缩失败(如 CONTEXT_NO_REDUCTION)不再整 run 毙命，
+                    // 降级交给下方窗口级硬裁剪；只有裁剪后仍装不下才以 CONTEXT_EXHAUSTED
+                    // 可恢复错误收束。取消走 AgentRunCancelledException(RuntimeException)，
+                    // 不在本捕获范围；session 已发 ContextCompaction failed 事件，此处不重复。
+                    runController.throwIfCancelled()
+                }
+            }
             var requestMessages = AssistantScreenContextProjection.project(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
@@ -120,12 +130,27 @@ internal class AgentLoop(
                 val history = (systemCount until messages.length()).map {
                     AgentConversationCodec.fromJsonObject(messages.getJSONObject(it))
                 }
-                val trimmed = AgentHistoryTrimmer.trim(history, trimWindow, systemEstimate).messages
+                val trimOutcome = AgentHistoryTrimmer.trim(history, trimWindow, systemEstimate)
+                if (trimOutcome.trimmed) {
+                    // M1.2：硬裁剪必须可观测 —— UI/日志能区分“摘要压缩”与“硬裁剪丢历史”。
+                    onEvent(AgentEvent.HistoryTrimmed(operationId, trimOutcome.droppedMessages))
+                }
                 while (messages.length() > systemCount) messages.remove(messages.length() - 1)
-                trimmed.forEach { messages.put(AgentConversationCodec.toJsonObject(it)) }
+                trimOutcome.messages.forEach { messages.put(AgentConversationCodec.toJsonObject(it)) }
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )
+                if (AgentContextBudget.rawEstimate(requestMessages, roundTools) >= trimWindow) {
+                    // 摘要+硬裁都救不回来(如 system 本身接近/超过窗口)：返回可恢复的结构化错误，
+                    // 不发必然失败的请求，也不让任务死得不明不白。
+                    throw AgentModelFailure(
+                        "CONTEXT_EXHAUSTED",
+                        false,
+                        "上下文在摘要压缩与硬裁剪后仍超过窗口(约 " +
+                            "${AgentContextBudget.rawEstimate(requestMessages, roundTools)} ≥ $trimWindow)。" +
+                            "请新开会话继续任务，或先手动压缩历史；本会话记录未丢失。",
+                    )
+                }
             }
             var roundInputTokens: Int? = null
             val reasoningLengthBeforeRound = accumulatedReasoning.length
