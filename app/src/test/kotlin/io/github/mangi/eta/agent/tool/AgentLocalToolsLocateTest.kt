@@ -120,10 +120,10 @@ class AgentLocalToolsLocateTest {
         )
 
         val payload = JSONObject(tools.execute(call("""{"query":"打开"}""")).content)
-        assertTrue(payload.getBoolean("ok"))
-        assertEquals("ocr", payload.getString("source"))
-        assertEquals(1, payload.getInt("match_count"))
-        assertTrue(payload.getString("note").contains("OCR"))
+        assertTrue("payload=$payload", payload.getBoolean("ok"))
+        assertEquals("payload=$payload", "ocr", payload.getString("source"))
+        assertEquals("payload=$payload", 1, payload.getInt("match_count"))
+        assertTrue("payload=$payload", payload.getString("note").contains("OCR"))
         // 坐标断言用载荷自带的 image/screen 尺寸自洽计算（Robolectric 屏幕尺寸不可预知）
         val scale = payload.getInt("screen_width").toFloat() / payload.getInt("image_width")
         val match = payload.getJSONArray("matches").getJSONObject(0)

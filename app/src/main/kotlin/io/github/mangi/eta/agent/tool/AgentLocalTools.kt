@@ -680,7 +680,8 @@ internal class AgentLocalTools(
 
     /** OCR 降级通道：走与 observe 相同的 provider 注入缝（可测）；返回 null = OCR 不可用。 */
     private fun locateViaOcr(query: String): OcrOutcome? {
-        val screen = runCatching { deviceController.screenDimensions() }.getOrNull() ?: return null
+        // 屏幕尺寸只用于换算：拿不到（无无障碍且 root 被拒）时按 1:1 降级，不放弃 OCR。
+        val screen = runCatching { deviceController.screenDimensions() }.getOrNull()
         val screenshotObservation = screenObservationProvider?.invoke(
             AgentScreenObservationContract.Options(
                 includeScreenshot = true,
@@ -707,8 +708,8 @@ internal class AgentLocalTools(
             }
             val rawMatches = ScreenLocator.locate(candidates, query)
             // 截图按显示分辨率采集，常态 1:1；分辨率不一致时防御性按比例换算到 screen 坐标。
-            val scaleX = screen.first.toFloat() / bitmap.width
-            val scaleY = screen.second.toFloat() / bitmap.height
+            val scaleX = screen?.first?.toFloat()?.div(bitmap.width) ?: 1f
+            val scaleY = screen?.second?.toFloat()?.div(bitmap.height) ?: 1f
             val matches = if (scaleX == 1f && scaleY == 1f) {
                 rawMatches
             } else {
@@ -727,8 +728,8 @@ internal class AgentLocalTools(
                 matches = matches,
                 imageWidth = bitmap.width,
                 imageHeight = bitmap.height,
-                screenWidth = screen.first,
-                screenHeight = screen.second,
+                screenWidth = screen?.first ?: bitmap.width,
+                screenHeight = screen?.second ?: bitmap.height,
             )
         } finally {
             bitmap.recycle()
