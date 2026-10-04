@@ -1,8 +1,13 @@
 package io.github.mangi.eta.agent.tool
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import io.github.mangi.eta.agent.device.RootShellDeviceController
+import io.github.mangi.eta.agent.media.AgentImageCodec
+import io.github.mangi.eta.agent.media.RecognizedText
+import io.github.mangi.eta.agent.media.ScreenTextRecognizer
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.core.AgentLogger
@@ -15,6 +20,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * locate_on_screen 端到端（provider 注入，CI 侧 Robolectric 验证）。
@@ -23,6 +29,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AgentLocalToolsLocateTest {
 
     @Test
@@ -86,6 +93,46 @@ class AgentLocalToolsLocateTest {
         tools.close()
     }
 
+    @Test
+    fun treeMissFallsBackToOcrAndScalesCenterToScreen() {
+        // M2.1 OCR 通道：树里没有 ≠ 屏幕上没有（KSU Compose 列表实证场景）。
+        val bitmap = Bitmap.createBitmap(1440, 3216, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(Color.rgb(0x10, 0x20, 0x30))
+        val image = try {
+            AgentImageCodec.fromScreenBitmap(bitmap, source = "screen")
+        } finally {
+            bitmap.recycle()
+        }
+        val tools = AgentLocalTools(
+            context = RuntimeEnvironment.getApplication() as Context,
+            logger = NoOpLogger,
+            rootAvailable = { false },
+            screenObservationProvider = { options ->
+                if (options.includeScreenshot) observation("o-shot", nodes = emptyList(), image = image)
+                else observation("o-tree-empty", nodes = emptyList())
+            },
+            textRecognizerFactory = {
+                object : ScreenTextRecognizer {
+                    override fun recognize(bitmap: Bitmap): List<RecognizedText> =
+                        listOf(RecognizedText("打开", Rect(170, 2800, 270, 2914)))
+                }
+            },
+        )
+
+        val payload = JSONObject(tools.execute(call("""{"query":"打开"}""")).content)
+        assertTrue(payload.getBoolean("ok"))
+        assertEquals("ocr", payload.getString("source"))
+        assertEquals(1, payload.getInt("match_count"))
+        assertTrue(payload.getString("note").contains("OCR"))
+        // 坐标断言用载荷自带的 image/screen 尺寸自洽计算（Robolectric 屏幕尺寸不可预知）
+        val scale = payload.getInt("screen_width").toFloat() / payload.getInt("image_width")
+        val match = payload.getJSONArray("matches").getJSONObject(0)
+        assertEquals((220f * scale).toInt(), match.getInt("center_x"))
+        assertEquals((2857f * scale).toInt(), match.getInt("center_y"))
+        assertEquals(0, match.getInt("node_index"))
+        tools.close()
+    }
+
     private fun call(args: String) = AgentModelClient.ToolCall(
         id = "call-locate",
         name = "locate_on_screen",
@@ -112,10 +159,11 @@ class AgentLocalToolsLocateTest {
     private fun observation(
         id: String,
         nodes: List<RootShellDeviceController.UiNode>,
+        image: AgentModelClient.ModelImage? = null,
     ): RootShellDeviceController.Observation =
         RootShellDeviceController.Observation(
             content = """{"ok":true,"tool":"observe_screen","observation_id":"$id"}""",
-            image = null,
+            image = image,
             elementObservation = RootShellDeviceController.ElementObservation(
                 id = id,
                 source = RootShellDeviceController.ElementSource.ACCESSIBILITY,

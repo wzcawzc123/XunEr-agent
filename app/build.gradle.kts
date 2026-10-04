@@ -134,6 +134,7 @@ dependencies {
     implementation(libs.miuix.nav)
     implementation(libs.miuix.preference)
     implementation(libs.material.icons.extended)
+    implementation(libs.text.recognition.chinese)
     implementation(libs.androidx.navigationevent)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

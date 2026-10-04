@@ -6,6 +6,11 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.SystemClock
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import io.github.mangi.eta.agent.media.MlKitScreenTextRecognizer
+import io.github.mangi.eta.agent.media.ScreenTextRecognizer
 import io.github.mangi.eta.agent.browser.AgentBrowserSession
 import io.github.mangi.eta.agent.device.DeviceControlUnavailableException
 import io.github.mangi.eta.agent.device.RootAccess
@@ -84,6 +89,7 @@ internal class AgentLocalTools(
     private val screenObservationProvider: (
         (AgentScreenObservationContract.Options) -> RootShellDeviceController.Observation
     )? = null,
+    private val textRecognizerFactory: () -> ScreenTextRecognizer = { MlKitScreenTextRecognizer() },
     private val beforeToolExecution: (String) -> ToolExecutionDecision = {
         ToolExecutionDecision.Allow
     },
@@ -107,6 +113,7 @@ internal class AgentLocalTools(
         rootAvailable = rootAvailable,
     )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
+    private val textRecognizerLazy = lazy(textRecognizerFactory)
     private val terminalController = RootShellTerminalController(
         logger = logger,
         rootAvailable = rootAvailable,
@@ -153,6 +160,7 @@ internal class AgentLocalTools(
         AgentBrowserSession.interruptAgentAction(browserRunId)
         terminalController.interruptAll()
         rootCommandExecutor.close()
+        if (textRecognizerLazy.isInitialized()) runCatching { textRecognizerLazy.value.close() }
         githubSkillSource?.close()
         inspectedGitHubSnapshots.clear()
     }
@@ -567,13 +575,9 @@ internal class AgentLocalTools(
         )
         val elementObservation = observation.elementObservation
         val nodes = elementObservation?.nodes.orEmpty()
-        if (nodes.isEmpty()) {
-            return errorResult(
-                "LOCATE_UNAVAILABLE",
-                "当前拿不到 UI 节点树（无障碍未连接或快照为空）；请先 observe_screen 确认状态",
-            )
-        }
-        val matches = ScreenLocator.locate(
+
+        // 第 1 级：树匹配（节点在树里 → 最快、带 observation_id 可走 tap_element）
+        val treeMatches = if (nodes.isEmpty()) emptyList() else ScreenLocator.locate(
             candidates = nodes.map { node ->
                 ScreenLocator.Candidate(
                     index = node.index,
@@ -589,13 +593,33 @@ internal class AgentLocalTools(
             },
             query = query,
         )
-        if (matches.isEmpty()) {
-            return errorResult(
-                "LOCATE_MISS",
-                "在 ${nodes.size} 个节点里没有匹配“${query.trim()}”的 text/desc/viewId；" +
-                    "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
-            )
+
+        // 第 2 级：OCR（树里没有 ≠ 屏幕上没有；对截图像素直接找文字 bbox）
+        val ocr = if (treeMatches.isEmpty()) locateViaOcr(query) else null
+
+        if (treeMatches.isEmpty()) {
+            if (ocr == null) {
+                return if (nodes.isEmpty()) {
+                    errorResult(
+                        "LOCATE_UNAVAILABLE",
+                        "当前既拿不到 UI 节点树也拿不到截图（无障碍未连接且 root 不可用）；请先 observe_screen 确认状态",
+                    )
+                } else {
+                    errorResult(
+                        "LOCATE_MISS",
+                        "树（${nodes.size} 节点）无匹配且 OCR 不可用；改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
+                    )
+                }
+            }
+            if (ocr.matches.isEmpty()) {
+                return errorResult(
+                    "LOCATE_MISS",
+                    "树（${nodes.size} 节点）与 OCR 都没有匹配“${query.trim()}”的文本；" +
+                        "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
+                )
+            }
         }
+
         // 与 observe_screen 同一套发布与新鲜度记账：结果可直接用于 tap_element / tap
         publishedObservation.set(
             PublishedObservation(
@@ -606,14 +630,26 @@ internal class AgentLocalTools(
         observedContentVersion = ++contentVersion
         observedPackage = deviceController.focusedPackageName()
         observedScreen = runCatching { deviceController.screenDimensions() }.getOrNull()
+
+        val matches = treeMatches.ifEmpty { ocr!!.matches }
+        val source = if (treeMatches.isNotEmpty()) "ui_tree" else "ocr"
         val payload = JSONObject()
             .put("ok", true)
             .put("tool", "locate_on_screen")
             .put("query", query.trim())
+            .put("source", source)
             .put("observation_id", elementObservation?.id ?: "")
             .put("node_count", nodes.size)
             .put("match_count", matches.size)
             .put("coordinate_space", "screen")
+        if (source == "ocr") {
+            payload
+                .put("note", "OCR 源：bbox 来自截图像素并已按 image→screen 比例换算；node_index 为识别块序号而非无障碍节点")
+                .put("image_width", ocr!!.imageWidth)
+                .put("image_height", ocr.imageHeight)
+                .put("screen_width", ocr.screenWidth)
+                .put("screen_height", ocr.screenHeight)
+        }
         val matchesJson = JSONArray()
         matches.forEach { match ->
             matchesJson.put(
@@ -633,6 +669,77 @@ internal class AgentLocalTools(
         payload.put("matches", matchesJson)
         return payload.toString()
     }
+
+    private data class OcrOutcome(
+        val matches: List<ScreenLocator.Match>,
+        val imageWidth: Int,
+        val imageHeight: Int,
+        val screenWidth: Int,
+        val screenHeight: Int,
+    )
+
+    /** OCR 降级通道：走与 observe 相同的 provider 注入缝（可测）；返回 null = OCR 不可用。 */
+    private fun locateViaOcr(query: String): OcrOutcome? {
+        val screen = runCatching { deviceController.screenDimensions() }.getOrNull() ?: return null
+        val screenshotObservation = screenObservationProvider?.invoke(
+            AgentScreenObservationContract.Options(
+                includeScreenshot = true,
+                includeUiTree = false,
+                maxNodes = 1,
+            ),
+        ) ?: deviceController.observe(includeScreenshot = true, includeUiTree = false, maxNodes = 1)
+        val image = screenshotObservation.image ?: return null
+        val bitmap = decodeImageBitmap(image.reference) ?: return null
+        return try {
+            val recognized = textRecognizerLazy.value.recognize(bitmap) ?: return null
+            val candidates = recognized.mapIndexed { index, item ->
+                ScreenLocator.Candidate(
+                    index = index,
+                    text = item.text,
+                    desc = "",
+                    viewId = "",
+                    left = item.bounds.left,
+                    top = item.bounds.top,
+                    right = item.bounds.right,
+                    bottom = item.bounds.bottom,
+                    clickable = false,
+                )
+            }
+            val rawMatches = ScreenLocator.locate(candidates, query)
+            // 截图按显示分辨率采集，常态 1:1；分辨率不一致时防御性按比例换算到 screen 坐标。
+            val scaleX = screen.first.toFloat() / bitmap.width
+            val scaleY = screen.second.toFloat() / bitmap.height
+            val matches = if (scaleX == 1f && scaleY == 1f) {
+                rawMatches
+            } else {
+                rawMatches.map { match ->
+                    match.copy(
+                        left = (match.left * scaleX).toInt(),
+                        top = (match.top * scaleY).toInt(),
+                        right = (match.right * scaleX).toInt(),
+                        bottom = (match.bottom * scaleY).toInt(),
+                        centerX = (match.centerX * scaleX).toInt(),
+                        centerY = (match.centerY * scaleY).toInt(),
+                    )
+                }
+            }
+            OcrOutcome(
+                matches = matches,
+                imageWidth = bitmap.width,
+                imageHeight = bitmap.height,
+                screenWidth = screen.first,
+                screenHeight = screen.second,
+            )
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun decodeImageBitmap(reference: String): Bitmap? = runCatching {
+        val base64 = reference.substringAfter("base64,", reference)
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
 
     private fun tap(args: JSONObject): String {
         ensureCoordinateFreshness()
