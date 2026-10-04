@@ -22,7 +22,7 @@
 - [ ] M2.1 OCR 通道（ML Kit，+15-20MB）—— **⏸ 等用户拍板体积**，v3.5.1 目标
 - [ ] M2.1 region 参数 —— ❌ 暂无需求，不做
 - [ ] M2.2 坐标锚定收紧 —— ❌ 未做；**只做减半版**（拦无观察裸坐标），等 locate 真机反馈定
-- [ ] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 显式回归锁（preserveOriginal 路径）
+- [x] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 回归锁：契约构建抽为纯函数 buildCoordinateContract + CoordinateContractTest 3 例（本地绿）；三层等式=codec 不缩放锁→构造点→契约锁
 
 ## M3 工具层结构化与可维护性（选择性）
 - [ ] M3.1 拆 AgentLocalTools —— ❌ 搁置（用户同意；有痛点再动）

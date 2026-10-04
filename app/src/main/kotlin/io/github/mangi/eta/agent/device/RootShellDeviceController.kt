@@ -177,36 +177,7 @@ internal class RootShellDeviceController(
                         }
                     )
             )
-            .put(
-                "coordinate_contract",
-                if (coordinateSpace == null) {
-                    JSONObject()
-                        .put("default_coordinate_space", "screen")
-                        .put("note", "未附加截图，坐标工具使用真实设备屏幕坐标")
-                } else {
-                    JSONObject()
-                        .put("default_coordinate_space", "screenshot")
-                        .put(
-                            "screenshot",
-                            JSONObject()
-                                .put("width", coordinateSpace.screenshotWidth)
-                                .put("height", coordinateSpace.screenshotHeight)
-                        )
-                        .put(
-                            "screen",
-                            JSONObject()
-                                .put("width", coordinateSpace.screenWidth)
-                                .put("height", coordinateSpace.screenHeight)
-                        )
-                        .put(
-                            "scale_to_screen",
-                            JSONObject()
-                                .put("x", coordinateSpace.screenWidth.toDouble() / coordinateSpace.screenshotWidth)
-                                .put("y", coordinateSpace.screenHeight.toDouble() / coordinateSpace.screenshotHeight)
-                        )
-                        .put("note", "tap、tap_area、long_press、swipe 默认接收截图像素坐标；ui_nodes.center 是 screen 坐标")
-                }
-            )
+            .put("coordinate_contract", buildCoordinateContract(coordinateSpace))
             .put("focus", focus)
             .put("observation_id", elementObservation?.id ?: JSONObject.NULL)
             .put("observation_source", elementObservation?.source?.wireName ?: JSONObject.NULL)
@@ -1424,3 +1395,38 @@ internal class RootShellDeviceController(
         private val ROOT_OBSERVATION_IDS = AtomicLong(0)
     }
 }
+
+/**
+ * M2.3 契约锁：coordinate_contract 的纯函数构建。
+ * observe() 里 CoordinateSpace 由**编码后图片**的 width/height 构建（preserveOriginal
+ * 不缩放，AgentImageCodecTest 已锁），本函数再由 CoordinateSpace 构建契约 —— 三层相等
+ * 即"发出图尺寸 ≡ 契约截图尺寸"。抽出为纯函数以便本地单测锁定。
+ */
+internal fun buildCoordinateContract(coordinateSpace: RootShellDeviceController.CoordinateSpace?): JSONObject =
+    if (coordinateSpace == null) {
+        JSONObject()
+            .put("default_coordinate_space", "screen")
+            .put("note", "未附加截图，坐标工具使用真实设备屏幕坐标")
+    } else {
+        JSONObject()
+            .put("default_coordinate_space", "screenshot")
+            .put(
+                "screenshot",
+                JSONObject()
+                    .put("width", coordinateSpace.screenshotWidth)
+                    .put("height", coordinateSpace.screenshotHeight)
+            )
+            .put(
+                "screen",
+                JSONObject()
+                    .put("width", coordinateSpace.screenWidth)
+                    .put("height", coordinateSpace.screenHeight)
+            )
+            .put(
+                "scale_to_screen",
+                JSONObject()
+                    .put("x", coordinateSpace.screenWidth.toDouble() / coordinateSpace.screenshotWidth)
+                    .put("y", coordinateSpace.screenHeight.toDouble() / coordinateSpace.screenshotHeight)
+            )
+            .put("note", "tap、tap_area、long_press、swipe 默认接收截图像素坐标；ui_nodes.center 是 screen 坐标")
+    }
