@@ -267,6 +267,52 @@ class AgentContextRecoveryTest {
         assertEquals("只有首轮正常发出", 1, chatRounds)
     }
 
+
+    // ---- 审查探针（v3.4.0-audit）：新鲜 run 超窗时 round1 的兜底顺序 ----
+
+    @Test
+    fun freshRunOversizedHistorySendsRound1UntrimmedAndTrimsFromRound2() {
+        // 审查问题 C：AgentLoop 的硬裁门是 `usageObserved && estimate>=trimWindow`，
+        // usageObserved 每 run 从 false 起步 → 预期 round1 不裁、round2（拿到 usage 后）才裁。
+        // 本测试锁住这一真实行为，防回归的同时把 C 从"推理"变"实证"。
+        // 窗口必须大于 Trimmer 的 TOOL_SCHEMA_RESERVE(24k)+system，否则 trim 必然装不下。
+        val config = config.copy(contextWindow = 30_000)
+        var chatRounds = 0
+        var largestRequest = 0
+        val events = mutableListOf<AgentEvent>()
+        val result = AgentModelClient.complete(
+            config, "继续",
+            AgentModelClient.ToolExecutor { AgentModelClient.ToolResult("""{"ok":true}""") },
+            history = history(),
+            onEvent = events::add,
+            provider = provider { request, emit ->
+                if (request.purpose == ProviderRequestPurpose.COMPACTION) {
+                    response("此前任务已完成。")
+                } else {
+                    chatRounds++
+                    largestRequest = maxOf(largestRequest, request.messages.toString().length)
+                    if (chatRounds == 1) {
+                        emit(ProviderEvent.Usage(AgentTokenUsage(inputTokens = 480, outputTokens = 10)))
+                        toolCallResponse("probe-1")
+                    } else {
+                        response("完成")
+                    }
+                }
+            },
+        )
+        assertEquals("完成", result.content)
+        assertTrue("round1/2 都应发出", chatRounds >= 2)
+        assertTrue(
+            "round1 应携带未裁剪的巨型历史(>=700k chars)，实测 largest=$largestRequest",
+            largestRequest >= 700_000,
+        )
+        val trims = events.filterIsInstance<AgentEvent.HistoryTrimmed>()
+        assertTrue(
+            "拿到 usage 后 round2 触发硬裁，实测 trims=${trims.size}",
+            trims.isNotEmpty(),
+        )
+    }
+
     private fun toolCallResponse(id: String) = ProviderResponse(
         JSONObject()
             .put("role", "assistant")
