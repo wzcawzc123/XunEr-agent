@@ -51,5 +51,8 @@ class AgentScreenObservationContractTest {
         assertTrue(note.contains("不要用 tap_element"))
         assertTrue(note.contains("coordinate_contract"))
         assertTrue(note.contains("重新 observe_screen"))
+        assertTrue(note.contains("像素分析"))
+        assertTrue(note.contains("screencap"))
+        assertTrue(note.contains("系统性偏左上"))
     }
 }

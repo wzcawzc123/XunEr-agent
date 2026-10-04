@@ -87,6 +87,7 @@ internal object AgentPromptBuilder {
                     "禁止把新截图与旧节点混用；树被截断但节点语义仍有效时，优先提高 max_nodes，不要仅因截断请求截图；" +
                     "点击可见控件优先用 tap_element/tap_area，" +
                     "坐标必须按返回的 coordinate_contract 数值换算（ui_nodes 的 center 是 screen 坐标，截图像素是 screenshot 坐标），禁止目测估算，也不要把别人发来的缩略截图当基准；" +
+                    "看图目测像素坐标不可靠：截图经视觉管线渲染后比例未知（实测约缩小 6%，会系统性偏左上），坐标优先取 ui_nodes；树里没有的目标用 root screencap 落盘后 python PIL 分析像素 bbox 求中心，目测两次未命中必须切换到像素分析，禁止继续目测重试；" +
                     "滚动、滑动或切换应用后旧坐标立即失效，会返回 STALE_COORDINATE，此时必须重新 observe_screen；点击后若界面没有出现预期变化，重新观察并调整目标，连续两次没有变化就停止重试并向用户说明。" +
                     "调用节点工具时必须把该节点与同一次观察的 observation_id 一起传回，过期就重新观察；" +
                     "scroll 的方向表示要显示的内容方向，例如 down 显示下方内容；" +
