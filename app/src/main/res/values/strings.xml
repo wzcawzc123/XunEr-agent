@@ -1216,6 +1216,9 @@
   <string name="data_backup_warning_title">Keep the backup file safe</string>
   <string name="data_backup_warning_summary">The file contains provider API keys. It only includes conversations, model providers, and MEMORY.md.</string>
   <string name="data_backup_export">Export data</string>
+  <string name="data_diagnostics_export">Export diagnostics</string>
+  <string name="data_diagnostics_export_summary">Export recent tool sequences and system events (sensitive tools redacted)</string>
+  <string name="data_diagnostics_exported">Diagnostics exported</string>
   <string name="data_backup_export_summary">Save conversations, providers, and MEMORY.md to a JSON file</string>
   <string name="data_backup_import">Import data</string>
   <string name="data_backup_import_summary">Replace conversations, providers, and MEMORY.md from a backup file</string>

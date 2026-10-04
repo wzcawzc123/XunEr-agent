@@ -20,14 +20,15 @@
 - [x] M2.1 locate_on_screen 树匹配通道（ScreenLocator 纯匹配 + 快照自刷新 + observe 同套记账 + LOCATE_MISS/LOCATE_UNAVAILABLE）
 - [x] M2.1 引导接入（稀疏树 locate 优先）+ 图标/requirements/trace 注册
 - [x] M2.1 OCR 通道（**v3.6.4 真机验收通过 2026-10-04**）：`source=ocr` 精确命中 score0.98、1:1 载荷、center 直接点击生效；根因=R8 裁 registrar 无参构造（proguard 一行修复）；ML Kit 中文离线 bundled（+约20MB）
-- [ ] M2.1 region 参数 —— ❌ 暂无需求，不做
-- [ ] M2.2 坐标锚定收紧 —— ❌ 未做；**只做减半版**（拦无观察裸坐标），等 locate 真机反馈定
+- [x] LOCATE_MISS 换词引导（小尾巴，v3.7.0）：提示"优先改写为屏幕上实际可见的原文重查"
+- [x] M2.1 region 参数 —— ❌ 暂无需求，不做（终审）
+- [x] M2.2 坐标锚定收紧（减半版，v3.7.0）：零观察点击 → `UNANCHORED_COORDINATE` 判链首+独立码（M3.3 可统计误伤）；审查确认 swipe 刻意不覆盖（连滑翻页合法）、契约测试补 observe 保原意、locate→tap 共享记账天然放行
 - [x] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 回归锁：契约构建抽为纯函数 buildCoordinateContract + CoordinateContractTest 3 例（本地绿）；三层等式=codec 不缩放锁→构造点→契约锁
 
 ## M3 工具层结构化与可维护性（选择性）
 - [ ] M3.1 拆 AgentLocalTools —— ❌ 搁置（用户同意；有痛点再动）
 - [ ] M3.2 浏览器等待可取消（超时预算 + 可取消 future）—— ❌ 低优先级
-- [ ] M3.3 结构化诊断导出（run 序列/错误码/trim·compact 标记，不含敏感原文）—— 待做
+- [x] M3.3 结构化诊断导出（v3.7.0）：数据源=conversations+conversation_messages 全量（审查否掉 runtime_archive_runs——只存 handoff 运行）；敏感工具按 AgentSensitiveToolPolicy 整段脱敏；上下文口径如实（只导持久化 system_notice，不谎报硬裁剪）；复用 DataBackupScreen 导出流，三语言
 
 ## M4 Hook/无障碍/语音
 - [ ] M4 拆大文件/ROM 整理 —— ❌ 搁置（用户同意）

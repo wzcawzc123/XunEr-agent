@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,7 @@ internal fun DataBackupScreen(
     onBack: () -> Unit,
     onExport: suspend (OutputStream) -> EtaBackupSummary,
     onImport: suspend (InputStream) -> EtaBackupSummary,
+    onExportDiagnostics: suspend (OutputStream) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -88,6 +90,30 @@ internal fun DataBackupScreen(
                 // 导出中途失败（例如超过 64 MiB 上限）时清掉残留文件：
                 // 流式写盘意味着失败时目标文件里可能已经留下了部分数据，
                 // 留着会被误当成一份可用的备份。
+                runCatching { context.contentResolver.delete(uri, null, null) }
+                showFailure(throwable)
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    val diagnosticsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            try {
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: error(context.getString(R.string.data_backup_file_open_failed))
+                output.use { onExportDiagnostics(it) }
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.data_diagnostics_exported),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (throwable: Throwable) {
                 runCatching { context.contentResolver.delete(uri, null, null) }
                 showFailure(throwable)
             } finally {
@@ -153,6 +179,25 @@ internal fun DataBackupScreen(
                     },
                     onClick = {
                         importLauncher.launch(arrayOf("application/json", "text/plain"))
+                    },
+                )
+                EtaPreferenceDivider(hasLeading = true)
+                EtaArrowPreference(
+                    title = stringResource(R.string.data_diagnostics_export),
+                    summary = if (busy) {
+                        stringResource(R.string.data_backup_working)
+                    } else {
+                        stringResource(R.string.data_diagnostics_export_summary)
+                    },
+                    enabled = !busy,
+                    startAction = {
+                        BackupIcon(
+                            icon = Icons.Rounded.Insights,
+                            loading = busy,
+                        )
+                    },
+                    onClick = {
+                        diagnosticsLauncher.launch(defaultDiagnosticsFileName())
                     },
                 )
             }
@@ -238,3 +283,6 @@ private fun BackupIcon(icon: ImageVector, loading: Boolean) {
 
 private fun defaultBackupFileName(): String =
     "Eta-backup-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.eta-backup.json"
+
+private fun defaultDiagnosticsFileName(): String =
+    "Eta-diag-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.txt"

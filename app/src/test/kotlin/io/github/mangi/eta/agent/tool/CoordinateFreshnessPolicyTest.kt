@@ -31,8 +31,18 @@ class CoordinateFreshnessPolicyTest {
     }
 
     @Test
-    fun withoutAnyObservationCoordinatesAreAllowed() {
-        assertEquals(CoordinateFreshnessPolicy.Verdict.ALLOW, verdict(-1, 99))
+    fun withoutAnyObservationCoordinatesAreUnanchored() {
+        // M2.2 减半版（2026-10-04 决策，推翻旧"未观察即放行"契约）：
+        // 零观察 = 坐标无来源 → UNANCHORED 独立码，便于 M3.3 诊断统计误伤。
+        assertEquals(CoordinateFreshnessPolicy.Verdict.UNANCHORED, verdict(-1, 99))
+    }
+
+    @Test
+    fun unanchoredTakesPrecedenceOverEveryStaleSignal() {
+        assertEquals(
+            CoordinateFreshnessPolicy.Verdict.UNANCHORED,
+            verdict(-1, 99, "me.example.app", "com.other.app"),
+        )
     }
 
     @Test

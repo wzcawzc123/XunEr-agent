@@ -52,6 +52,7 @@ import io.github.mangi.eta.data.model.ModelReasoningCapabilities
 import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
 import io.github.mangi.eta.data.repository.EtaBackupRepository
+import io.github.mangi.eta.data.repository.EtaDiagnosticsReport
 import io.github.mangi.eta.data.repository.EtaBackupSummary
 import io.github.mangi.eta.data.repository.ModelRepository
 import io.github.mangi.eta.data.repository.ProviderRepository
@@ -381,6 +382,10 @@ internal class AgentAppState(
 
     suspend fun exportBackup(output: OutputStream): EtaBackupSummary =
         EtaBackupRepository.export(appContext, output)
+
+    /** M3.3 结构化诊断导出（工具序列/系统事件/错误汇总，敏感工具已脱敏）。 */
+    suspend fun exportDiagnostics(output: OutputStream) =
+        EtaDiagnosticsReport.export(appContext, output)
 
     suspend fun importBackup(input: InputStream): EtaBackupSummary {
         val locallyBusy = withContext(Dispatchers.Main.immediate) {

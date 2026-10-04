@@ -654,6 +654,7 @@ fun AgentAppRoot(
                     onBack = ::popRoute,
                     onExport = agentState::exportBackup,
                     onImport = agentState::importBackup,
+                    onExportDiagnostics = { output -> agentState.exportDiagnostics(output) },
                 )
             }
             entry<AppRoute.Memory>(swipeDismiss = swipeDismiss) {

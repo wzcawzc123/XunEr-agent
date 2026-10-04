@@ -244,7 +244,7 @@ internal class AgentLocalTools(
             textResult(
                 errorResult(
                     code = when (throwable) {
-                        is StaleCoordinateException -> "STALE_COORDINATE"
+                        is StaleCoordinateException -> throwable.code
                         is InvalidToolArgumentException -> "INVALID_ARGUMENT"
                         is DeviceControlUnavailableException -> "ACCESSIBILITY_UNAVAILABLE"
                         else -> "TOOL_ERROR"
@@ -618,7 +618,8 @@ internal class AgentLocalTools(
                 return errorResult(
                     "LOCATE_MISS",
                     "树（${nodes.size} 节点）与 OCR 都没有匹配“${query.trim()}”的文本；" +
-                        "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
+                        "优先改写为屏幕上实际可见的原文（按钮/标签文字）重查，或提高 max_nodes、" +
+                        "observe_screen 查看树，禁止凭空猜坐标",
                 )
             }
         }
@@ -1710,7 +1711,10 @@ internal class AgentLocalTools(
 
     private class InvalidToolArgumentException(message: String) : IllegalArgumentException(message)
 
-    private class StaleCoordinateException(message: String) : IllegalStateException(message)
+    private class StaleCoordinateException(
+        message: String,
+        val code: String = "STALE_COORDINATE",
+    ) : IllegalStateException(message)
 
     private fun ensureCoordinateFreshness() {
         val verdict = CoordinateFreshnessPolicy.evaluate(
@@ -1722,7 +1726,14 @@ internal class AgentLocalTools(
             currentScreen = runCatching { deviceController.screenDimensions() }.getOrNull(),
         )
         if (verdict != CoordinateFreshnessPolicy.Verdict.ALLOW) {
-            throw StaleCoordinateException(CoordinateFreshnessPolicy.message(verdict))
+            throw StaleCoordinateException(
+                message = CoordinateFreshnessPolicy.message(verdict),
+                code = if (verdict == CoordinateFreshnessPolicy.Verdict.UNANCHORED) {
+                    "UNANCHORED_COORDINATE"
+                } else {
+                    "STALE_COORDINATE"
+                },
+            )
         }
     }
 

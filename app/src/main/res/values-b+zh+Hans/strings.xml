@@ -1187,6 +1187,9 @@
   <string name="data_backup_warning_title">请妥善保管备份文件</string>
   <string name="data_backup_warning_summary">文件包含模型提供商 API Key，仅包含对话、模型提供商和 MEMORY.md。</string>
   <string name="data_backup_export">导出数据</string>
+  <string name="data_diagnostics_export">导出诊断</string>
+  <string name="data_diagnostics_export_summary">导出最近工具序列与系统事件（敏感工具已脱敏）</string>
+  <string name="data_diagnostics_exported">诊断已导出</string>
   <string name="data_backup_export_summary">将对话、模型提供商和 MEMORY.md 保存为 JSON 文件</string>
   <string name="data_backup_import">导入数据</string>
   <string name="data_backup_import_summary">从备份文件替换对话、模型提供商和 MEMORY.md</string>

@@ -154,8 +154,28 @@ class AgentLocalToolsPermissionTest {
     }
 
     @Test
+    fun tapWithoutAnyObservationIsRejectedAsUnanchored() {
+        // M2.2 减半版：本 run 从未 observe/locate → 坐标无来源，独立码拒绝。
+        val tools = tools()
+        val result = tools.execute(
+            AgentModelClient.ToolCall(
+                id = "call-unanchored",
+                name = "tap",
+                argumentsJson = "{\"x\":100,\"y\":200,\"coordinate_space\":\"screen\"}",
+            ),
+        )
+        val json = JSONObject(result.content)
+        assertEquals("UNANCHORED_COORDINATE", json.getString("code"))
+        assertTrue(json.getString("message").contains("observe_screen"))
+        tools.close()
+    }
+
+    @Test
     fun screenshotCoordinatesRequireACurrentScreenshotCoordinateSpace() {
         val tools = tools()
+        // M2.2 后零观察点击会先撞 UNANCHORED；先 observe 一次以保住本测试原意
+        // （测的是"截图坐标必须有 coordinate_contract"，不是测锚定）。
+        tools.execute(AgentModelClient.ToolCall("obs", "observe_screen", "{}"))
 
         val result = tools.execute(
             AgentModelClient.ToolCall(

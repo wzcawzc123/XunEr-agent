@@ -1175,6 +1175,9 @@
   <string name="data_backup_warning_title">請妥善保管備份檔案</string>
   <string name="data_backup_warning_summary">檔案包含模型供應商 API Key，僅包含對話、模型供應商與 MEMORY.md。</string>
   <string name="data_backup_export">匯出資料</string>
+  <string name="data_diagnostics_export">匯出診斷</string>
+  <string name="data_diagnostics_export_summary">匯出最近工具序列與系統事件（敏感工具已脫敏）</string>
+  <string name="data_diagnostics_exported">診斷已匯出</string>
   <string name="data_backup_export_summary">將對話、模型供應商與 MEMORY.md 儲存為 JSON 檔案</string>
   <string name="data_backup_import">匯入資料</string>
   <string name="data_backup_import_summary">從備份檔案取代對話、模型供應商與 MEMORY.md</string>
