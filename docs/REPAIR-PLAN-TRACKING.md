@@ -19,7 +19,7 @@
 ## M2 设备侧定位与点击契约（核心）
 - [x] M2.1 locate_on_screen 树匹配通道（ScreenLocator 纯匹配 + 快照自刷新 + observe 同套记账 + LOCATE_MISS/LOCATE_UNAVAILABLE）
 - [x] M2.1 引导接入（稀疏树 locate 优先）+ 图标/requirements/trace 注册
-- [x] M2.1 OCR 通道（2026-10-04 用户放行体积）：ML Kit 中文离线 bundled（+约20MB），locate 两级降级树→OCR，坐标防御换算+载荷自洽，假识别器注入测试
+- [x] M2.1 OCR 通道（**v3.6.4 真机验收通过 2026-10-04**）：`source=ocr` 精确命中 score0.98、1:1 载荷、center 直接点击生效；根因=R8 裁 registrar 无参构造（proguard 一行修复）；ML Kit 中文离线 bundled（+约20MB）
 - [ ] M2.1 region 参数 —— ❌ 暂无需求，不做
 - [ ] M2.2 坐标锚定收紧 —— ❌ 未做；**只做减半版**（拦无观察裸坐标），等 locate 真机反馈定
 - [x] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 回归锁：契约构建抽为纯函数 buildCoordinateContract + CoordinateContractTest 3 例（本地绿）；三层等式=codec 不缩放锁→构造点→契约锁
