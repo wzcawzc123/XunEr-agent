@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.components.ComponentRegistrar
+import com.google.mlkit.common.sdkinternal.MlKitContext
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -115,79 +116,91 @@ internal class MlKitScreenTextRecognizer(private val context: Context) : ScreenT
     }
 
     /**
-     * 进程内取证 + 自愈（v3.6.2）：读 MlKitContext 状态 → 手动复现 ComponentDiscovery
-     * （manifest meta-data → registrar 实例化）→ 探测 zzo 在不在册 → 不在册则反射
-     * 清静态实例并用 `initializeIfNeeded(Context, List)` 重建注册表，上层再重试。
-     * 逐段捕获，返回一句话摘要直接进 LOCATE 错误载荷与 logcat（tag=EtaOcr）。
+     * 进程内取证 + 自愈（v3.6.3，rename-agnostic）。
+     *
+     * v3.6.2 教训：靠类名字符串反射在 release 下必挂（R8 改名且逐构建变化：
+     * ComponentRuntime→fv0、MlKitContext→qz2，NoSuchElementException 吞掉了取证）。
+     * v3.6.3 全部改用**编译期类/方法字面量与签名匹配**（R8 同步改名，天然抗混淆）；
+     * 字符串仅用于 manifest 指定的组件（consumer keep 与 manifest 组件保名）。
+     * 逐步打点，任何一步失败都带标签进 LOCATE 载荷。
      */
     private fun forensicsAndHeal(): String {
         val steps = StringBuilder()
-        try {
-            val ctxClass = Class.forName("com.google.mlkit.common.sdkinternal.MlKitContext")
-            val holderField = ctxClass.declaredFields
-                .first { it.type == ctxClass && java.lang.reflect.Modifier.isStatic(it.modifiers) }
-                .apply { isAccessible = true }
-            val runtimeField = ctxClass.declaredFields
-                .first { it.type.name == "com.google.firebase.components.ComponentRuntime" }
-                .apply { isAccessible = true }
-            val existing = holderField.get(null)
-            steps.append("ctx=").append(existing != null)
-            val runtime = existing?.let { runCatching { runtimeField.get(it) }.getOrNull() }
-            steps.append(",rt=").append(runtime != null)
+        val ctxClass = MlKitContext::class.java
 
-            val svcClass = Class.forName("com.google.mlkit.common.internal.MlKitComponentDiscoveryService")
+        val holderField = runCatching {
+            ctxClass.declaredFields.first {
+                it.type == ctxClass && java.lang.reflect.Modifier.isStatic(it.modifiers)
+            }
+        }.getOrElse {
+            steps.append(",holder=ERR:").append(it.javaClass.simpleName)
+            null
+        }
+        val existing = holderField?.let { field ->
+            runCatching { field.isAccessible = true; field.get(null) }.getOrNull()
+        }
+        steps.append(",ctx=").append(existing != null)
+
+        val runtimeField = existing?.let { inst ->
+            ctxClass.declaredFields.firstOrNull { f ->
+                !java.lang.reflect.Modifier.isStatic(f.modifiers) && !f.type.isPrimitive &&
+                    runCatching { f.isAccessible = true; f.get(inst) != null }.getOrDefault(false)
+            }
+        }
+        steps.append(",rt=").append(runtimeField != null)
+
+        // manifest 发现：service 组件名与 meta-data 值为字符串常量，不受混淆影响。
+        val names = runCatching {
             val serviceInfo = context.packageManager.getServiceInfo(
-                ComponentName(context, svcClass),
+                ComponentName(context.packageName, DISCOVERY_SERVICE),
                 PackageManager.GET_META_DATA,
             )
             val meta = serviceInfo.metaData
-            val names = meta?.keySet()
+            meta?.keySet()
                 ?.filter {
-                    it.startsWith("com.google.firebase.components:") &&
+                    it.startsWith(REGISTRAR_PREFIX) &&
                         meta[it] == "com.google.firebase.components.ComponentRegistrar"
                 }
-                ?.map { it.substringAfter(':') }
-                ?: emptyList()
-            steps.append(",registrars=").append(names.size)
-
-            val registrars = mutableListOf<ComponentRegistrar>()
-            for (name in names) {
-                val label = name.substringAfterLast('.')
-                try {
-                    @Suppress("UNCHECKED_CAST")
-                    val registrar = Class.forName(name).getDeclaredConstructor().newInstance() as ComponentRegistrar
-                    val componentCount = runCatching { registrar.components.size }.getOrNull() ?: -1
-                    steps.append(" |").append(label).append('=').append(componentCount)
-                    registrars.add(registrar)
-                } catch (t: Throwable) {
-                    steps.append(" |").append(label).append(":FAIL ").append(t.javaClass.simpleName)
-                }
-            }
-
-            val zzoClass = Class.forName("com.google.mlkit.vision.text.internal.zzo")
-            fun probeZzo(): Any? = runtime?.let { rt ->
-                rt.javaClass.getMethod("get", Class::class.java).invoke(rt, zzoClass)
-            }
-            val zzoPresent = runCatching { probeZzo() != null }
-                .getOrElse { steps.append(",probeErr=").append(it.javaClass.simpleName); false }
-            steps.append(",getZzo=").append(zzoPresent)
-
-            if (!zzoPresent && registrars.isNotEmpty()) {
-                holderField.set(null, null)
-                val init = ctxClass.getMethod(
-                    "initializeIfNeeded",
-                    Context::class.java,
-                    List::class.java,
-                )
-                init.invoke(null, context, registrars)
-                val after = runCatching { probeZzo() != null }.getOrNull()
-                steps.append(",heal=ok,reget=").append(after)
-            } else if (!zzoPresent) {
-                steps.append(",heal=skip(noRegistrars)")
-            }
-        } catch (t: Throwable) {
-            steps.append(",forensicsErr=").append(t.javaClass.simpleName).append(':').append(t.message)
+                ?.map { it.substring(REGISTRAR_PREFIX.length) }
+                ?: emptyList<String>()
+        }.getOrElse {
+            steps.append(",meta=ERR:").append(it.javaClass.simpleName)
+            emptyList()
         }
+        steps.append(",registrars=").append(names.size)
+
+        val registrars = mutableListOf<ComponentRegistrar>()
+        for (name in names) {
+            val label = name.substringAfterLast('.')
+            runCatching {
+                val registrar = Class.forName(name).getDeclaredConstructor().newInstance() as ComponentRegistrar
+                steps.append(" |").append(label).append('=').append(registrar.components.size)
+                registrars.add(registrar)
+            }.onFailure {
+                steps.append(" |").append(label).append(":FAIL ").append(it.javaClass.simpleName)
+            }
+        }
+
+        if (registrars.isNotEmpty()) {
+            runCatching {
+                holderField?.set(null, null) ?: error("holder missing")
+                val initMethod = ctxClass.declaredMethods.firstOrNull { m ->
+                    java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                        m.parameterCount == 2 &&
+                        m.parameterTypes[0] == Context::class.java &&
+                        List::class.java.isAssignableFrom(m.parameterTypes[1])
+                } ?: error("init(Context,List) not found")
+                initMethod.isAccessible = true
+                initMethod.invoke(null, context, registrars)
+                steps.append(",reinit=ok")
+            }.onFailure {
+                steps.append(",reinit=ERR:").append(it.javaClass.simpleName)
+                    .append(':').append((it.message ?: "").take(100))
+            }
+        } else {
+            steps.append(",reinit=skip")
+        }
+
         val summary = steps.toString()
         Log.w("EtaOcr", "forensics: $summary")
         return summary
@@ -203,5 +216,10 @@ internal class MlKitScreenTextRecognizer(private val context: Context) : ScreenT
     private companion object {
         // 首次识别要加载 11MB pipeline so + 模型，5s 冷启动超时曾致真机三连失败。
         const val RECOGNIZE_TIMEOUT_SECONDS = 15L
+
+        // manifest 字符串常量（组件保名，不受 R8 影响）。
+        const val DISCOVERY_SERVICE =
+            "com.google.mlkit.common.internal.MlKitComponentDiscoveryService"
+        const val REGISTRAR_PREFIX = "com.google.firebase.components:"
     }
 }
