@@ -59,3 +59,11 @@
 # 不在 App 层重复保留整个类或包，避免阻断裁剪、内联和混淆。
 # 保留源码与行号属性，便于使用 release mapping 还原线上堆栈。
 -keepattributes SourceFile,LineNumberTable
+
+# ── ML Kit/Firebase 组件保构造（v3.6.4 OCR 根因修复）────────────────────────
+# 组件 registrar 仅被反射实例化（启动期 ComponentDiscovery + Eta 取证自愈），
+# 静态不可达；Google 自带规则 `-keep class * implements ComponentRegistrar`
+# 只保类名不保成员 —— R8 会裁掉无参 <init>，导致注册表静默为空：
+# TextRegistrar/VisionCommon/Common 三个全灭 → MlKitContext.get(zzo)=null
+# → TextRecognition.getClient NPE（v3.6.0-v3.6.3 五轮取证定罪，双模型同签名）。
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
