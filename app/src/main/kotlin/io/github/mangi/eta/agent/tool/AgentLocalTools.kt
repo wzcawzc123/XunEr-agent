@@ -138,6 +138,7 @@ internal class AgentLocalTools(
     private var contentVersion = 0L
     private var observedContentVersion = -1L
     private var observedPackage: String? = null
+    private var observedScreen: Pair<Int, Int>? = null
     private val runAvailableSkillIds = runAvailableSkillIds
         .mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup)
     private val mutatedSkillIds = ConcurrentHashMap.newKeySet<String>()
@@ -489,6 +490,7 @@ internal class AgentLocalTools(
         )
         observedContentVersion = ++contentVersion
         observedPackage = deviceController.focusedPackageName()
+        observedScreen = runCatching { deviceController.screenDimensions() }.getOrNull()
         logger.debug {
             "Agent local tool action=observe_screen outcome=completed " +
                 "observation=${observation.elementObservation?.id} " +
@@ -1459,6 +1461,8 @@ internal class AgentLocalTools(
             currentVersion = contentVersion,
             observedPackage = observedPackage,
             currentPackage = deviceController.focusedPackageName(),
+            observedScreen = observedScreen,
+            currentScreen = runCatching { deviceController.screenDimensions() }.getOrNull(),
         )
         if (verdict != CoordinateFreshnessPolicy.Verdict.ALLOW) {
             throw StaleCoordinateException(CoordinateFreshnessPolicy.message(verdict))

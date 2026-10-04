@@ -54,6 +54,13 @@ internal class AgentImageTools(
                     .put("tool", "read_image")
                     .put("path", source)
                     .put("image_attached", true)
+                    .put("image_width", image.width ?: JSONObject.NULL)
+                    .put("image_height", image.height ?: JSONObject.NULL)
+                    .put(
+                        "note",
+                        "image_width/height 是原图像素尺寸；若与 observe_screen 的 coordinate_contract " +
+                            "screen 尺寸不一致，说明该图不是当前屏幕截图，禁止用于推算点击坐标",
+                    )
                     .toString(),
                 images = listOf(image),
             )

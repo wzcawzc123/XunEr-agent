@@ -15,14 +15,19 @@ package io.github.mangi.eta.agent.tool
  * 所有坐标点击被误拦（实测 WebUI 事件列表每几秒刷新一次）。
  */
 internal object CoordinateFreshnessPolicy {
-    enum class Verdict { ALLOW, STALE_AFTER_SCROLL, STALE_WINDOW }
+    enum class Verdict { ALLOW, STALE_AFTER_SCROLL, STALE_WINDOW, STALE_RESOLUTION }
 
     fun evaluate(
         observedVersion: Long,
         currentVersion: Long,
         observedPackage: String?,
         currentPackage: String?,
+        observedScreen: Pair<Int, Int>? = null,
+        currentScreen: Pair<Int, Int>? = null,
     ): Verdict = when {
+        // 分辨率切换（FHD 1080x2412 ↔ 2K 1440x3216）让全部旧坐标失效，且不伴随滚动或切窗；
+        // 真机实测（内存管理模块会话横跨切换点）导致系统性点偏，必须最先判定。
+        observedScreen != null && currentScreen != null && observedScreen != currentScreen -> Verdict.STALE_RESOLUTION
         observedVersion >= 0 && currentVersion != observedVersion -> Verdict.STALE_AFTER_SCROLL
         !observedPackage.isNullOrBlank() &&
             !currentPackage.isNullOrBlank() &&
@@ -35,6 +40,8 @@ internal object CoordinateFreshnessPolicy {
             "屏幕已滚动或被滑动过，坐标相对上次 observe_screen 已过期；请重新 observe_screen 获取新坐标"
         Verdict.STALE_WINDOW ->
             "前台应用已变化，坐标已过期；请重新 observe_screen"
+        Verdict.STALE_RESOLUTION ->
+            "屏幕分辨率已变化，全部旧坐标失效；请重新 observe_screen 获取新的 coordinate_contract 后再点击"
         Verdict.ALLOW -> ""
     }
 }
