@@ -20,7 +20,9 @@ internal object AgentScreenObservationContract {
     fun sparseTreeNote(nodeCount: Int, treeIncluded: Boolean): String {
         if (!treeIncluded || nodeCount >= SPARSE_TREE_THRESHOLD) return ""
         return "\n\n[无障碍树稀疏：本次只返回 $nodeCount 个节点，目标控件很可能不在树里。" +
-            "不要用 tap_element。注意：你看到的截图经视觉管线渲染后比例未知（真机实测约缩小 6%），" +
+            "不要用 tap_element，先调 locate_on_screen(query=目标文本) 拿精确 bbox 与 center" +
+            "（返回 coordinate_space=screen，也可用其 index+observation_id 调 tap_element）。" +
+            "只有 locate 返回 LOCATE_MISS（目标确实不在树里）才回到截图分析：注意：你看到的截图经视觉管线渲染后比例未知（真机实测约缩小 6%），" +
             "直接在图上目测像素会系统性偏左上（实测点偏 166px 导致五连点空）——coordinate_contract 的 scale 1:1 描述的是图片文件，不是你眼中的渲染。" +
             "精确坐标必须程序化求取：root screencap 落盘目标区域截图，再用 python PIL 分析目标文字/按钮的像素 bbox 取中心，" +
             "禁止连续目测重试；两次目测未命中就强制切换到像素分析。" +

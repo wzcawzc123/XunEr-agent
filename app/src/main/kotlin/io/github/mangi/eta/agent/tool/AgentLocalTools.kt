@@ -186,6 +186,7 @@ internal class AgentLocalTools(
                 "open_uri" -> textResult(openUri(args))
                 "browser_use" -> browserUse(args, toolCall.id)
                 "observe_screen" -> observeScreen(args)
+                "locate_on_screen" -> textResult(locate(args))
                 "tap" -> textResult(tap(args))
                 "tap_area" -> textResult(tapArea(args))
                 "tap_element" -> textResult(tapElement(args))
@@ -511,6 +512,92 @@ internal class AgentLocalTools(
             ),
             images = listOfNotNull(observation.image)
         )
+    }
+
+    private fun locate(args: JSONObject): String {
+        val query = args.optString("query")
+        if (query.isBlank()) {
+            return errorResult("INVALID_TOOL_ARGUMENTS", "query 不能为空：给出要定位的文本/描述/viewId 子串")
+        }
+        val maxNodes = args.optInt("max_nodes", 120).coerceIn(1, 120)
+        val observation = screenObservationProvider?.invoke(
+            AgentScreenObservationContract.Options(
+                includeScreenshot = false,
+                includeUiTree = true,
+                maxNodes = maxNodes,
+            ),
+        ) ?: deviceController.observe(
+            includeScreenshot = false,
+            includeUiTree = true,
+            maxNodes = maxNodes,
+        )
+        val elementObservation = observation.elementObservation
+        val nodes = elementObservation?.nodes.orEmpty()
+        if (nodes.isEmpty()) {
+            return errorResult(
+                "LOCATE_UNAVAILABLE",
+                "当前拿不到 UI 节点树（无障碍未连接或快照为空）；请先 observe_screen 确认状态",
+            )
+        }
+        val matches = ScreenLocator.locate(
+            candidates = nodes.map { node ->
+                ScreenLocator.Candidate(
+                    index = node.index,
+                    text = node.text,
+                    desc = node.desc,
+                    viewId = node.viewId,
+                    left = node.bounds.left,
+                    top = node.bounds.top,
+                    right = node.bounds.right,
+                    bottom = node.bounds.bottom,
+                    clickable = node.clickable,
+                )
+            },
+            query = query,
+        )
+        if (matches.isEmpty()) {
+            return errorResult(
+                "LOCATE_MISS",
+                "在 ${nodes.size} 个节点里没有匹配“${query.trim()}”的 text/desc/viewId；" +
+                    "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
+            )
+        }
+        // 与 observe_screen 同一套发布与新鲜度记账：结果可直接用于 tap_element / tap
+        publishedObservation.set(
+            PublishedObservation(
+                elements = elementObservation,
+                coordinateSpace = observation.coordinateSpace,
+            ),
+        )
+        observedContentVersion = ++contentVersion
+        observedPackage = deviceController.focusedPackageName()
+        observedScreen = runCatching { deviceController.screenDimensions() }.getOrNull()
+        val payload = JSONObject()
+            .put("ok", true)
+            .put("tool", "locate_on_screen")
+            .put("query", query.trim())
+            .put("observation_id", elementObservation?.id ?: "")
+            .put("node_count", nodes.size)
+            .put("match_count", matches.size)
+            .put("coordinate_space", "screen")
+        val matchesJson = JSONArray()
+        matches.forEach { match ->
+            matchesJson.put(
+                JSONObject()
+                    .put("x", match.left)
+                    .put("y", match.top)
+                    .put("w", match.right - match.left)
+                    .put("h", match.bottom - match.top)
+                    .put("center_x", match.centerX)
+                    .put("center_y", match.centerY)
+                    .put("score", match.score)
+                    .put("field", match.field)
+                    .put("node_index", match.index)
+                    .put("clickable", match.clickable),
+            )
+        }
+        payload.put("matches", matchesJson)
+        return payload.toString()
     }
 
     private fun tap(args: JSONObject): String {

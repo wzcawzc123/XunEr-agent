@@ -9,6 +9,34 @@ internal object AgentGestureToolCatalog {
         tools
             .put(
                 AgentToolSchema.function(
+                    name = "locate_on_screen",
+                    description = "按文本在当前屏幕的 UI 节点里精确定位元素，返回 screen 坐标 bbox 与中心点。树里没有的目标（稀疏树、列表项未暴露）优先用本工具拿到坐标再点；也可直接用返回的 index 与 observation_id 调 tap_element。每次调用都会重新抓取节点快照，不依赖旧观察。找不到返回 LOCATE_MISS：改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put(
+                                    "query",
+                                    JSONObject()
+                                        .put("type", "string")
+                                        .put("description", "目标文本/描述/viewId 子串；按空白分词后要求全部命中，大小写不敏感")
+                                )
+                                .put(
+                                    "max_nodes",
+                                    JSONObject()
+                                        .put("type", "integer")
+                                        .put("minimum", 1)
+                                        .put("maximum", 120)
+                                        .put("default", 120)
+                                        .put("description", "本次快照最多抓取的节点数，默认 120")
+                                )
+                        )
+                        .put("required", JSONArray().put("query"))
+                )
+            )
+            .put(
+                AgentToolSchema.function(
                     name = "tap",
                     description = "点击坐标。默认使用最近一次 observe_screen 截图里的像素坐标；如果坐标来自 ui_nodes 的 center，请设置 coordinate_space=screen。",
                     parameters = JSONObject()

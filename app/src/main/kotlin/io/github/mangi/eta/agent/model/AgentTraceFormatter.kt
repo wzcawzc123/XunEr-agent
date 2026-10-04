@@ -25,6 +25,7 @@ internal class AgentTraceFormatter {
             "launch_app" -> "打开应用"
             "get_current_context" -> "读取当前上下文"
             "observe_screen" -> summarizeObservationArguments(toolCall.argumentsJson)
+            "locate_on_screen" -> summarizeQueryArguments("定位元素", toolCall.argumentsJson)
             "tap" -> summarizePointArguments("点击屏幕", toolCall.argumentsJson)
             "long_press" -> summarizePointArguments("长按屏幕", toolCall.argumentsJson)
             "tap_area" -> "点击区域"
