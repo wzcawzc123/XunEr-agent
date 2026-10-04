@@ -21,6 +21,9 @@ internal interface ScreenTextRecognizer {
     /** 识别截图像素里的文字；不可用/超时/无文字返回 null，调用方保持 LOCATE_MISS 语义。 */
     fun recognize(bitmap: Bitmap): List<RecognizedText>?
 
+    /** 最近一次失败原因（类名+消息），供 locate 的错误载荷与 logcat 定罪，成功时清空。 */
+    val lastFailure: String? get() = null
+
     fun close() {}
 }
 
@@ -37,12 +40,19 @@ internal class MlKitScreenTextRecognizer : ScreenTextRecognizer {
 
     private val recognizer by recognizerLazy
 
+    override val lastFailure: String?
+        get() = failure
+
+    @Volatile
+    private var failure: String? = null
+
     override fun recognize(bitmap: Bitmap): List<RecognizedText>? = try {
         val text = Tasks.await(
             recognizer.process(InputImage.fromBitmap(bitmap, 0)),
             RECOGNIZE_TIMEOUT_SECONDS,
             TimeUnit.SECONDS,
         )
+        this.failure = null
         buildList {
             for (block in text.textBlocks) {
                 for (line in block.lines) {
@@ -53,8 +63,11 @@ internal class MlKitScreenTextRecognizer : ScreenTextRecognizer {
                 }
             }
         }.ifEmpty { null }
-    } catch (_: Exception) {
-        // 模型未下载/超时/进程限制：OCR 是降级通道，失败不得阻断工具主路径。
+    } catch (failure: Exception) {
+        // OCR 是降级通道，失败不得阻断工具主路径——但必须留痕（此前静默吞异常
+        // 导致真机 OCR 三连 null 无法定罪，2026-10-04 v3.6.0 教训）。
+        this.failure = "${failure.javaClass.name}: ${failure.message}"
+        android.util.Log.e("EtaOcr", "recognize failed", failure)
         null
     }
 
@@ -64,6 +77,7 @@ internal class MlKitScreenTextRecognizer : ScreenTextRecognizer {
     }
 
     private companion object {
-        const val RECOGNIZE_TIMEOUT_SECONDS = 5L
+        // 首次识别要加载 11MB pipeline so + 模型，5s 冷启动超时曾致真机三连失败。
+        const val RECOGNIZE_TIMEOUT_SECONDS = 15L
     }
 }

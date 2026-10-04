@@ -114,6 +114,7 @@ internal class AgentLocalTools(
     )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
     private val textRecognizerLazy = lazy(textRecognizerFactory)
+    private var ocrDiag: String = ""
     private val terminalController = RootShellTerminalController(
         logger = logger,
         rootAvailable = rootAvailable,
@@ -602,12 +603,14 @@ internal class AgentLocalTools(
                 return if (nodes.isEmpty()) {
                     errorResult(
                         "LOCATE_UNAVAILABLE",
-                        "当前既拿不到 UI 节点树也拿不到截图（无障碍未连接且 root 不可用）；请先 observe_screen 确认状态",
+                        "当前既拿不到 UI 节点树也拿不到截图（无障碍未连接且 root 不可用；OCR诊断：$ocrDiag）；" +
+                            "请先 observe_screen 确认状态",
                     )
                 } else {
                     errorResult(
                         "LOCATE_MISS",
-                        "树（${nodes.size} 节点）无匹配且 OCR 不可用；改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
+                        "树（${nodes.size} 节点）无匹配且 OCR 不可用（OCR诊断：$ocrDiag）；" +
+                            "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
                     )
                 }
             }
@@ -678,10 +681,13 @@ internal class AgentLocalTools(
         val screenHeight: Int,
     )
 
-    /** OCR 降级通道：走与 observe 相同的 provider 注入缝（可测）；返回 null = OCR 不可用。 */
+    /** OCR 降级通道：走与 observe 相同的 provider 注入缝（可测）；返回 null = OCR 不可用。
+     *  每一步失败都写入 [ocrDiag] 并进错误载荷——v3.6.0 曾静默三连 null 无法定罪。 */
     private fun locateViaOcr(query: String): OcrOutcome? {
+        ocrDiag = ""
         // 屏幕尺寸只用于换算：拿不到（无无障碍且 root 被拒）时按 1:1 降级，不放弃 OCR。
         val screen = runCatching { deviceController.screenDimensions() }.getOrNull()
+        if (screen == null) ocrDiag = "screen_dims=unknown(1:1); "
         val screenshotObservation = screenObservationProvider?.invoke(
             AgentScreenObservationContract.Options(
                 includeScreenshot = true,
@@ -689,10 +695,32 @@ internal class AgentLocalTools(
                 maxNodes = 1,
             ),
         ) ?: deviceController.observe(includeScreenshot = true, includeUiTree = false, maxNodes = 1)
-        val image = screenshotObservation.image ?: return null
-        val bitmap = decodeImageBitmap(image.reference) ?: return null
+        val image = screenshotObservation.image
+        if (image == null) {
+            ocrDiag += "image=null(source=${screenshotObservation.content.take(80)})"
+            logger.warn("locate ocr diag: image=null")
+            return null
+        }
+        val bitmap = decodeImageBitmap(image.reference)
+        if (bitmap == null) {
+            ocrDiag += "decode_failed(ref=${image.reference.take(40)})"
+            logger.warn("locate ocr diag: decode failed")
+            return null
+        }
         return try {
-            val recognized = textRecognizerLazy.value.recognize(bitmap) ?: return null
+            val recognizer = try {
+                textRecognizerLazy.value
+            } catch (initFailure: Throwable) {
+                ocrDiag += "init_failed:${initFailure.javaClass.name}: ${initFailure.message}"
+                logger.warn("locate ocr diag: init failed ${initFailure.javaClass.name}")
+                return null
+            }
+            val recognized = recognizer.recognize(bitmap)
+            if (recognized == null) {
+                ocrDiag += "recognize_failed:${recognizer.lastFailure ?: "unknown"}"
+                return null
+            }
+            ocrDiag += "ok texts=${recognized.size} (${bitmap.width}x${bitmap.height})"
             val candidates = recognized.mapIndexed { index, item ->
                 ScreenLocator.Candidate(
                     index = index,
