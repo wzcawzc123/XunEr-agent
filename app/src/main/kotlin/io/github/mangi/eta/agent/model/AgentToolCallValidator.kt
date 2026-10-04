@@ -25,6 +25,7 @@ internal class AgentToolCallValidator(tools: JSONArray) {
             ?: return "工具未在本次运行的能力目录中声明"
         val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
             .getOrElse { return "参数不是有效的 JSON object" }
+        if (isRedactedPayload(arguments)) return REDACTED_REPLAY_GUIDANCE
         return validateValue(
             value = arguments,
             schema = toolSchema.parameters,
@@ -32,6 +33,17 @@ internal class AgentToolCallValidator(tools: JSONArray) {
             path = "arguments",
             depth = 0,
         )
+    }
+
+    /** 历史里敏感工具的参数会被脱敏成 {_redacted,_note,_fields}；模型原样重发时必须给出可执行引导。 */
+    fun isRedactedReplay(call: AgentModelClient.ToolCall): Boolean {
+        val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }.getOrNull() ?: return false
+        return isRedactedPayload(arguments)
+    }
+
+    private fun isRedactedPayload(value: JSONObject): Boolean {
+        if (value.has(REDACTED_KEY)) return true
+        return REDACTED_MARKERS.all { value.has(it) }
     }
 
     private fun validateValue(
@@ -375,5 +387,13 @@ internal class AgentToolCallValidator(tools: JSONArray) {
 
     private companion object {
         const val MAX_SCHEMA_DEPTH = 256
+        const val REDACTED_KEY = "_redacted"
+        val REDACTED_MARKERS = listOf("_note", "_fields")
+
+        /** 脱敏占位不是参数：取值不可恢复，唯一出路是重新取数。 */
+        const val REDACTED_REPLAY_GUIDANCE =
+            "参数是会话里的脱敏占位（_redacted/_note/_fields），不能原样重发，真实取值不会被恢复。" +
+                "请改为重新取数：例如先 observe_screen 重新截图，再用返回的新路径调用 read_image；" +
+                "或用真实参数重新调用该工具。禁止重复提交相同占位参数。"
     }
 }

@@ -328,7 +328,11 @@ internal class AgentLoop(
             return rejectedToolOutcome(
                 round = round,
                 toolCall = toolCall,
-                code = "INVALID_TOOL_ARGUMENTS",
+                code = if (toolCallValidator.isRedactedReplay(toolCall)) {
+                    "REDACTED_ARGUMENTS_REPLAYED"
+                } else {
+                    "INVALID_TOOL_ARGUMENTS"
+                },
                 message = validationError,
             )
         }

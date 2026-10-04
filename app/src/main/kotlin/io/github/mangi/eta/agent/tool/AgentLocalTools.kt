@@ -133,6 +133,11 @@ internal class AgentLocalTools(
         },
     )
     private val publishedObservation = AtomicReference(PublishedObservation())
+
+    /** 屏幕内容版本：observe 记录基线；滚动/滑动递增，用于坐标过期判定。 */
+    private var contentVersion = 0L
+    private var observedContentVersion = -1L
+    private var observedPackage: String? = null
     private val runAvailableSkillIds = runAvailableSkillIds
         .mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup)
     private val mutatedSkillIds = ConcurrentHashMap.newKeySet<String>()
@@ -185,9 +190,9 @@ internal class AgentLocalTools(
                 "tap_element" -> textResult(tapElement(args))
                 "long_press" -> textResult(longPress(args))
                 "long_press_element" -> textResult(longPressElement(args))
-                "swipe" -> textResult(swipe(args))
-                "scroll" -> textResult(deviceController.scroll(args.optString("direction")))
-                "scroll_element" -> textResult(scrollElement(args))
+                "swipe" -> textResult(swipe(args).also { contentVersion++ })
+                "scroll" -> textResult(deviceController.scroll(args.optString("direction")).also { contentVersion++ })
+                "scroll_element" -> textResult(scrollElement(args).also { contentVersion++ })
                 "input_text" -> textResult(inputText(args))
                 "replace_text" -> textResult(replaceText(args))
                 "clear_text" -> textResult(clearText(args))
@@ -228,6 +233,7 @@ internal class AgentLocalTools(
             textResult(
                 errorResult(
                     code = when (throwable) {
+                        is StaleCoordinateException -> "STALE_COORDINATE"
                         is InvalidToolArgumentException -> "INVALID_ARGUMENT"
                         is DeviceControlUnavailableException -> "ACCESSIBILITY_UNAVAILABLE"
                         else -> "TOOL_ERROR"
@@ -481,6 +487,8 @@ internal class AgentLocalTools(
                 coordinateSpace = observation.coordinateSpace,
             ),
         )
+        observedContentVersion = ++contentVersion
+        observedPackage = deviceController.focusedPackageName()
         logger.debug {
             "Agent local tool action=observe_screen outcome=completed " +
                 "observation=${observation.elementObservation?.id} " +
@@ -488,18 +496,23 @@ internal class AgentLocalTools(
                 "image=${observation.image?.bytes ?: 0} elapsed_ms=${SystemClock.elapsedRealtime() - startedAt} " +
                 "coordinate=${observation.coordinateSpace?.summary()}"
         }
+        val baseContent = if (visionDisabled) {
+            observation.content +
+                "\n\n[模型不支持视觉：截图已跳过，请基于 UI 树文本操作，不要请求截图]"
+        } else {
+            observation.content
+        }
         return AgentModelClient.ToolResult(
-            content = if (visionDisabled) {
-                observation.content +
-                    "\n\n[模型不支持视觉：截图已跳过，请基于 UI 树文本操作，不要请求截图]"
-            } else {
-                observation.content
-            },
+            content = baseContent + AgentScreenObservationContract.sparseTreeNote(
+                nodeCount = observation.elementObservation?.nodes?.size ?: 0,
+                treeIncluded = effectiveOptions.includeUiTree,
+            ),
             images = listOfNotNull(observation.image)
         )
     }
 
     private fun tap(args: JSONObject): String {
+        ensureCoordinateFreshness()
         val point = convertPoint(
             x = args.optInt("x"),
             y = args.optInt("y"),
@@ -511,6 +524,7 @@ internal class AgentLocalTools(
     }
 
     private fun tapArea(args: JSONObject): String {
+        ensureCoordinateFreshness()
         val x1 = args.optInt("x1")
         val y1 = args.optInt("y1")
         val x2 = args.optInt("x2")
@@ -559,6 +573,7 @@ internal class AgentLocalTools(
     }
 
     private fun longPress(args: JSONObject): String {
+        ensureCoordinateFreshness()
         val point = convertPoint(
             x = args.optInt("x"),
             y = args.optInt("y"),
@@ -1435,6 +1450,20 @@ internal class AgentLocalTools(
     private data class ScreenPoint(val x: Int, val y: Int)
 
     private class InvalidToolArgumentException(message: String) : IllegalArgumentException(message)
+
+    private class StaleCoordinateException(message: String) : IllegalStateException(message)
+
+    private fun ensureCoordinateFreshness() {
+        val verdict = CoordinateFreshnessPolicy.evaluate(
+            observedVersion = observedContentVersion,
+            currentVersion = contentVersion,
+            observedPackage = observedPackage,
+            currentPackage = deviceController.focusedPackageName(),
+        )
+        if (verdict != CoordinateFreshnessPolicy.Verdict.ALLOW) {
+            throw StaleCoordinateException(CoordinateFreshnessPolicy.message(verdict))
+        }
+    }
 
     private data class PublishedObservation(
         val elements: RootShellDeviceController.ElementObservation? = null,

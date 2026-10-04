@@ -141,6 +141,25 @@ class AgentToolCallValidatorTest {
         org.junit.Assert.assertTrue(bothMissing.contains("已收到字段：（无）"))
     }
 
+    @Test
+    fun redactedPayloadIsGuidedInsteadOfReportedAsMissingField() {
+        val validator = validator(
+            JSONObject("""{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}""")
+        )
+        val redacted = call(
+            """{"_redacted":true,"_note":"占位","_fields":{"path":"str:44"}}"""
+        )
+
+        val message = validator.validate(redacted)
+
+        org.junit.Assert.assertNotNull(message)
+        org.junit.Assert.assertTrue(message!!.contains("脱敏占位"))
+        org.junit.Assert.assertTrue(message.contains("重新"))
+        org.junit.Assert.assertFalse(message.contains("缺少必填字段"))
+        org.junit.Assert.assertTrue(validator.isRedactedReplay(redacted))
+        org.junit.Assert.assertFalse(validator.isRedactedReplay(call("""{"path":"/sdcard/a.png"}""")))
+    }
+
     private fun validator(parameters: JSONObject): AgentToolCallValidator =
         AgentToolCallValidator(
             JSONArray().put(

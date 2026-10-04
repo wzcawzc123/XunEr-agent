@@ -37,7 +37,6 @@ internal object AgentSensitiveToolPolicy {
         "search_personal_orders",
         "search_qq_chat_images",
         "search_wechat_chat_images",
-        "read_image",
         "set_setting",
         "memory_get",
         "memory_write",

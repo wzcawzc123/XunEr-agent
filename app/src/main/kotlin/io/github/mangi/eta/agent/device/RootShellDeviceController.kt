@@ -73,6 +73,11 @@ internal class RootShellDeviceController(
 
     fun screenDimensions(): Pair<Int, Int> = screenSize()
 
+    /** 当前前台应用包名；无障碍服务不可用时返回 null（此时跳过窗口新鲜度判定）。 */
+    fun focusedPackageName(): String? = runCatching {
+        AgentAccessibilityService.current()?.currentPackageName()?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     data class UiNode(
         val index: Int,
         val text: String,

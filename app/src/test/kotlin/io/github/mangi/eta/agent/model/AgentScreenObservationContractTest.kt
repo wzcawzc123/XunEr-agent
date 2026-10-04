@@ -40,4 +40,16 @@ class AgentScreenObservationContractTest {
         assertFalse(options.includeUiTree)
         assertEquals(120, options.maxNodes)
     }
+
+    @Test
+    fun sparseTreeNoteFiresOnlyWhenTreeIsIncludedAndSparse() {
+        assertEquals("", AgentScreenObservationContract.sparseTreeNote(nodeCount = 60, treeIncluded = true))
+        assertEquals("", AgentScreenObservationContract.sparseTreeNote(nodeCount = 6, treeIncluded = false))
+
+        val note = AgentScreenObservationContract.sparseTreeNote(nodeCount = 6, treeIncluded = true)
+        assertTrue(note.contains("无障碍树稀疏"))
+        assertTrue(note.contains("不要用 tap_element"))
+        assertTrue(note.contains("coordinate_contract"))
+        assertTrue(note.contains("重新 observe_screen"))
+    }
 }
