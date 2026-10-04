@@ -49,10 +49,11 @@ class AgentScreenObservationContractTest {
         val note = AgentScreenObservationContract.sparseTreeNote(nodeCount = 6, treeIncluded = true)
         assertTrue(note.contains("无障碍树稀疏"))
         assertTrue(note.contains("不要用 tap_element"))
-        assertTrue(note.contains("coordinate_contract"))
+        assertTrue(note.contains("locate_on_screen"))
+        assertTrue(note.contains("OCR"))
+        assertTrue(note.contains("LOCATE_MISS"))
         assertTrue(note.contains("重新 observe_screen"))
-        assertTrue(note.contains("像素分析"))
-        assertTrue(note.contains("screencap"))
-        assertTrue(note.contains("系统性偏左上"))
+        assertFalse("M1.1：6%/PIL 文案已删除（OCR 落地后按方案时序清理），禁止回潮",
+            note.contains("缩小 6%") || note.contains("python PIL"))
     }
 }

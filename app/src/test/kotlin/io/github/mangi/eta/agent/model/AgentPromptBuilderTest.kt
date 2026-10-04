@@ -96,8 +96,10 @@ class AgentPromptBuilderTest {
         assertTrue(messages.getJSONObject(2).getString("content").contains("再在下一轮调用下一张"))
         assertTrue(messages.getJSONObject(2).getString("content").contains("图片归因规则"))
         assertTrue(messages.getJSONObject(2).getString("content").contains("不得凭附件作答"))
-        assertTrue(messages.systemContents().any { it.contains("视觉管线渲染后比例未知") })
-        assertTrue(messages.systemContents().any { it.contains("像素分析") })
+        assertTrue(messages.systemContents().any { it.contains("locate_on_screen") })
+        assertTrue(messages.systemContents().any { it.contains("LOCATE_MISS") })
+        assertFalse("M1.1：个案缩放数字与 PIL SOP 已删除，禁止回潮",
+            messages.systemContents().any { it.contains("缩小 6%") || it.contains("python PIL") })
         assertFalse(messages.systemContents().any { it.contains("网页浏览、读取") })
         assertEquals("旧问题", messages.getJSONObject(3).getString("content"))
         assertEquals("旧回答", messages.getJSONObject(4).getString("content"))
