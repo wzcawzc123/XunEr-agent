@@ -14,12 +14,12 @@
 - [x] M1.2 压缩失败可恢复：compact 失败降级硬裁（不再整 run 毙命）→ 裁后仍超窗抛可恢复 `CONTEXT_EXHAUSTED`（带下一步指引）；新事件 `HistoryTrimmed`（wire 序列化+解析+UI 系统通知）；档位关系锁 TRIGGER 0.75 < TARGET 0.95 单测通过
 - [x] M1.3 memory_get 重复页拦截：同参同 revision 分页重读返回 `DUPLICATE_PAGE` + 强制 next_start_line；只比对最后一页（读其他页解锁）+ revision 进 key（写入解锁）
 - [x] M1.4 敏感策略表单一真源（2026-10-04 用户决策：默认敏感/当轮可见/持久形状化，记忆与读图不设豁免，跨会话靠记忆系统与再取数）：AgentSensitiveToolPolicy 四分组真源 + 权限清单派生；read_image 豁免废除；补齐 set_device_state/app_state_control 漏挂；表驱动测试 5 例
-- [ ] M1.1 删 6%/PIL 文案 —— **⏸ 按方案时序等 OCR 落地**（现为 locate 优先、像素分析后备）
+- [x] M1.1 删 6%/PIL 文案（OCR 落地后按方案时序解锁）：主系统提示与 sparseTreeNote 净化为 locate→LOCATE_MISS→两次停止 短规则；测试加 assertFalse 防回潮
 
 ## M2 设备侧定位与点击契约（核心）
 - [x] M2.1 locate_on_screen 树匹配通道（ScreenLocator 纯匹配 + 快照自刷新 + observe 同套记账 + LOCATE_MISS/LOCATE_UNAVAILABLE）
 - [x] M2.1 引导接入（稀疏树 locate 优先）+ 图标/requirements/trace 注册
-- [ ] M2.1 OCR 通道（ML Kit，+15-20MB）—— **⏸ 等用户拍板体积**，v3.5.1 目标
+- [x] M2.1 OCR 通道（2026-10-04 用户放行体积）：ML Kit 中文离线 bundled（+约20MB），locate 两级降级树→OCR，坐标防御换算+载荷自洽，假识别器注入测试
 - [ ] M2.1 region 参数 —— ❌ 暂无需求，不做
 - [ ] M2.2 坐标锚定收紧 —— ❌ 未做；**只做减半版**（拦无观察裸坐标），等 locate 真机反馈定
 - [x] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 回归锁：契约构建抽为纯函数 buildCoordinateContract + CoordinateContractTest 3 例（本地绿）；三层等式=codec 不缩放锁→构造点→契约锁
