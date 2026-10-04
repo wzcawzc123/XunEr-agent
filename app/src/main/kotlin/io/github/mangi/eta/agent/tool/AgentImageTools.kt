@@ -124,11 +124,15 @@ internal class AgentImageTools(
     private fun error(code: String, message: String): String =
         JSONObject().put("ok", false).put("code", code).put("message", message).toString()
 
-    /** read_image 的参数（图片路径）与结果不视为敏感：脱敏会让下一轮模型拿到占位符无法归因，功能优先于隐私。 */
+    /**
+     * M1.4（2026-10-04 用户决策，废除旧“功能优先于隐私”豁免）：read_image 参数与结果默认敏感
+     * ——当轮模型可见，持久 transcript 形状化脱敏；跨会话归因靠再取数，占位符重发由
+     * REDACTED_ARGUMENTS_REPLAYED 引导。策略真源见 [AgentSensitiveToolPolicy.IMAGE_TOOLS]。
+     */
     private fun result(
         content: String,
         images: List<AgentModelClient.ModelImage> = emptyList(),
-    ) = AgentModelClient.ToolResult(content = content, images = images, sensitive = false)
+    ) = AgentModelClient.ToolResult(content = content, images = images, sensitive = true)
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 

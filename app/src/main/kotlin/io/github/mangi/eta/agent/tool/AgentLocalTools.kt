@@ -1630,44 +1630,8 @@ internal class AgentLocalTools(
             "media_control",
             "set_volume",
         )
-        val DEVICE_SENSITIVE_READ_TOOL_NAMES = setOf(
-            "get_setting",
-            "wifi_credentials",
-            "recent_notifications",
-            "search_notification_history",
-            "recent_app_activity",
-            "app_usage_summary",
-            "get_current_location",
-            "get_device_environment",
-            "list_alarms",
-            "list_active_timers",
-            "search_clipboard_history",
-            "get_health_summary",
-            "read_sms_code",
-            "get_logcat",
-            "search_media",
-            "search_audio",
-            "search_recordings",
-            "search_files",
-            "search_calendar_events",
-            "search_contacts",
-            "search_call_history",
-            "search_messages",
-            "search_downloads",
-            "search_coloros_notes",
-            "search_coloros_recordings",
-            "search_recording_summaries",
-            "search_coloros_memories",
-            "search_saved_places",
-            "search_personal_orders",
-            "search_qq_chat_images",
-            "search_wechat_chat_images",
-        )
-        val DEVICE_SENSITIVE_ACTION_TOOL_NAMES = setOf(
-            "set_setting",
-            "set_device_state",
-            "app_state_control",
-        )
+        val DEVICE_SENSITIVE_READ_TOOL_NAMES = AgentSensitiveToolPolicy.SENSITIVE_DEVICE_READ
+        val DEVICE_SENSITIVE_ACTION_TOOL_NAMES = AgentSensitiveToolPolicy.SENSITIVE_DEVICE_ACTION
         val DEVICE_TOOL_NAMES =
             DEVICE_DIRECT_TOOL_NAMES + DEVICE_SENSITIVE_READ_TOOL_NAMES +
                 DEVICE_SENSITIVE_ACTION_TOOL_NAMES

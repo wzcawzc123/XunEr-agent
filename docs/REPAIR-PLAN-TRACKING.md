@@ -13,7 +13,7 @@
 ## M1 去掉负收益手段 + 失败可恢复性
 - [x] M1.2 压缩失败可恢复：compact 失败降级硬裁（不再整 run 毙命）→ 裁后仍超窗抛可恢复 `CONTEXT_EXHAUSTED`（带下一步指引）；新事件 `HistoryTrimmed`（wire 序列化+解析+UI 系统通知）；档位关系锁 TRIGGER 0.75 < TARGET 0.95 单测通过
 - [x] M1.3 memory_get 重复页拦截：同参同 revision 分页重读返回 `DUPLICATE_PAGE` + 强制 next_start_line；只比对最后一页（读其他页解锁）+ revision 进 key（写入解锁）
-- [ ] M1.4 敏感策略表单一真源 —— **⏸ 等用户确认产品立场**（会推翻"功能优先于隐私"取舍）
+- [x] M1.4 敏感策略表单一真源（2026-10-04 用户决策：默认敏感/当轮可见/持久形状化，记忆与读图不设豁免，跨会话靠记忆系统与再取数）：AgentSensitiveToolPolicy 四分组真源 + 权限清单派生；read_image 豁免废除；补齐 set_device_state/app_state_control 漏挂；表驱动测试 5 例
 - [ ] M1.1 删 6%/PIL 文案 —— **⏸ 按方案时序等 OCR 落地**（现为 locate 优先、像素分析后备）
 
 ## M2 设备侧定位与点击契约（核心）

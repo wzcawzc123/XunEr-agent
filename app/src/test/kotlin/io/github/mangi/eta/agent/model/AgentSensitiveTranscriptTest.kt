@@ -20,9 +20,10 @@ class AgentSensitiveTranscriptTest {
     }
 
     @Test
-    fun readImageIsNotSensitiveSoItsArgumentsSurviveRounds() {
-        // 功能优先：read_image 参数被脱敏会让下一轮模型拿到占位符无法归因（串图/回环根因）。
-        assertFalse(AgentSensitiveToolPolicy.isSensitive("read_image"))
+    fun readImageIsSensitiveByDefaultPerPolicyDecision() {
+        // M1.4（2026-10-04 用户决策）：默认敏感、当轮可见、持久形状化；记忆与读图不设豁免，
+        // 跨会话靠记忆系统与再取数，不靠 transcript。旧“功能优先”豁免已废除。
+        assertTrue(AgentSensitiveToolPolicy.isSensitive("read_image"))
     }
 
     @Test
