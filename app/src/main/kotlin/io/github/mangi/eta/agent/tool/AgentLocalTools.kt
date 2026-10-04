@@ -348,6 +348,22 @@ internal class AgentLocalTools(
             .toString()
     }
 
+    /**
+     * M1.3 重复页拦截：同参、同 revision 的分页读取重试不会产出新内容
+     * —— 实测病灶是"连续 30 次相同参数只拿到第 1 页"。只比对**最后一次**读取，
+     * 因此读过任意其他页即自动解锁（上下文压缩后重读旧页的活口）；
+     * revision 进 key，写入记忆后也自动解锁。
+     */
+    private data class MemoryPageKey(
+        val section: String?,
+        val query: String?,
+        val startLine: Int,
+        val maxChars: Int,
+        val revision: String,
+    )
+
+    private var lastMemoryPageKey: MemoryPageKey? = null
+
     private fun memoryGet(args: JSONObject): String = try {
         val section = args.optString("section").takeIf(String::isNotBlank)
         val query = args.optString("query").takeIf(String::isNotBlank)
@@ -383,7 +399,25 @@ internal class AgentLocalTools(
                         "还有内容未返回，继续读取请传 start_line=$next",
                 )
         }
-        payload.put("content", result.content).toString()
+        val key = MemoryPageKey(
+            section = section,
+            query = query,
+            startLine = args.optInt("start_line", 1),
+            maxChars = args.optInt("max_chars", 12_000),
+            revision = result.snapshot.revision,
+        )
+        val duplicatePage = key == lastMemoryPageKey && section == null && query == null && result.hasMore
+        lastMemoryPageKey = key
+        if (duplicatePage) {
+            errorResult(
+                "DUPLICATE_PAGE",
+                "同参重复读取第 ${result.startLine}-${result.endLine} 行不会得到新内容（revision 未变）；" +
+                    "请传 start_line=${payload.optInt("next_start_line")} 续读。" +
+                    "如确需重读本页（例如上下文被压缩），先读一次其他页再回来。",
+            )
+        } else {
+            payload.put("content", result.content).toString()
+        }
     } catch (failure: AgentMemoryException) {
         errorResult(failure.code, failure.message ?: "记忆读取失败")
     }

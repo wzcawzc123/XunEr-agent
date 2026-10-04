@@ -12,7 +12,7 @@
 
 ## M1 去掉负收益手段 + 失败可恢复性
 - [ ] M1.2 压缩失败可恢复：compact→trim→`CONTEXT_EXHAUSTED`；trim 触发发 `history_trimmed` 事件；TRIGGER_RATIO 与 Trimmer 0.95 档位关系用单测锁
-- [ ] M1.3 memory_get 重复页拦截：同参重读返回 `DUPLICATE_PAGE` + 强制 next_start_line
+- [x] M1.3 memory_get 重复页拦截：同参同 revision 分页重读返回 `DUPLICATE_PAGE` + 强制 next_start_line；只比对最后一页（读其他页解锁）+ revision 进 key（写入解锁）
 - [ ] M1.4 敏感策略表单一真源 —— **⏸ 等用户确认产品立场**（会推翻"功能优先于隐私"取舍）
 - [ ] M1.1 删 6%/PIL 文案 —— **⏸ 按方案时序等 OCR 落地**（现为 locate 优先、像素分析后备）
 

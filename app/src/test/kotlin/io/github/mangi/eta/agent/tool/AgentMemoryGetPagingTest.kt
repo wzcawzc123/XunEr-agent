@@ -79,6 +79,33 @@ class AgentMemoryGetPagingTest {
         }
     }
 
+    @Test
+    fun repeatedIdenticalPagedReadReturnsDuplicatePageAndForcesContinuation() {
+        writeLongMemory()
+        tools().use { tools ->
+            val first = JSONObject(tools.execute(call()).content)
+            assertTrue("长记忆首页应当还有后续", first.getBoolean("has_more"))
+            val nextStart = first.getInt("next_start_line")
+
+            // 病灶复现：同参同 revision 重试不再吐同一页，而是给出续读指引。
+            val duplicate = JSONObject(tools.execute(call()).content)
+            assertEquals("DUPLICATE_PAGE", duplicate.getString("code"))
+            assertTrue(
+                "错误信息必须给出续读坐标",
+                duplicate.getString("message").contains("start_line=$nextStart"),
+            )
+
+            // 按指引续读正常。
+            val second = JSONObject(tools.execute(call(startLine = nextStart)).content)
+            assertTrue("续读应返回正文", second.has("content"))
+
+            // 只比对最后一页：读过其他页后首页自动解锁（上下文压缩后重读的活口）。
+            val backToFirst = JSONObject(tools.execute(call()).content)
+            assertTrue("读过其他页后应可重读首页", backToFirst.has("content"))
+            assertTrue(backToFirst.getBoolean("has_more"))
+        }
+    }
+
     private fun writeLongMemory() {
         val snapshot = AgentMemoryRepository.snapshot()
         val body = (1..400).joinToString("\n") {
