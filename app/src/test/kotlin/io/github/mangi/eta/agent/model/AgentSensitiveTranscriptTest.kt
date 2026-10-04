@@ -20,6 +20,12 @@ class AgentSensitiveTranscriptTest {
     }
 
     @Test
+    fun readImageIsNotSensitiveSoItsArgumentsSurviveRounds() {
+        // 功能优先：read_image 参数被脱敏会让下一轮模型拿到占位符无法归因（串图/回环根因）。
+        assertFalse(AgentSensitiveToolPolicy.isSensitive("read_image"))
+    }
+
+    @Test
     fun sensitiveToolArgumentsAndResultAreRemovedTogether() {
         val callId = "call_sensitive"
         val messages = JSONArray()

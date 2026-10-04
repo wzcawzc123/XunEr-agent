@@ -94,6 +94,8 @@ class AgentPromptBuilderTest {
         assertTrue(messages.getJSONObject(2).getString("content").contains("open_and_exec"))
         assertTrue(messages.getJSONObject(2).getString("content").contains("同一轮模型回复最多调用一次 read_image"))
         assertTrue(messages.getJSONObject(2).getString("content").contains("再在下一轮调用下一张"))
+        assertTrue(messages.getJSONObject(2).getString("content").contains("图片归因规则"))
+        assertTrue(messages.getJSONObject(2).getString("content").contains("不得凭附件作答"))
         assertFalse(messages.systemContents().any { it.contains("网页浏览、读取") })
         assertEquals("旧问题", messages.getJSONObject(3).getString("content"))
         assertEquals("旧回答", messages.getJSONObject(4).getString("content"))
