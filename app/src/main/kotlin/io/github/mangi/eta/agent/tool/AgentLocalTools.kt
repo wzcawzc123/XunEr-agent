@@ -89,7 +89,7 @@ internal class AgentLocalTools(
     private val screenObservationProvider: (
         (AgentScreenObservationContract.Options) -> RootShellDeviceController.Observation
     )? = null,
-    private val textRecognizerFactory: () -> ScreenTextRecognizer = { MlKitScreenTextRecognizer() },
+    private val textRecognizerFactory: (Context) -> ScreenTextRecognizer = { ctx -> MlKitScreenTextRecognizer(ctx) },
     private val beforeToolExecution: (String) -> ToolExecutionDecision = {
         ToolExecutionDecision.Allow
     },
@@ -113,7 +113,7 @@ internal class AgentLocalTools(
         rootAvailable = rootAvailable,
     )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
-    private val textRecognizerLazy = lazy(textRecognizerFactory)
+    private val textRecognizerLazy = lazy { textRecognizerFactory(context) }
     private var ocrDiag: String = ""
     private val terminalController = RootShellTerminalController(
         logger = logger,
