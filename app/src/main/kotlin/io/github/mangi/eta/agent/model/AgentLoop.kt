@@ -86,8 +86,6 @@ internal class AgentLoop(
     fun run(): Result {
         var round = 1
         var precedingTools: JSONArray? = null
-        // 是否已有真实输入用量回执；硬裁剪只在拿到用量证据后才允许动历史。
-        var usageObserved = false
 
         while (true) {
             runController.throwIfCancelled()
@@ -119,8 +117,11 @@ internal class AgentLoop(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
             // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的请求发出。
+            // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的
+            // round1（尚无用量回执）巨型历史原样发出、trim 与 M1.2 降级同轮被挡。
+            // 估量口径 round1/round2 一致，trim 只影响出站请求不改持久历史，故去前置。
             val trimWindow = config.contextWindow
-            if (usageObserved && trimWindow != null && trimWindow > 0 &&
+            if (trimWindow != null && trimWindow > 0 &&
                 AgentContextBudget.rawEstimate(requestMessages, roundTools) >= trimWindow
             ) {
                 val systemEstimate = AgentContextBudget.rawEstimate(
@@ -188,7 +189,6 @@ internal class AgentLoop(
                 discardPendingToolImageMessage()
             }
             context.observeInputTokens(roundInputTokens)
-            if (roundInputTokens != null) usageObserved = true
             round = completedRound.round
             val providerResponse = completedRound.response
 

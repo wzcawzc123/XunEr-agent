@@ -21,6 +21,7 @@
 - [x] M2.1 引导接入（稀疏树 locate 优先）+ 图标/requirements/trace 注册
 - [x] M2.1 OCR 通道（**v3.6.4 真机验收通过 2026-10-04**）：`source=ocr` 精确命中 score0.98、1:1 载荷、center 直接点击生效；根因=R8 裁 registrar 无参构造（proguard 一行修复）；ML Kit 中文离线 bundled（+约20MB）
 - [x] LOCATE_MISS 换词引导（小尾巴，v3.7.0）：提示"优先改写为屏幕上实际可见的原文重查"
+- [x] 审查 C1（v3.7.1）：AgentLoop 硬裁门去掉 usageObserved 前置——新鲜 run round1 超窗即裁不再原样发出（探针翻转为回归锁，见 docs/reviews/v3.4.0-audit.md）
 - [x] M2.1 region 参数 —— ❌ 暂无需求，不做（终审）
 - [x] M2.2 坐标锚定收紧（减半版，v3.7.0）：零观察点击 → `UNANCHORED_COORDINATE` 判链首+独立码（M3.3 可统计误伤）；审查确认 swipe 刻意不覆盖（连滑翻页合法）、契约测试补 observe 保原意、locate→tap 共享记账天然放行
 - [x] M2.3 编码尺寸 ≡ coordinate_contract.screenshot 回归锁：契约构建抽为纯函数 buildCoordinateContract + CoordinateContractTest 3 例（本地绿）；三层等式=codec 不缩放锁→构造点→契约锁

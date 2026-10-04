@@ -31,19 +31,28 @@ class AgentContextCompactionTest {
     )
 
     @Test
-    fun largeHistoryWithoutUsageDoesNotTriggerCompaction() {
+    fun largeHistoryWithoutUsageSkipsCompactionAndUsesTrimInstead() {
+        // 审查 C1（v3.4.0-audit）后契约：无 usage 回执时**不做摘要压缩**（本测试原意保留），
+        // 但窗口级硬裁允许介入——估量口径与轮次无关，round1 超窗必须先裁再发，
+        // 不得再原样发送巨型历史（旧断言 contains(original) 已被 C1 修复推翻）。
         val original = "历史事实".repeat(40_000)
         var requests = 0
+        val events = mutableListOf<AgentEvent>()
         val result = AgentModelClient.complete(config, "继续", AgentModelClient.ToolExecutor { error("不应执行工具") },
             history = listOf(AgentModelClient.ConversationMessage("assistant", original)),
+            onEvent = events::add,
             provider = provider { request, _ ->
                 requests++
                 assertEquals(ProviderRequestPurpose.CHAT, request.purpose)
-                assertTrue(request.messages.toString().contains(original))
+                assertFalse(
+                    "round1 应已被硬裁，历史原文不得再出现（C1 修复）",
+                    request.messages.toString().contains(original),
+                )
                 response("完成")
             })
         assertEquals(1, requests)
         assertNull(result.contextSnapshot)
+        assertTrue(events.filterIsInstance<AgentEvent.HistoryTrimmed>().isNotEmpty())
     }
 
     @Test

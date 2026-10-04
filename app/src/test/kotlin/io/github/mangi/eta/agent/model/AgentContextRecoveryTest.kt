@@ -264,17 +264,19 @@ class AgentContextRecoveryTest {
         val cause = failure.cause as AgentModelFailure
         assertEquals("CONTEXT_EXHAUSTED", cause.code)
         assertTrue("错误必须给出可执行下一步", cause.message!!.contains("新开会话"))
-        assertEquals("只有首轮正常发出", 1, chatRounds)
+        // C1 修复后行为提升：system 本身就超窗时 round1 即被硬裁复检拦下，
+        // 不再先发一次注定失败的请求（修复前 chatRounds=1）。
+        assertEquals("Provider 不应收到必然失败的请求", 0, chatRounds)
     }
 
 
     // ---- 审查探针（v3.4.0-audit）：新鲜 run 超窗时 round1 的兜底顺序 ----
 
     @Test
-    fun freshRunOversizedHistorySendsRound1UntrimmedAndTrimsFromRound2() {
-        // 审查问题 C：AgentLoop 的硬裁门是 `usageObserved && estimate>=trimWindow`，
-        // usageObserved 每 run 从 false 起步 → 预期 round1 不裁、round2（拿到 usage 后）才裁。
-        // 本测试锁住这一真实行为，防回归的同时把 C 从"推理"变"实证"。
+    fun freshRunWithOversizedHistoryTrimsRound1BeforeSending() {
+        // 审查 C1（v3.4.0-audit）修复后行为锁：原门要求 usageObserved，导致新鲜 run 的
+        // round1 巨型历史原样发出（探针曾实证 ≥700k chars 未裁剪）；修后 round1 即裁，
+        // 请求必须显著缩小，HistoryTrimmed 在首轮出现，run 正常完成。
         // 窗口必须大于 Trimmer 的 TOOL_SCHEMA_RESERVE(24k)+system，否则 trim 必然装不下。
         val config = config.copy(contextWindow = 30_000)
         var chatRounds = 0
@@ -303,12 +305,12 @@ class AgentContextRecoveryTest {
         assertEquals("完成", result.content)
         assertTrue("round1/2 都应发出", chatRounds >= 2)
         assertTrue(
-            "round1 应携带未裁剪的巨型历史(>=700k chars)，实测 largest=$largestRequest",
-            largestRequest >= 700_000,
+            "round1 请求必须已被硬裁(远小于原始 700k+ chars)，实测 largest=$largestRequest",
+            largestRequest < 400_000,
         )
         val trims = events.filterIsInstance<AgentEvent.HistoryTrimmed>()
         assertTrue(
-            "拿到 usage 后 round2 触发硬裁，实测 trims=${trims.size}",
+            "round1 即触发硬裁，实测 trims=${trims.size}",
             trims.isNotEmpty(),
         )
     }
