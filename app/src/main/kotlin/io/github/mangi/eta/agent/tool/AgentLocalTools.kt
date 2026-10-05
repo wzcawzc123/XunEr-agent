@@ -235,7 +235,7 @@ internal class AgentLocalTools(
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 "terminal" -> textResult(terminalTool { terminal(args) })
                 "run_command" -> textResult(terminalTool { runCommand(args) })
-                in AgentFileToolCatalog.names -> textResult(terminalController.fileTool(toolCall.name, args))
+                in AgentFileToolCatalog.names -> textResult(terminalTool { terminalController.fileTool(toolCall.name, args) })
                 "androguard_analyze" -> textResult(terminalTool { androguardAnalyze(args) })
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
