@@ -29,11 +29,11 @@ android {
 
     defaultConfig {
         applicationId = "io.github.mangi.eta"
-        minSdk = 34
-        targetSdk = 36
+        minSdk = 33
+        targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026100411
-        versionName = "3.7.1"
+        versionCode = 2026100501
+        versionName = "3.8.0"
     }
 
     signingConfigs {
@@ -68,6 +68,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_25
         targetCompatibility = JavaVersion.VERSION_25
     }
@@ -122,6 +123,8 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
+    implementation(libs.jsoup)
     implementation(libs.commons.compress)
     implementation(libs.xz)
     compileOnly(libs.libxposed.api)

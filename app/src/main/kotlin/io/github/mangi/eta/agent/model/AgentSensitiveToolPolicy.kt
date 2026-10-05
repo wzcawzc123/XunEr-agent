@@ -49,14 +49,16 @@ internal object AgentSensitiveToolPolicy {
         "search_messages",
         "search_downloads",
         "search_coloros_notes",
+        "search_notes",
         "search_coloros_recordings",
         "search_recording_summaries",
         "search_coloros_memories",
+        "search_system_memories",
         "search_saved_places",
         "search_personal_orders",
         "search_qq_chat_images",
         "search_wechat_chat_images",
-    )
+    ) + io.github.mangi.eta.agent.context.PersonalSearchTools.names + AgentPhoneToolCatalog.reads
 
     /**
      * 设备状态写入：参数含目标包名/系统开关。此前只有 set_setting 在表内，
@@ -66,7 +68,7 @@ internal object AgentSensitiveToolPolicy {
         "set_setting",
         "set_device_state",
         "app_state_control",
-    )
+    ) + AgentPhoneToolCatalog.writes
 
     /** 记忆系统：用户明确不设默认豁免（旧实现已含，保留）。 */
     val MEMORY_TOOLS: Set<String> = setOf(
@@ -86,5 +88,7 @@ internal object AgentSensitiveToolPolicy {
         SENSITIVE_DEVICE_READ + SENSITIVE_DEVICE_ACTION + MEMORY_TOOLS + IMAGE_TOOLS
 
     fun isSensitive(toolName: String): Boolean =
-        toolName.startsWith("mcp_") || toolName in allSensitive
+        toolName.startsWith("mcp_") || toolName in allSensitive ||
+            toolName in io.github.mangi.eta.agent.context.PersonalSearchTools.names ||
+            toolName in AgentPhoneToolCatalog.names
 }

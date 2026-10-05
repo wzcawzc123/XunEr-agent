@@ -2,7 +2,7 @@
 
 **简体中文** | [English](README_EN.md)
 
-<p><a href="https://github.com/Mangi-11/Eta/releases"><img src="https://img.shields.io/github/downloads/Mangi-11/Eta/total?logo=github&amp;label=Downloads&amp;color=1677FF" alt="GitHub Releases 累计下载量"></a> <img src="https://img.shields.io/badge/minSdk-34-3DDC84?logo=android&amp;logoColor=white" alt="minSdk 34"> <img src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&amp;logoColor=white" alt="Kotlin 2.4.20"> <img src="https://img.shields.io/badge/AGP-9.4.1-3DDC84?logo=android&amp;logoColor=white" alt="AGP 9.4.1"> <img src="https://img.shields.io/badge/Assistant%20Integrations-ColorOS%20%26%20HyperOS-1677FF" alt="Assistant integrations for ColorOS and HyperOS"></p>
+ <p><a href="https://github.com/Mangi-11/Eta/releases"><img src="https://img.shields.io/github/downloads/Mangi-11/Eta/total?logo=github&amp;label=Downloads&amp;color=1677FF" alt="GitHub Releases 累计下载量"></a> <img src="https://img.shields.io/badge/minSdk-33-3DDC84?logo=android&amp;logoColor=white" alt="minSdk 33"> <img src="https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&amp;logoColor=white" alt="Kotlin 2.4.20"> <img src="https://img.shields.io/badge/AGP-9.4.1-3DDC84?logo=android&amp;logoColor=white" alt="AGP 9.4.1"> <img src="https://img.shields.io/badge/Assistant%20Integrations-ColorOS%20%26%20HyperOS-1677FF" alt="Assistant integrations for ColorOS and HyperOS"></p>
 
 **面向 Android 的第三方系统级 AI 助手**
 
@@ -16,7 +16,7 @@ Eta 是为手机和移动设备设计的 AI Agent，结合了 [Codex](https://op
 
 Eta 内置 Agent Runtime，通过 Agent Loop 编排模型调用、工具执行和结果反馈，并支持 Skills 与 MCP 扩展。使用 AI 功能需要自备模型服务的 **API Key（BYOK）**，模型与服务商由你选择。
 
-支持 **Android 14 及以上版本**，App 本体不限手机品牌，基础功能无需 Root。Root 和 LSPosed 可进一步扩展系统访问与助手入口，具体能力取决于授权和 ROM 适配。
+支持 **Android 13 及以上版本**，App 本体不限手机品牌，基础功能无需 Root。Root 和 LSPosed 可进一步扩展系统访问与助手入口，具体能力取决于授权和 ROM 适配。
 
 [下载 APK](https://github.com/Mangi-11/Eta/releases) · [快速开始](#快速开始) · [为什么做 Eta](#为什么做-eta)
 
@@ -41,10 +41,11 @@ Eta 内置 Agent Runtime，通过 Agent Loop 编排模型调用、工具执行�
 
 ### 执行工具
 
-- **系统 API 调用**：通过 Android API 与系统 Intent 设置闹钟、控制媒体、调整音量、读取设备状态，无需逐步操作界面。
+- **系统 API 与设备工具**：通过 Android API 与系统 Intent 设置闹钟、控制媒体、调整音量、读取设备状态；也可查询应用版本、安装信息与权限，在 Root 授权下筛选系统日志。设置、应用状态和音量操作会读回结果，未确认时明确报告。
 - **GUI Agent**：结合无障碍 UI 树、控件定位与按需截图，执行点击、滚动和输入；截图按原始尺寸与像素传递，不在上传前缩放或转 JPEG。通过浮层展示执行状态，支持停止和接管。
 - **内置浏览器**：通过 WebView 加载 JavaScript 页面、读取正文、操作 DOM 与截图；用户可打开同一浏览器会话接管。
-- **终端与文件**：Android user/root Shell、Alpine / Debian Linux、文件读写与脚本执行，支持会话、异步命令和守护任务。
+- **终端**：Android user/root Shell、Alpine / Debian Linux 与脚本执行，支持会话、异步命令和守护任务；返回实际 Shell、执行身份与可解析命令的信息。
+- **文件工具**：读取、写入、精确编辑、元数据查询、目录分页、路径匹配与文本搜索。文本读取按 UTF-8 字节边界续读，编辑检查旧内容，搜索结果说明实际范围与未完成部分。
 
 同一项任务可以组合多种工具：例如先读取网页资料，再用脚本整理文件；或从通知中找到订单线索，再打开应用确认状态。
 
@@ -69,9 +70,11 @@ Runtime 同时管理流式事件、steering、取消和增量 transcript。追�
 
 Eta 的终端可以由 Agent 调用，也可以由你直接操作。多个会话各自保留工作目录与环境；简洁模式按命令展示输入输出，PTY 控制台支持 TUI、快捷键与 ANSI 渲染。异步命令和守护任务都可以查看日志、主动停止。
 
+Agent 的新文件工具在 Android 环境默认使用 Eta 的 App UID，需要 Root 时必须显式指定；普通 Shell 身份不等同于 ADB Shell。Linux 文件路径在所选环境内部解析，例如 `/workspace`，不使用 Android 宿主的 rootfs 路径。单次写入及精确编辑限制为 512 KiB；续读、分页、版本检查与不同后端的写入保证见 [文件工具合同](docs/AGENT_RUNTIME.md#结构化文件工具)。
+
 - **Linux 环境**：可选 Alpine 或 Debian，普通设备使用 PRoot，Root 设备还可选择 chroot。两种后端独立安装，不自动迁移数据；PRoot 中的模拟 root 不提供 Android 系统权限。
 - **开发工具**：Python、Node.js、SSH、APK 分析与 Kimi Code 按需安装。
-- **文件管理**：私有工作区支持导入、导出；已授权的 Android 目录可共享到 Linux 的 `/workspace/mounts/`，也可在 App 内浏览 Linux 文件。
+- **文件管理**：私有工作区支持导入、导出；已授权的 Android 目录可共享到 Linux 的 `/workspace/mounts/`，也可在 App 内浏览 Linux 文件。通过选择器导入的文件是工作区副本，修改副本不会自动写回来源；文件工具只接受文件系统路径，不直接写回 `content://` 文档。
 
 Eta 本体可以读取项目、修改代码、运行命令并验证结果。如果想在手机上持续进行编程工作，[Kimi Code](https://github.com/MoonshotAI/kimi-code) 的 **Kimi Web** 提供了更适合移动端的 Web UI，可以在浏览器中持续对话、查看代码修改与执行结果，享受完整的 Coding Agent 工作体验，随时随地 Vibe Coding。
 
@@ -121,7 +124,7 @@ Provider 层支持 OpenAI-compatible Chat Completions、Responses API 和 Anthro
 2. 按任务需要配置工具开关与权限：GUI Agent 需要无障碍服务；通知、应用使用情况分别授权；位置工具需要“始终允许”。工具页可查看当前设备的可用能力。
 3. 开始对话。需要 Linux 时，在“Linux 工具环境”中安装发行版、基础工具及所需开发工具；需要系统入口时，参见[系统助手入口](#系统助手入口)。
 
-- **普通设备**：Android 14+，可使用聊天、浏览器、记忆、Skills、MCP、普通终端与私有工作区；GUI 和本机信息读取按需授权。Linux 支持对应的 64 位设备。
+- **普通设备**：Android 13+，可使用聊天、浏览器、记忆、Skills、MCP、普通终端与私有工作区；GUI 和本机信息读取按需授权。Linux 支持对应的 64 位设备。
 - **Root 设备**：进一步开放系统设置修改、应用管理、受保护文件与专用个人数据检索，以及 Root Shell 和 chroot。
 - **LSPosed 与适配 ROM**：开放厂商助手接管、系统快捷入口及 Google 能力增强；部分功能另需 Root。
 

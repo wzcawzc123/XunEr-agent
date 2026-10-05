@@ -60,6 +60,10 @@
 # 保留源码与行号属性，便于使用 release mapping 还原线上堆栈。
 -keepattributes SourceFile,LineNumberTable
 
+# app_process 通过固定类名启动受控的一方应用操作入口。
+-keep class io.github.mangi.eta.agent.phone.PhoneCommandMain {
+    public static void main(java.lang.String[]);
+}
 # ── ML Kit/Firebase 组件保构造（v3.6.4 OCR 根因修复）────────────────────────
 # 组件 registrar 仅被反射实例化（启动期 ComponentDiscovery + Eta 取证自愈），
 # 静态不可达；Google 自带规则 `-keep class * implements ComponentRegistrar`

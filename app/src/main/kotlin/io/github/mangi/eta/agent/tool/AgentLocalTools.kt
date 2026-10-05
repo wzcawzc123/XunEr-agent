@@ -17,8 +17,13 @@ import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.AgentHttpClient
+import io.github.mangi.eta.agent.device.LocalNetworkPermission
+import io.github.mangi.eta.agent.web.AgentWebTools
+import io.github.mangi.eta.agent.web.WebHttpTransport
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
+import io.github.mangi.eta.agent.model.AgentFileToolCatalog
 import io.github.mangi.eta.agent.overlay.AgentHapticFeedback
 import io.github.mangi.eta.agent.overlay.GestureIndicator
 import io.github.mangi.eta.agent.runtime.AgentAppContext
@@ -115,6 +120,10 @@ internal class AgentLocalTools(
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
     private val textRecognizerLazy = lazy { textRecognizerFactory(context) }
     private var ocrDiag: String = ""
+    private val webTools = AgentWebTools(
+        transport = WebHttpTransport(AgentHttpClient.client),
+        localNetworkAccess = { LocalNetworkPermission.accessState(context).name.lowercase(Locale.ROOT) },
+    )
     private val terminalController = RootShellTerminalController(
         logger = logger,
         rootAvailable = rootAvailable,
@@ -159,6 +168,7 @@ internal class AgentLocalTools(
         if (!closed.compareAndSet(false, true)) return
         publishedObservation.set(PublishedObservation())
         AgentBrowserSession.interruptAgentAction(browserRunId)
+        webTools.close()
         terminalController.interruptAll()
         rootCommandExecutor.close()
         if (textRecognizerLazy.isInitialized()) runCatching { textRecognizerLazy.value.close() }
@@ -194,6 +204,10 @@ internal class AgentLocalTools(
                 "launch_app" -> textResult(launchApp(args))
                 "open_uri" -> textResult(openUri(args))
                 "browser_use" -> browserUse(args, toolCall.id)
+                "web_search", "fetch_url" -> {
+                    if (!browserToolsEnabled()) textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页搜索、读取与浏览器工具"))
+                    else textResult(webTools.execute(toolCall.name, args))
+                }
                 "observe_screen" -> observeScreen(args)
                 "locate_on_screen" -> textResult(locate(args))
                 "tap" -> textResult(tap(args))
@@ -221,9 +235,7 @@ internal class AgentLocalTools(
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 "terminal" -> textResult(terminalTool { terminal(args) })
                 "run_command" -> textResult(terminalTool { runCommand(args) })
-                "read_file" -> textResult(terminalTool { readFile(args) })
-                "write_file" -> textResult(terminalTool { writeFile(args) })
-                "list_directory" -> textResult(terminalTool { listDirectory(args) })
+                in AgentFileToolCatalog.names -> textResult(terminalController.fileTool(toolCall.name, args))
                 "androguard_analyze" -> textResult(terminalTool { androguardAnalyze(args) })
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
@@ -1076,22 +1088,12 @@ internal class AgentLocalTools(
                 .put("message", "environment 仅支持 android/linux，实际收到：$requestedEnvironment")
                 .toString()
         }
-        val result = terminalController.terminalAction(
-            action = args.optString("action", "open_and_exec"),
-            command = args.optString("command"),
-            cwd = args.optString("cwd").ifBlank { null },
-            timeoutMs = args.optInt("timeout_ms", 30_000),
-            identity = args.optString("identity"),
-            mergeStderr = args.optBoolean("merge_stderr", false),
-            sessionId = args.optString("session_id").ifBlank { null },
-            jobId = args.optString("job_id").ifBlank { null },
-            async = args.optBoolean("async", false),
-            offsetChars = args.optInt("offset_chars", 0),
-            maxChars = args.optInt("max_chars", 8_000),
-            closeIfDone = args.optBoolean("close_if_done", false),
-            environment = requestedEnvironment.ifBlank { "android" },
-            taskId = args.optString("task_id").ifBlank { null },
-        )
+        // 走上游统一外壳：TerminalToolContract 入参契约校验 + 参数解码，
+        // environment 缺省由本方法显式补 android 后再进入，保住"默认值可观测"修复。
+        val effective =
+            if (requestedEnvironment.isEmpty()) JSONObject(args.toString()).put("environment", "android")
+            else args
+        val result = terminalController.terminalAction(effective)
         return if (requestedEnvironment.isEmpty()) annotateDefaultedEnvironment(result) else result
     }
 
@@ -1123,27 +1125,6 @@ internal class AgentLocalTools(
         raw.isBlank() ||
             raw.equals("android", ignoreCase = true) ||
             raw.equals("linux", ignoreCase = true)
-
-    private fun readFile(args: JSONObject): String =
-        terminalController.readFile(
-            path = args.optString("path"),
-            offsetBytes = args.optInt("offset_bytes", 0),
-            maxBytes = args.optInt("max_bytes", 65_536)
-        )
-
-    private fun writeFile(args: JSONObject): String =
-        terminalController.writeFile(
-            path = args.optString("path"),
-            content = args.optString("content"),
-            append = args.optBoolean("append", false)
-        )
-
-    private fun listDirectory(args: JSONObject): String =
-        terminalController.listDirectory(
-            path = args.optString("path"),
-            showHidden = args.optBoolean("show_hidden", false),
-            limit = args.optInt("limit", 80)
-        )
 
     private fun findAppByPackage(packageName: String): AppInfo? =
         installedLauncherApps().firstOrNull { it.packageName == packageName }
@@ -1767,10 +1748,11 @@ internal class AgentLocalTools(
     )
 
     private companion object {
-        val DEVICE_DIRECT_TOOL_NAMES = setOf(
+        val DEVICE_DIRECT_TOOL_NAMES = io.github.mangi.eta.agent.model.AgentPhoneToolCatalog.direct + setOf(
             "set_alarm",
             "set_timer",
             "device_status",
+            "inspect_app",
             "network_info",
             "top_memory_apps",
             "top_storage_apps",

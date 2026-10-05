@@ -55,18 +55,29 @@ internal interface ConversationDao : ChunkedTextDao {
 
     @Transaction
     suspend fun conversationEntities(): List<ConversationEntity> = conversationEntityRows().map { row ->
-        row.copy(
-            appliedRuntimeRunIdsJson = restoreText("conversations", row.id, "runs", row.appliedRuntimeRunIdsJson),
-            roleplayJson = restoreText("conversations", row.id, "roleplay", row.roleplayJson),
-            revisionsJson = restoreText("conversations", row.id, "revisions", row.revisionsJson),
-        )
+        restoreConversation(row)
     }
+
+    @Query("SELECT * FROM conversations ORDER BY updated_at ASC, id ASC LIMIT :limit OFFSET :offset")
+    suspend fun conversationEntityRowsPage(limit: Int, offset: Int): List<ConversationEntity>
+
+    suspend fun restoreConversation(row: ConversationEntity) = row.copy(
+        appliedRuntimeRunIdsJson = restoreText("conversations", row.id, "runs", row.appliedRuntimeRunIdsJson),
+        roleplayJson = restoreText("conversations", row.id, "roleplay", row.roleplayJson),
+        revisionsJson = restoreText("conversations", row.id, "revisions", row.revisionsJson),
+    )
+
+    @Query("SELECT * FROM conversation_messages ORDER BY conversation_id ASC, sort_index ASC LIMIT :limit OFFSET :offset")
+    suspend fun allMessageRowsPage(limit: Int, offset: Int): List<ConversationMessageEntity>
 
     @Query("SELECT * FROM conversation_context_checkpoints ORDER BY conversation_id ASC")
     suspend fun contextCheckpointRows(): List<ConversationContextCheckpointEntity>
 
     @Transaction
     suspend fun contextCheckpoints(): List<ConversationContextCheckpointEntity> = contextCheckpointRows().map { restoreCheckpoint(it) }
+
+    @Query("SELECT * FROM conversation_context_checkpoints ORDER BY conversation_id ASC LIMIT :limit OFFSET :offset")
+    suspend fun contextCheckpointRowsPage(limit: Int, offset: Int): List<ConversationContextCheckpointEntity>
 
     @Query("SELECT * FROM conversation_messages WHERE conversation_id = :conversationId ORDER BY sort_index ASC LIMIT :limit OFFSET :offset")
     suspend fun messageRowsPage(conversationId: String, limit: Int, offset: Int): List<ConversationMessageEntity>
@@ -141,14 +152,32 @@ internal interface ConversationDao : ChunkedTextDao {
         }
     }
 
+    @Transaction
+    suspend fun updateContextCheckpoint(conversationId: String, historyJson: String?, journalJson: String?) {
+        val previous = contextCheckpointRow(conversationId)
+            ?: ConversationContextCheckpointEntity(conversationId, "[]")
+        insertContextCheckpointRow(previous.copy(
+            historyJson = historyJson?.let { storeText("conversation_context_checkpoints", conversationId, "history", it) }
+                ?: previous.historyJson,
+            journalJson = journalJson?.let { storeText("conversation_context_checkpoints", conversationId, "journal", it) }
+                ?: previous.journalJson,
+        ))
+    }
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertState(state: ConversationStateEntity)
 
     @Query("DELETE FROM conversations")
     suspend fun deleteConversations()
 
+    @Query("DELETE FROM conversations WHERE id = :conversationId")
+    suspend fun deleteConversation(conversationId: String)
+
     @Query("DELETE FROM conversation_messages")
     suspend fun deleteMessages()
+
+    @Query("DELETE FROM conversation_messages WHERE conversation_id = :conversationId AND sort_index >= :fromIndex")
+    suspend fun deleteMessagesFrom(conversationId: String, fromIndex: Int)
 
     @Query("DELETE FROM conversation_context_checkpoints")
     suspend fun deleteContextCheckpoints()

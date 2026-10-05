@@ -59,6 +59,7 @@ import io.github.mangi.eta.ui.model.AgentSkillsAction
 import io.github.mangi.eta.ui.model.AgentSystemEnhanceAction
 import io.github.mangi.eta.ui.model.AgentToolsAction
 import io.github.mangi.eta.ui.model.ConversationSummaryUi
+import io.github.mangi.eta.ui.model.LOCAL_NETWORK_PERMISSION_ITEM_ID
 import io.github.mangi.eta.ui.model.PermissionHealthAction
 import io.github.mangi.eta.ui.navigation.AgentNavigator
 import io.github.mangi.eta.ui.navigation.AppRoute
@@ -127,6 +128,7 @@ fun AgentAppRoot(
     val characterStore = viewModel<CharacterLibraryViewModel>().store
     val communityCatalogStore = viewModel<CommunityCatalogViewModel>().store
     val requestExecutionNotifications = rememberExecutionNotificationRequest()
+    val requestLocalNetworkPermission = rememberLocalNetworkPermissionRequest(agentState::refreshPermissionHealth)
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -511,6 +513,9 @@ fun AgentAppRoot(
                             PermissionHealthAction.NavigateBack -> popRoute()
                             is PermissionHealthAction.OpenItemAction -> {
                                 when (action.itemId) {
+                                    LOCAL_NETWORK_PERMISSION_ITEM_ID -> requestLocalNetworkPermission()
+                                    "calendar" -> locationPermissionLauncher.launch(io.github.mangi.eta.agent.device.CalendarPermissions.requested)
+                                    "notification_policy" -> context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                                     "accessibility" -> {
                                         runCatching {
                                             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))

@@ -56,8 +56,10 @@ class AgentSensitiveToolPolicyTest {
         val action = AgentSensitiveToolPolicy.SENSITIVE_DEVICE_ACTION
         val memory = AgentSensitiveToolPolicy.MEMORY_TOOLS
         val image = AgentSensitiveToolPolicy.IMAGE_TOOLS
-        assertEquals(31, read.size)
-        assertEquals(3, action.size)
+        // v3.8.0 合并上游 3.2.0：个人上下文检索与系统应用操作（读/写）入表，
+        // 计数锁随名单合法扩容更新（31→46 / 3→15）；互斥与覆盖断言保持不变。
+        assertEquals(46, read.size)
+        assertEquals(15, action.size)
         assertEquals(4, memory.size)
         assertEquals(setOf("read_image"), image)
         // 分组互斥：并集大小 = 各组之和（防止一个工具被重复归类后行为漂移）
