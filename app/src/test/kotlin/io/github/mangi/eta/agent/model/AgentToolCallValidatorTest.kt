@@ -3,6 +3,7 @@ package io.github.mangi.eta.agent.model
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -163,38 +164,6 @@ class AgentToolCallValidatorTest {
     }
 
     @Test
-    fun oneOfWithoutMatchingBranchReportsPerBranchReason() {
-        // 修复前：0 个分支匹配与多个匹配折叠成同一句话，且不指出字段，
-        // 会话里无法区分"action 拼错 / 多传字段 / 取值非法"。
-        val validator = validator(
-            JSONObject(
-                """
-                {
-                  "type": "object",
-                  "properties": {
-                    "action": {"type": "string", "enum": ["exec", "close"]},
-                    "command": {"type": "string"},
-                    "session_id": {"type": "string"}
-                  },
-                  "required": ["action"],
-                  "oneOf": [
-                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
-                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]}
-                  ]
-                }
-                """.trimIndent()
-            )
-        )
-
-        val message = validator.validate(call("""{"action":"open_and_exec"}"""))
-        assertNotNull(message)
-        assertTrue("须说明没有任何分支匹配", message!!.contains("不符合任何分支"))
-        assertTrue("须附分支级原因并标出是哪个分支", message.contains("action=exec") || message.contains("action=close"))
-        assertTrue("须指出具体字段", message.contains("action") || message.contains("command"))
-        assertTrue("须给出合法取值全集", message.contains("「action」的合法取值"))
-    }
-
-    @Test
     fun oneOfWithMultipleMatchingBranchesReportsTheCount() {
         val validator = validator(
             JSONObject(
@@ -233,43 +202,6 @@ class AgentToolCallValidatorTest {
             AgentModelClient.ToolCall(id = "call-2", name = "no_such_tool", argumentsJson = "{}")
         )
         assertEquals("未声明工具仍走通用文案", "工具未在本次运行的能力目录中声明", generic)
-    }
-
-    @Test
-    fun branchFailuresNameTheBranchAndListAllAllowedValues() {
-        val validator = validator(
-            JSONObject(
-                """
-                {
-                  "type": "object",
-                  "properties": {
-                    "action": {"type": "string", "enum": ["exec", "daemon_logs", "close", "read_async_result"]},
-                    "command": {"type": "string"},
-                    "task_id": {"type": "string"},
-                    "session_id": {"type": "string"},
-                    "job_id": {"type": "string"}
-                  },
-                  "required": ["action"],
-                  "oneOf": [
-                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
-                    {"properties": {"action": {"enum": ["daemon_logs"]}}, "required": ["action", "task_id"]},
-                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]},
-                    {"properties": {"action": {"enum": ["read_async_result"]}}, "required": ["action", "job_id"]}
-                  ]
-                }
-                """.trimIndent()
-            )
-        )
-
-        val message = validator.validate(call("""{"action":"open_and_exec"}"""))
-        assertNotNull(message)
-        // 只报"分支1/2/3"时模型无法知道在说哪个分支；必须带 action 值
-        assertTrue(message!!.contains("action=exec"))
-        assertTrue(message.contains("action=daemon_logs"))
-        // 最该给的信息：这个参数到底能填什么
-        assertTrue(message.contains("「action」的合法取值"))
-        // 截断时必须说明还有多少分支没列
-        assertTrue(message.contains("仅列前") || message.contains("个分支"))
     }
 
     @Test
@@ -313,6 +245,39 @@ class AgentToolCallValidatorTest {
     }
 
     @Test
+    fun unsupportedActionValueIsReportedDirectlyWithAllowedSet() {
+        // 值非法（action 拼错 / 用旧名）是最常见的调用错误：直接点明值不被接受并给出
+        // 合法取值，比罗列一堆无关分支的失败原因更有用（真机实测：open_and_exec、foobar
+        // 都只会得到"某些分支不接受 command"之类的解释，模型还得自己比对取值表）。
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "action": {"type": "string", "enum": ["exec", "close"]},
+                    "command": {"type": "string"},
+                    "session_id": {"type": "string"}
+                  },
+                  "required": ["action"],
+                  "oneOf": [
+                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
+                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"action":"open_and_exec"}"""))
+        assertNotNull(message)
+        assertTrue("须直接点明该值不被接受：$message", message!!.contains("不被接受"))
+        assertTrue("须回显收到的值：$message", message.contains("open_and_exec"))
+        assertTrue("须给出合法取值：$message", message.contains("合法取值") && message.contains("exec"))
+        assertFalse("不必罗列无关分支的原因：$message", message.contains("各分支失败原因"))
+    }
+
+    @Test
     fun theBranchMatchingTheRequestedActionIsReportedFirst() {
         // 真机实测（v3.8.2）：传合法的 action=exec 但缺 command 时，exec 分支的
         // 原因排在第二位；terminal 有 8 个分支，一旦掉出前 3 条，模型就只看得到
@@ -344,6 +309,20 @@ class AgentToolCallValidatorTest {
         val reasons = message!!.substringAfter("各分支失败原因：")
         assertTrue("与请求 action 同名的分支必须排第一：$message", reasons.startsWith("action=exec"))
         assertTrue("须说明缺什么：$message", reasons.contains("缺少必填字段 command"))
+    }
+
+    @Test
+    fun emptyPathIsRejectedBeforeExecutionForFileTools() {
+        // 真机实测：path 只声明了 maxLength、没有 minLength，空路径会被放行到执行层，
+        // 报成「NOT_REGULAR_FILE：目标不是普通文件」，看不出是路径为空。
+        val validator = AgentToolCallValidator(
+            JSONArray().also { AgentFileToolCatalog.appendTo(it) },
+        )
+        val message = validator.validate(
+            AgentModelClient.ToolCall(id = "call-1", name = "read_file", argumentsJson = """{"path":""}"""),
+        )
+        assertNotNull("空路径应在能力目录层被拦：$message", message)
+        assertTrue("错误须指向 path：$message", message!!.contains("path"))
     }
 
     private fun validator(parameters: JSONObject): AgentToolCallValidator =

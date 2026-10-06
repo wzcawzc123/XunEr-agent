@@ -168,6 +168,13 @@ internal class AgentToolCallValidator(tools: JSONArray) {
             }
         }
         if (matches >= minimum) return null
+        // 请求的 action 值若根本不在任何分支的合法取值内 —— 直接点明值非法。
+        // 列一堆无关分支的失败原因帮不上忙（真机实测：open_and_exec、foobar 都只会
+        // 得到"某些分支不接受 command"之类的解释，模型还得自己比对取值表）。
+        val (enumKey, enumValues) = unifiedEnumField(branches) ?: ("" to emptyList())
+        if (requestedAction != null && enumKey == "action" && requestedAction !in enumValues) {
+            return "$path 的 action 值「$requestedAction」不被接受；合法取值：${enumValues.joinToString("、")}"
+        }
         // 与请求 action 同名的那条永远排最前：分支多时它最可能被上限截断，
         // 而它恰恰是模型最需要的信息。
         // 实测（v3.8.2 真机）：传合法的 exec 但缺 command 时，exec 分支的原因排在
@@ -204,13 +211,23 @@ internal class AgentToolCallValidator(tools: JSONArray) {
      * 反复试探 action 取值。这里把并集直接给出。
      */
     private fun allowedValuesHint(branches: JSONArray): String {
+        val (key, values) = unifiedEnumField(branches) ?: return ""
+        return "；「$key」的合法取值：${values.joinToString("、")}"
+    }
+
+    /**
+     * 分支组若统一由单一枚举字段区分，返回该字段名与其取值并集；否则 null。
+     *
+     * 用于两处：报错末尾附合法取值全集；以及判断请求里给的值是否根本不合法。
+     */
+    private fun unifiedEnumField(branches: JSONArray): Pair<String, List<String>>? {
         val fields = (0 until branches.length()).mapNotNull { singleEnumField(branches.opt(it)) }
-        if (fields.isEmpty()) return ""
+        if (fields.isEmpty()) return null
         val key = fields.first().first
-        if (fields.any { it.first != key }) return ""
+        if (fields.any { it.first != key }) return null
         val all = fields.flatMap { it.second }.distinct()
-        if (all.size <= 1) return ""
-        return "；「$key」的合法取值：${all.joinToString("、")}"
+        if (all.size <= 1) return null
+        return key to all
     }
 
     /** 分支若"只用一个枚举字段作区分"，返回该字段名与其取值；否则 null。 */

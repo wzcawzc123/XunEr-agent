@@ -53,7 +53,11 @@ internal object AgentFileToolCatalog {
             .put("description", "Android 默认 user（Eta App UID，不是 ADB Shell）；需要 Root 时显式 root。Linux 默认按用户选定的 PRoot/chroot 后端解析，不会失败后自动升级身份。"))
         .put("cwd", text("相对路径的基准目录。Android user 默认 Eta 私有工作区，root 默认 /data/local/tmp/eta；Linux 默认 /workspace。与终端保持相同路径规则。", 4096))
 
-    private fun path(): JSONObject = text("绝对路径或相对于 cwd 的路径；仅接受文件系统路径，不接受 content URI。使用已导入文件的路径时操作的是该副本。", 4096)
+    private fun path(): JSONObject =
+        text("绝对路径或相对于 cwd 的路径；仅接受文件系统路径，不接受 content URI。使用已导入文件的路径时操作的是该副本。", 4096)
+            // 空路径无意义：缺 minLength 时它会被放行到执行层，真机上报成
+            // 「NOT_REGULAR_FILE：目标不是普通文件」，看不出是路径为空。
+            .put("minLength", 1)
     private fun revision(): JSONObject = text("上一次文件或目录结果中的 revision；不同环境和身份的版本不能混用。", 256)
     private fun text(description: String, max: Int): JSONObject = JSONObject().put("type", "string").put("description", description).put("maxLength", max)
     private fun integer(description: String, minimum: Int, maximum: Int? = null): JSONObject =
