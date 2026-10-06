@@ -312,6 +312,40 @@ class AgentToolCallValidatorTest {
         assertTrue(message.contains("不接受"))
     }
 
+    @Test
+    fun theBranchMatchingTheRequestedActionIsReportedFirst() {
+        // 真机实测（v3.8.2）：传合法的 action=exec 但缺 command 时，exec 分支的
+        // 原因排在第二位；terminal 有 8 个分支，一旦掉出前 3 条，模型就只看得到
+        // 与自己调用无关的分支解释。本测试锁住"相关分支必须排第一"。
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "action": {"type": "string", "enum": ["open", "exec", "close", "daemon_list"]},
+                    "command": {"type": "string"},
+                    "session_id": {"type": "string"}
+                  },
+                  "required": ["action"],
+                  "oneOf": [
+                    {"properties": {"action": {"enum": ["open"]}}, "required": ["action"]},
+                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
+                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]},
+                    {"properties": {"action": {"enum": ["daemon_list"]}}, "required": ["action"]}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"action":"exec"}"""))
+        assertNotNull(message)
+        val reasons = message!!.substringAfter("各分支失败原因：")
+        assertTrue("与请求 action 同名的分支必须排第一：$message", reasons.startsWith("action=exec"))
+        assertTrue("须说明缺什么：$message", reasons.contains("缺少必填字段 command"))
+    }
+
     private fun validator(parameters: JSONObject): AgentToolCallValidator =
         AgentToolCallValidator(
             JSONArray().put(

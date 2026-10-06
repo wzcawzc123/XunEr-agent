@@ -148,6 +148,9 @@ internal class AgentToolCallValidator(tools: JSONArray) {
     ): String? {
         var matches = 0
         val failures = mutableListOf<String>()
+        var preferred: String? = null
+        // 请求里显式给出的 action：与之同名分支的失败原因才是模型最该先看到的。
+        val requestedAction = (value as? JSONObject)?.optString("action")?.takeIf { it.isNotBlank() }
         for (index in 0 until branches.length()) {
             val branch = branches.opt(index)
             val failure = validateSchema(value, branch, root, path, depth + 1)
@@ -157,15 +160,26 @@ internal class AgentToolCallValidator(tools: JSONArray) {
                     return "$path 同时符合多个互斥分支（要求至多 $maximum 个）：" +
                         "已判定 $matches 个，请只保留其中一种形态的字段"
                 }
-            } else if (failures.size < MAX_REPORTED_BRANCH_FAILURES) {
-                failures += "${branchLabel(branch) ?: "分支${index + 1}"}：$failure"
+            } else {
+                val label = branchLabel(branch) ?: "分支${index + 1}"
+                val entry = "$label：$failure"
+                if (requestedAction != null && label == "action=$requestedAction") preferred = entry
+                if (failures.size < MAX_REPORTED_BRANCH_FAILURES) failures += entry
             }
         }
         if (matches >= minimum) return null
-        val omitted = branches.length() - failures.size
-        val detail = if (failures.isEmpty()) "" else "；各分支失败原因：" + failures.joinToString("；")
-        val truncated = if (failures.isNotEmpty() && omitted > 0) {
-            "（共 ${branches.length()} 个分支，仅列前 ${failures.size} 个）"
+        // 与请求 action 同名的那条永远排最前：分支多时它最可能被上限截断，
+        // 而它恰恰是模型最需要的信息。
+        // 实测（v3.8.2 真机）：传合法的 exec 但缺 command 时，exec 分支的原因排在
+        // 第二位；terminal 有 8 个分支，一旦它掉出前 3，模型就只剩无关分支的解释。
+        val ordered = buildList {
+            if (preferred != null) add(preferred)
+            addAll(failures.filter { it != preferred })
+        }.take(MAX_REPORTED_BRANCH_FAILURES)
+        val omitted = branches.length() - ordered.size
+        val detail = if (ordered.isEmpty()) "" else "；各分支失败原因：" + ordered.joinToString("；")
+        val truncated = if (ordered.isNotEmpty() && omitted > 0) {
+            "（共 ${branches.length()} 个分支，仅列前 ${ordered.size} 个）"
         } else {
             ""
         }
