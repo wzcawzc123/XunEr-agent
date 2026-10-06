@@ -108,7 +108,12 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         }
         schema.opt("not").takeUnless { it == null || it == JSONObject.NULL }?.let { rejected ->
             if (validateSchema(value, rejected, root, path, depth + 1) == null) {
-                return "$path 符合了 not 禁止的 Schema"
+                val forbidden = forbiddenFieldsHit(value, rejected)
+                return if (forbidden.isEmpty()) {
+                    "$path 符合了 not 禁止的 Schema"
+                } else {
+                    "$path 含当前 action 不接受的字段：${forbidden.joinToString("、")}（请移除后重试）"
+                }
             }
         }
         schema.opt("if").takeUnless { it == null || it == JSONObject.NULL }?.let { condition ->
@@ -144,7 +149,8 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         var matches = 0
         val failures = mutableListOf<String>()
         for (index in 0 until branches.length()) {
-            val failure = validateSchema(value, branches.opt(index), root, path, depth + 1)
+            val branch = branches.opt(index)
+            val failure = validateSchema(value, branch, root, path, depth + 1)
             if (failure == null) {
                 matches += 1
                 if (matches > maximum) {
@@ -152,12 +158,86 @@ internal class AgentToolCallValidator(tools: JSONArray) {
                         "已判定 $matches 个，请只保留其中一种形态的字段"
                 }
             } else if (failures.size < MAX_REPORTED_BRANCH_FAILURES) {
-                failures += "分支${index + 1}：$failure"
+                failures += "${branchLabel(branch) ?: "分支${index + 1}"}：$failure"
             }
         }
         if (matches >= minimum) return null
+        val omitted = branches.length() - failures.size
         val detail = if (failures.isEmpty()) "" else "；各分支失败原因：" + failures.joinToString("；")
-        return "$path 不符合任何分支（要求至少 $minimum 个）$detail"
+        val truncated = if (failures.isNotEmpty() && omitted > 0) {
+            "（共 ${branches.length()} 个分支，仅列前 ${failures.size} 个）"
+        } else {
+            ""
+        }
+        return "$path 不符合任何分支（要求至少 $minimum 个）$detail$truncated" + allowedValuesHint(branches)
+    }
+
+    /**
+     * 分支的简短标签。oneOf 分支多以某个枚举字段（如 `action`）区分，
+     * 报「分支2」对排查毫无帮助，报「action=exec」才能一眼看出在说哪个分支。
+     */
+    private fun branchLabel(branch: Any?): String? {
+        val (key, values) = singleEnumField(branch) ?: return null
+        val first = values.firstOrNull() ?: return null
+        return "$key=$first"
+    }
+
+    /**
+     * 分支组若统一由单一枚举字段区分，附上全部合法取值。
+     *
+     * 实测（terminal 的 8 分支 oneOf 真机上连续两次踩中）：模型最需要的信息是
+     * "这个参数到底能填什么"，而只列前几条分支原因反而看不到全集 —— 有会话因此
+     * 反复试探 action 取值。这里把并集直接给出。
+     */
+    private fun allowedValuesHint(branches: JSONArray): String {
+        val fields = (0 until branches.length()).mapNotNull { singleEnumField(branches.opt(it)) }
+        if (fields.isEmpty()) return ""
+        val key = fields.first().first
+        if (fields.any { it.first != key }) return ""
+        val all = fields.flatMap { it.second }.distinct()
+        if (all.size <= 1) return ""
+        return "；「$key」的合法取值：${all.joinToString("、")}"
+    }
+
+    /** 分支若"只用一个枚举字段作区分"，返回该字段名与其取值；否则 null。 */
+    private fun singleEnumField(branch: Any?): Pair<String, List<String>>? {
+        val properties = (branch as? JSONObject)?.optJSONObject("properties") ?: return null
+        val keys = properties.keys().asSequence().toList()
+        if (keys.size != 1) return null
+        val key = keys.first()
+        val enum = properties.optJSONObject(key)?.optJSONArray("enum") ?: return null
+        val values = (0 until enum.length()).mapNotNull { enum.optString(it).takeIf { value -> value.isNotBlank() } }
+        if (values.isEmpty()) return null
+        return key to values
+    }
+
+    /**
+     * `not` 校验失败时，找出实际命中的被禁字段名。
+     *
+     * 只覆盖最常见形态（`not.anyOf[].required` / `not.required`，terminal 的
+     * 专属字段白名单就是这种）；无法归因时返回空列表，调用方回退到原文案。
+     * 这样"多传了一个 environment"能直接报出来，而不是笼统的"符合了 not"。
+     */
+    private fun forbiddenFieldsHit(value: Any?, rejected: Any?): List<String> {
+        val target = value as? JSONObject ?: return emptyList()
+        val hits = mutableListOf<String>()
+        fun collect(schema: Any?) {
+            val object_ = schema as? JSONObject ?: return
+            object_.optJSONArray("required")?.let { required ->
+                for (index in 0 until required.length()) {
+                    val name = required.optString(index)
+                    if (name.isNotBlank() && target.has(name) && name !in hits) hits += name
+                }
+            }
+            object_.optJSONArray("anyOf")?.let { branches ->
+                for (index in 0 until branches.length()) collect(branches.opt(index))
+            }
+            object_.optJSONArray("allOf")?.let { branches ->
+                for (index in 0 until branches.length()) collect(branches.opt(index))
+            }
+        }
+        collect(rejected)
+        return hits
     }
 
     /**

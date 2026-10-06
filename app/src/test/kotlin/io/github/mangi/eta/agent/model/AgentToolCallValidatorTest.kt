@@ -189,8 +189,9 @@ class AgentToolCallValidatorTest {
         val message = validator.validate(call("""{"action":"open_and_exec"}"""))
         assertNotNull(message)
         assertTrue("须说明没有任何分支匹配", message!!.contains("不符合任何分支"))
-        assertTrue("须附分支级原因", message.contains("分支1"))
+        assertTrue("须附分支级原因并标出是哪个分支", message.contains("action=exec") || message.contains("action=close"))
         assertTrue("须指出具体字段", message.contains("action") || message.contains("command"))
+        assertTrue("须给出合法取值全集", message.contains("「action」的合法取值"))
     }
 
     @Test
@@ -232,6 +233,83 @@ class AgentToolCallValidatorTest {
             AgentModelClient.ToolCall(id = "call-2", name = "no_such_tool", argumentsJson = "{}")
         )
         assertEquals("未声明工具仍走通用文案", "工具未在本次运行的能力目录中声明", generic)
+    }
+
+    @Test
+    fun branchFailuresNameTheBranchAndListAllAllowedValues() {
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "action": {"type": "string", "enum": ["exec", "daemon_logs", "close", "read_async_result"]},
+                    "command": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "job_id": {"type": "string"}
+                  },
+                  "required": ["action"],
+                  "oneOf": [
+                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
+                    {"properties": {"action": {"enum": ["daemon_logs"]}}, "required": ["action", "task_id"]},
+                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]},
+                    {"properties": {"action": {"enum": ["read_async_result"]}}, "required": ["action", "job_id"]}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"action":"open_and_exec"}"""))
+        assertNotNull(message)
+        // 只报"分支1/2/3"时模型无法知道在说哪个分支；必须带 action 值
+        assertTrue(message!!.contains("action=exec"))
+        assertTrue(message.contains("action=daemon_logs"))
+        // 最该给的信息：这个参数到底能填什么
+        assertTrue(message.contains("「action」的合法取值"))
+        // 截断时必须说明还有多少分支没列
+        assertTrue(message.contains("仅列前") || message.contains("个分支"))
+    }
+
+    @Test
+    fun notRejectionNamesTheOffendingFieldInsteadOfBeingOpaque() {
+        // 复刻 terminal 的真实形态：oneOf 分支 + not 禁掉本 action 不该有的字段。
+        // 真机实测（v3.8.1）给 daemon_logs 多传 environment 时，旧文案是
+        // "分支N：arguments 符合了 not 禁止的 Schema"，完全看不出是哪个字段多余。
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "action": {"type": "string", "enum": ["exec", "daemon_logs"]},
+                    "command": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "environment": {"type": "string", "enum": ["android", "linux"]}
+                  },
+                  "required": ["action"],
+                  "oneOf": [
+                    {
+                      "properties": {"action": {"enum": ["exec"]}},
+                      "required": ["action", "command"],
+                      "not": {"anyOf": [{"required": ["task_id"]}, {"required": ["environment"]}]}
+                    },
+                    {
+                      "properties": {"action": {"enum": ["daemon_logs"]}},
+                      "required": ["action", "task_id"],
+                      "not": {"anyOf": [{"required": ["command"]}, {"required": ["environment"]}]}
+                    }
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"action":"daemon_logs","task_id":"t","environment":"linux"}"""))
+        assertNotNull(message)
+        assertTrue("必须指出违规字段名，而不是笼统的 not 文案", message!!.contains("environment"))
+        assertTrue(message.contains("不接受"))
     }
 
     private fun validator(parameters: JSONObject): AgentToolCallValidator =
