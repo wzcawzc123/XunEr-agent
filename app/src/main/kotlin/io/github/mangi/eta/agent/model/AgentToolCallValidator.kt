@@ -22,7 +22,7 @@ internal class AgentToolCallValidator(tools: JSONArray) {
 
     fun validate(call: AgentModelClient.ToolCall): String? {
         val toolSchema = schemasByName[call.name]
-            ?: return "工具未在本次运行的能力目录中声明"
+            ?: return retiredToolGuidance(call.name) ?: "工具未在本次运行的能力目录中声明"
         val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
             .getOrElse { return "参数不是有效的 JSON object" }
         if (isRedactedPayload(arguments)) return REDACTED_REPLAY_GUIDANCE
@@ -99,14 +99,12 @@ internal class AgentToolCallValidator(tools: JSONArray) {
             }
         }
         schema.optJSONArray("anyOf")?.let { branches ->
-            if (!matchesBranchCount(value, branches, root, path, depth, minimum = 1)) {
-                return "$path 不符合 anyOf 中的任何 Schema"
-            }
+            branchFailure(value, branches, root, path, depth, minimum = 1, maximum = Int.MAX_VALUE)
+                ?.let { return it }
         }
         schema.optJSONArray("oneOf")?.let { branches ->
-            if (!matchesBranchCount(value, branches, root, path, depth, minimum = 1, maximum = 1)) {
-                return "$path 必须且只能符合 oneOf 中的一个 Schema"
-            }
+            branchFailure(value, branches, root, path, depth, minimum = 1, maximum = 1)
+                ?.let { return it }
         }
         schema.opt("not").takeUnless { it == null || it == JSONObject.NULL }?.let { rejected ->
             if (validateSchema(value, rejected, root, path, depth + 1) == null) {
@@ -126,21 +124,56 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         return null
     }
 
-    private fun matchesBranchCount(
+    /**
+     * 分支组（anyOf / oneOf）不匹配时给出可诊断原因；满足约束则返回 null。
+     *
+     * 原实现只回一个布尔值，调用方把「0 个分支匹配」与「匹配数超出上限」折叠成
+     * 同一句报错，且不指出字段 —— 实测 action 拼错、多传了不该有的字段、取值
+     * 非法这三种完全不同的原因会得到同一句话，会话里只能靠猜（已多次发生）。
+     * 现在分开报：超出上限 → 报实际匹配数；不足下限 → 附各分支的首个失败原因。
+     */
+    private fun branchFailure(
         value: Any?,
         branches: JSONArray,
         root: JSONObject,
         path: String,
         depth: Int,
         minimum: Int,
-        maximum: Int = Int.MAX_VALUE,
-    ): Boolean {
+        maximum: Int,
+    ): String? {
         var matches = 0
+        val failures = mutableListOf<String>()
         for (index in 0 until branches.length()) {
-            if (validateSchema(value, branches.opt(index), root, path, depth + 1) == null) matches += 1
-            if (matches > maximum) return false
+            val failure = validateSchema(value, branches.opt(index), root, path, depth + 1)
+            if (failure == null) {
+                matches += 1
+                if (matches > maximum) {
+                    return "$path 同时符合多个互斥分支（要求至多 $maximum 个）：" +
+                        "已判定 $matches 个，请只保留其中一种形态的字段"
+                }
+            } else if (failures.size < MAX_REPORTED_BRANCH_FAILURES) {
+                failures += "分支${index + 1}：$failure"
+            }
         }
-        return matches in minimum..maximum
+        if (matches >= minimum) return null
+        val detail = if (failures.isEmpty()) "" else "；各分支失败原因：" + failures.joinToString("；")
+        return "$path 不符合任何分支（要求至少 $minimum 个）$detail"
+    }
+
+    /**
+     * 已并入其他工具的旧名字，给出明确的迁移指引而不是笼统的"未声明"。
+     *
+     * run_command 与 terminal 的 Android 环境完全重叠，v3.2.0 起已从能力目录
+     * 移除（执行侧与显示映射仍在）。历史会话与长期记忆里仍存有大量旧用法，
+     * 只报"未在能力目录中声明"时模型会反复重试或绕道避开 —— 这里直接给出
+     * 等价调用，让旧用法一次就迁移完成。
+     */
+    private fun retiredToolGuidance(name: String): String? = when (name) {
+        "run_command" ->
+            "run_command 已并入 terminal：请改用 terminal（action=\"exec\", environment=\"android\"）"
+        "open_and_exec" ->
+            "open_and_exec 是 terminal 的旧动作名：请改用 action=\"exec\""
+        else -> null
     }
 
     /**
@@ -387,6 +420,9 @@ internal class AgentToolCallValidator(tools: JSONArray) {
 
     private companion object {
         const val MAX_SCHEMA_DEPTH = 256
+
+        /** 报错时最多附带的单分支失败原因条数（防止分支多时刷屏）。 */
+        const val MAX_REPORTED_BRANCH_FAILURES = 3
         const val REDACTED_KEY = "_redacted"
         val REDACTED_MARKERS = listOf("_note", "_fields")
 

@@ -2,8 +2,10 @@ package io.github.mangi.eta.agent.model
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentToolCallValidatorTest {
@@ -158,6 +160,78 @@ class AgentToolCallValidatorTest {
         org.junit.Assert.assertFalse(message.contains("缺少必填字段"))
         org.junit.Assert.assertTrue(validator.isRedactedReplay(redacted))
         org.junit.Assert.assertFalse(validator.isRedactedReplay(call("""{"path":"/sdcard/a.png"}""")))
+    }
+
+    @Test
+    fun oneOfWithoutMatchingBranchReportsPerBranchReason() {
+        // 修复前：0 个分支匹配与多个匹配折叠成同一句话，且不指出字段，
+        // 会话里无法区分"action 拼错 / 多传字段 / 取值非法"。
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "action": {"type": "string", "enum": ["exec", "close"]},
+                    "command": {"type": "string"},
+                    "session_id": {"type": "string"}
+                  },
+                  "required": ["action"],
+                  "oneOf": [
+                    {"properties": {"action": {"enum": ["exec"]}}, "required": ["action", "command"]},
+                    {"properties": {"action": {"enum": ["close"]}}, "required": ["action", "session_id"]}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"action":"open_and_exec"}"""))
+        assertNotNull(message)
+        assertTrue("须说明没有任何分支匹配", message!!.contains("不符合任何分支"))
+        assertTrue("须附分支级原因", message.contains("分支1"))
+        assertTrue("须指出具体字段", message.contains("action") || message.contains("command"))
+    }
+
+    @Test
+    fun oneOfWithMultipleMatchingBranchesReportsTheCount() {
+        val validator = validator(
+            JSONObject(
+                """
+                {
+                  "type": "object",
+                  "oneOf": [
+                    {"required": ["left"]},
+                    {"required": ["right"]}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val message = validator.validate(call("""{"left":true,"right":true}"""))
+        assertNotNull(message)
+        assertTrue("须报出互斥分支冲突而非笼统描述", message!!.contains("互斥分支"))
+    }
+
+    @Test
+    fun retiredToolNameGetsMigrationGuidanceInsteadOfGenericMissingTool() {
+        val validator = validator(JSONObject("""{"type":"object"}"""))
+
+        val guided = validator.validate(
+            AgentModelClient.ToolCall(
+                id = "call-1",
+                name = "run_command",
+                argumentsJson = """{"command":"id"}""",
+            )
+        )
+        assertNotNull(guided)
+        assertTrue("须给出迁移目标 terminal", guided!!.contains("terminal"))
+
+        val generic = validator.validate(
+            AgentModelClient.ToolCall(id = "call-2", name = "no_such_tool", argumentsJson = "{}")
+        )
+        assertEquals("未声明工具仍走通用文案", "工具未在本次运行的能力目录中声明", generic)
     }
 
     private fun validator(parameters: JSONObject): AgentToolCallValidator =

@@ -14,6 +14,8 @@ internal object AgentTerminalToolCatalog {
                     "async=true 启动属于当前 Agent run 的异步命令，通过 read_async_result 读取输出，close 取消任务或关闭会话。" +
                     "daemon_start 用于需要跨 Agent run 运行的服务，由 daemon_list/daemon_logs/daemon_stop 管理；" +
                     "进程仍可能因退出、系统回收、权限变化或重启而终止。命令可解析不代表有权执行。" +
+                    "每个 action 只接受自己的专属字段（如 daemon_logs/daemon_stop 仅 task_id、read_async_result 仅 job_id），多传字段会被拒绝。" +
+                    "environment=linux 需要 root identity（PRoot 后端除外）。" +
                     "已知文件的读取、写入、编辑和搜索优先使用对应文件工具。",
                 parameters = TerminalToolContract.schema(),
             ),
