@@ -22,6 +22,13 @@ java {
     }
 }
 
+// CI 对非发版构建传入提交号，按 SemVer 构建元数据追加为 +<sha>，不影响版本先后；本地与发版构建不传
+val buildMetadata = providers.gradleProperty("eta.buildMetadata").orNull?.takeIf { it.isNotBlank() }
+require(buildMetadata == null || buildMetadata.matches(Regex("[0-9A-Za-z.-]+"))) {
+    "eta.buildMetadata 只能包含字母、数字、点和连字符"
+}
+val buildMetadataSuffix = buildMetadata?.let { "+$it" }.orEmpty()
+
 android {
     namespace = "io.github.mangi.eta"
     compileSdk = 37
@@ -49,10 +56,13 @@ android {
 
     buildTypes {
         debug {
+            // 版本名带构建类型标记，设置页与 APK 文件名据此区分 Debug 包
+            versionNameSuffix = "-debug" + buildMetadataSuffix
             isMinifyEnabled = false
             isPseudoLocalesEnabled = true
         }
         release {
+            versionNameSuffix = buildMetadataSuffix
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -100,6 +110,8 @@ android {
     lint {
         abortOnError = true
         checkReleaseBuilds = false
+        // versionCode 采用日期编码，已发布值只能递增；上限 2100000000 足够覆盖到 2099 年。
+        disable += "HighAppVersionCode"
     }
 
     testOptions {
@@ -118,6 +130,15 @@ android {
                 "--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
                 "--enable-native-access=ALL-UNNAMED",
             )
+        }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        // 文件名只取 versionName：构建类型标记与 CI 构建元数据都由 versionNameSuffix 带出
+        variant.outputs.forEach { output ->
+            output.outputFileName.set(output.versionName.map { "Eta-v$it.apk" })
         }
     }
 }

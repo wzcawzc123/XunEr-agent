@@ -18,7 +18,7 @@ internal class AgentContextSession(
     private val transcriptSize: () -> Int = { 0 },
     private val roleplay: Boolean = false,
 ) {
-    private val contextWindow = config.requireContextWindow()
+    private val contextWindow = config.knownContextWindow
     private var inputTokens: Int? = null
     private var compacted = false
 
