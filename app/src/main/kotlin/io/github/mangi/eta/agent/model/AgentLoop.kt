@@ -120,7 +120,14 @@ internal class AgentLoop(
             // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的
             // round1（尚无用量回执）巨型历史原样发出、trim 与 M1.2 降级同轮被挡。
             // 估量口径 round1/round2 一致，trim 只影响出站请求不改持久历史，故去前置。
-            val trimWindow = config.contextWindow
+            // R6（spec context-cost-guard）：摘要已熔断时不能再指望压缩降规模，
+            // 否则只是把「重复压缩」换成「重复超线请求」；此时把裁剪线从窗口降到触发线。
+            val window = config.contextWindow
+            val trimWindow = if (context.compactionBlockedForRun) {
+                AgentContextBudget.triggerTokens(window) ?: window
+            } else {
+                window
+            }
             if (trimWindow != null && trimWindow > 0 &&
                 AgentContextBudget.rawEstimate(requestMessages, roundTools) >= trimWindow
             ) {

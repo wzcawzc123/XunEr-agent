@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
+import io.github.mangi.eta.agent.runtime.AgentTokenUsage
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -79,6 +80,53 @@ class AgentContextCostGuardTest {
         assertEquals("无效压缩不得改写上下文", before, messages.toString())
     }
 
+    /**
+     * R6：摘要熔断后，硬裁剪线必须从「窗口」降到「触发线」。
+     *
+     * 窗口 900_000 → 触发线 200_000；历史约 78 万（未超窗口）。首轮摘要失败后，
+     * 若仍按窗口兜底，第二轮会整份重发约 78 万 tokens；修复后应被裁到触发线量级。
+     */
+    @Test
+    fun failedCompactionFallsBackToTrimAtTriggerLine() {
+        val windowConfig = config.copy(contextWindow = 900_000)
+        val events = mutableListOf<AgentEvent>()
+        val estimates = mutableListOf<Int>()
+        var chatRounds = 0
+        AgentModelClient.complete(
+            windowConfig, "继续",
+            AgentModelClient.ToolExecutor { AgentModelClient.ToolResult("""{"ok":true}""") },
+            history = trimHistory(),
+            onEvent = events::add,
+            provider = provider { request, emit ->
+                if (request.purpose == ProviderRequestPurpose.COMPACTION) {
+                    throw AgentModelFailure("CONTEXT_NO_REDUCTION", false, "fixture")
+                }
+                chatRounds++
+                estimates += AgentContextBudget.rawEstimate(request.messages)
+                if (chatRounds == 1) {
+                    emit(ProviderEvent.Usage(AgentTokenUsage(inputTokens = 800_000, outputTokens = 10)))
+                    toolCallResponse("call-1")
+                } else {
+                    response("完成")
+                }
+            },
+        )
+        assertTrue("应完成两轮对话", chatRounds >= 2)
+        assertTrue(
+            "摘要熔断后第二轮必须裁到触发线量级，实测 ${estimates.getOrNull(1)}",
+            (estimates.getOrNull(1) ?: Int.MAX_VALUE) < 300_000,
+        )
+        assertTrue(
+            "硬裁剪必须可观测（HistoryTrimmed）",
+            events.filterIsInstance<AgentEvent.HistoryTrimmed>().isNotEmpty(),
+        )
+    }
+
+    private fun trimHistory() = listOf(
+        AgentModelClient.ConversationMessage("user", "旧任务"),
+        AgentModelClient.ConversationMessage("assistant", "长".repeat(780_000)),
+    )
+
     private fun longHistory(): JSONArray =
         JSONArray().put(JSONObject().put("role", "system").put("content", "固定约束")).also { array ->
             (1..6).forEach { turn ->
@@ -91,6 +139,17 @@ class AgentContextCostGuardTest {
 
     private fun response(text: String, stop: String = "stop") = ProviderResponse(
         JSONObject().put("role", "assistant").put("content", text).put("finish_reason", stop),
+    )
+
+    private fun toolCallResponse(id: String) = ProviderResponse(
+        JSONObject()
+            .put("role", "assistant")
+            .put("content", "")
+            .put("finish_reason", "tool_calls")
+            .put("tool_calls", JSONArray().put(
+                JSONObject().put("id", id).put("type", "function")
+                    .put("function", JSONObject().put("name", "get_current_context").put("arguments", "{}")),
+            )),
     )
 
     private fun provider(block: (ProviderRequest, (ProviderEvent) -> Unit) -> ProviderResponse) = object : AgentProviderClient {

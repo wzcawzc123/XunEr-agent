@@ -1,6 +1,6 @@
 # Spec: 上下文成本护栏（context-cost-guard）
 
-状态：已实现并发布（v3.8.6，commit c899528；CI run 37563252104 全绿），待真机复验 input 峰值
+状态：已实现并发布（v3.8.6 = R1-R3 主体，commit c899528；v3.8.7 = R6 熔断期裁剪兜底），CI 全绿，待真机复验 input 峰值
 模块 id：`context-cost-guard`
 
 ## 背景与证据（真机）
@@ -26,7 +26,7 @@
 
 - R4 摘要请求输入截断 / 独立廉价摘要模型（`AgentContextSummarizer` 目前全量发主模型）
 - R5 成本口径记账（`miss + 0.1 × hit`）与 UI 可视（会话累计、压缩次数、降幅预警）
-- R6 硬裁剪 `TARGET_RATIO = 0.95` 与触发线之间的"无机制地带"
+- R6 硬裁剪 `TARGET_RATIO = 0.95` 与触发线之间的"无机制地带" → **已在 v3.8.7 实现**（熔断后裁剪线降到触发线，见行为定义 4）
 - 上游上报（R1-R3 核心逻辑源自上游 Mangi-11/Eta）
 
 ## Objective
@@ -38,6 +38,7 @@
 1. **触发线加上限**：`triggerTokens(window) = min(floor(window × 0.75), 200_000)`；窗口为空或 ≤ 0 时无触发。压缩与相关判据统一走该函数。
 2. **失败熔断**：非 `force` 的压缩尝试一旦失败，同一 run 内不再重试压缩（改为依赖既有硬裁剪兜底）；`force = true`（用户手动压缩 / run 收尾）不受熔断限制，但失败同样置位熔断。
 3. **降幅门槛**：压缩产物估算若仍 **高于触发线**，按 `CONTEXT_NO_REDUCTION` 处理并保留原文——避免"压完立刻再压"的抖动。
+4. **熔断期兜底**（v3.8.7）：压缩已熔断时，硬裁剪线从 `config.contextWindow` 降到 `triggerTokens(window)`，否则每轮仍会整份发出超线上下文；未熔断时行为不变（不影响审查 C1 的"新鲜 run 不得被过度裁剪"）。
 
 ## Tech Stack
 

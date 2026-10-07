@@ -41,6 +41,15 @@ internal class AgentContextSession(
 
     fun snapshot(): AgentContextSnapshot? = committedSnapshot
 
+    /**
+     * 本次 run 是否已因压缩失败而熔断。
+     *
+     * 熔断后不能再指望摘要降规模，调用方（[AgentLoop]）应把硬裁剪线降到触发线——
+     * 否则每轮仍会把整份超线上下文发出去，只是把「重复压缩」换成了「重复超线请求」。
+     * （spec：docs/specs/context-cost-guard.md R6）
+     */
+    val compactionBlockedForRun: Boolean get() = compactionBlocked
+
     fun observeInputTokens(tokens: Int?) {
         inputTokens = tokens?.takeIf { it >= 0 }
     }
