@@ -67,10 +67,24 @@ internal class AgentContextCompactor(
         if (result.toString().length >= messages.toString().length) {
             throw failure("CONTEXT_NO_REDUCTION", "摘要未能缩小上下文，原始上下文已保留。")
         }
+        // 压缩必须「划算」：它本身是一次全量摘要请求，且会改写历史前缀导致缓存击穿
+        // （真机实测命中率可从 99.9% 掉到 9.4%，等于全价重算）。若降幅不足，压完仍会
+        // 立刻再次触发压缩，形成抖动式重复计费——此时宁可保留原文，由熔断与硬裁剪兜底。
+        val beforeEstimate = AgentContextBudget.rawEstimate(messages)
+        val afterEstimate = AgentContextBudget.rawEstimate(result)
+        if (afterEstimate.toLong() * 100 >= beforeEstimate.toLong() * MIN_REDUCTION_PERCENT) {
+            throw failure(
+                "CONTEXT_NO_REDUCTION",
+                "摘要只把上下文从约 $beforeEstimate 降到 $afterEstimate tokens，不足以抵偿压缩自身的开销；原始上下文已保留。",
+            )
+        }
         return result
     }
 
     companion object {
+        /** 压缩后至少要比压缩前小这个百分比，才值得提交（否则视为无效压缩）。 */
+        const val MIN_REDUCTION_PERCENT = 80
+
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",
             "当前 Anthropic 工具回合的思考签名绑定原始上下文，提交工具结果前无法压缩上下文。",

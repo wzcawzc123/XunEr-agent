@@ -19,17 +19,31 @@ internal class AgentContextBudget(private val window: Int?) {
     fun estimate(messages: JSONArray, tools: JSONArray): Int =
         ceil(rawEstimate(messages, tools) * calibration).toInt()
 
-    fun shouldCompact(tokens: Int): Boolean =
-        window?.takeIf { it > 0 }?.let { tokens >= it * TRIGGER_RATIO } == true
+    fun shouldCompact(tokens: Int): Boolean = triggerTokens(window)?.let { tokens >= it } == true
 
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
         /** 触发压缩的窗口占用比例。从 0.85 降到 0.75，为系统提示、工具 schema 和本轮增长留出 25% 安全余量。 */
         const val TRIGGER_RATIO = 0.75
+
+        /**
+         * 触发线的绝对上限（tokens）。
+         *
+         * 大窗口模型（100 万级）按比例算出的触发线会让单轮成本失控：真机实测
+         * （2026-10-07，会话 conv-3d2f1ce4）在 75 万触发线下单轮 input 达 749,916 tokens，
+         * 且压缩会改写历史前缀触发缓存击穿（该轮缓存命中率从 99.9% 掉到 9.4%，等于全价重算）。
+         * 上限让触发线不随窗口无限放大：窗口越大，越不能把「还装得下」当成「应该装满」。
+         */
+        const val ABSOLUTE_TRIGGER_CAP = 200_000
         const val RECENT_MESSAGES = 4
         const val RECENT_RATIO = 0.20
         const val MAX_OVERFLOW_ATTEMPTS = 3
+
+        /** 触发压缩的占用阈值：窗口比例与绝对上限取小；窗口无效时返回 null（不触发）。 */
+        fun triggerTokens(window: Int?): Int? = window?.takeIf { it > 0 }?.let {
+            minOf((it * TRIGGER_RATIO).toInt(), ABSOLUTE_TRIGGER_CAP)
+        }
 
         fun textTokens(text: String): Int {
             var ascii = 0

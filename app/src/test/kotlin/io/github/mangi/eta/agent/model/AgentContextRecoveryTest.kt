@@ -30,8 +30,10 @@ class AgentContextRecoveryTest {
 
     @Test
     fun automaticCompactionUsesOnlyActualInputUsageAndConfiguredWindow() {
-        // 阈值 = contextWindow(900_000) × AgentContextSession.TRIGGER_RATIO；fork 策略为 0.75 → 675_000。
-        for (input in listOf(null, 300_000, 674_999, 675_000)) {
+        // 阈值 = min(contextWindow(900_000) × TRIGGER_RATIO, ABSOLUTE_TRIGGER_CAP)
+        //      = min(675_000, 200_000) = 200_000。窗口越大越不能把「还装得下」当成「应该装满」：
+        // 75 万级触发线会让单轮请求与压缩重算的成本直接失控（真机 402 案例）。
+        for (input in listOf(null, 100_000, 199_999, 200_000)) {
             var summaries = 0
             val events = mutableListOf<AgentEvent>()
             val result = AgentModelClient.complete(config, "继续",
@@ -46,11 +48,11 @@ class AgentContextRecoveryTest {
                         response("完成")
                     }
                 })
-            assertEquals(if (input == 675_000) 1 else 0, summaries)
+            assertEquals(if (input == 200_000) 1 else 0, summaries)
             assertEquals("完成", result.content)
             val completed = events.filterIsInstance<AgentEvent.ContextCompaction>().lastOrNull()
-            if (input == 675_000) {
-                assertEquals(675_000, completed!!.tokensBefore)
+            if (input == 200_000) {
+                assertEquals(200_000, completed!!.tokensBefore)
                 assertNull(completed.tokensAfter)
             } else assertNull(completed)
         }

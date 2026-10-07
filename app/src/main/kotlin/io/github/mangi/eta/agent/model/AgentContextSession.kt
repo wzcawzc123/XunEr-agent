@@ -21,6 +21,17 @@ internal class AgentContextSession(
     private val contextWindow = config.requireContextWindow()
     private var inputTokens: Int? = null
     private var compacted = false
+
+    /**
+     * 压缩失败熔断（只在本次 run 内生效）。
+     *
+     * 真机教训（2026-10-07，会话 conv-3d2f1ce4）：失败分支既不重置 [inputTokens] 也不记状态，
+     * 而每轮 loop 都会调用 [compact]，于是额度不足时退化成「每轮再压一次」的风暴——
+     * 每次压缩都是一次全量摘要请求（该会话单轮 input 达 75 万 tokens）并按全价击穿缓存，
+     * 表现为上下文压缩事件连续出现、额度瞬间耗尽（HTTP 402）。失败一次即停，
+     * 兜底交给窗口级硬裁剪，跨 run 自动恢复。
+     */
+    private var compactionBlocked = false
     private var consumedSupplementCount = 0
     private var consumedUserTurns = (systemCount until messages.length()).sumOf {
         val message = messages.getJSONObject(it)
@@ -61,13 +72,14 @@ internal class AgentContextSession(
 
     fun compact(force: Boolean = false, final: Boolean = false) {
         val before = inputTokens
+        val trigger = AgentContextBudget.triggerTokens(contextWindow)
         if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
             if (force) {
                 throw AgentContextCompactor.signedAnthropicToolRoundFailure()
             }
             return
         }
-        if (!force && (!config.autoCompactionEnabled || before == null || before < contextWindow * TRIGGER_RATIO)) {
+        if (!force && (compactionBlocked || !config.autoCompactionEnabled || before == null || trigger == null || before < trigger)) {
             try {
                 publishSnapshot()
             } catch (failure: Exception) {
@@ -100,6 +112,7 @@ internal class AgentContextSession(
             onEvent(AgentEvent.ContextCompaction(operation, AgentEvent.ContextCompaction.PHASE_COMPLETED, before))
         } catch (failure: Exception) {
             runController.throwIfCancelled()
+            compactionBlocked = true
             onEvent(AgentEvent.ContextCompaction(operation, "failed", before,
                 reasonCode = (failure as? AgentModelFailure)?.code ?: "CONTEXT_SUMMARY_FAILED"))
             if (!final) throw failure
@@ -118,7 +131,10 @@ internal class AgentContextSession(
     }
 
     companion object {
-        /** 触发压缩的窗口占用比例。fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出 25% 安全余量。internal 供档位关系锁测试读取。 */
-        const val TRIGGER_RATIO = 0.75
+        /**
+         * 触发压缩的窗口占用比例（fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出余量）。
+         * 真源在 [AgentContextBudget]，实际阈值还要与绝对上限取小，见 `triggerTokens`。
+         */
+        const val TRIGGER_RATIO = AgentContextBudget.TRIGGER_RATIO
     }
 }
