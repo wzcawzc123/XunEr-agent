@@ -532,6 +532,40 @@ class AgentModelClientLoopTest {
         )
     }
 
+
+    @Test
+    fun retiredToolNameFromHistoryIsGuidedWithoutReachingExecutor() {
+        // 真机路径复刻：run_command 已被上游从能力目录移除（42b9930），但执行分支
+        // 与显示映射都还在，长期记忆/旧会话历史里也仍有它的用法 —— 模型会复读。
+        // 它必须在能力目录层被拦下并给出迁移引导，且永远不触达执行器。
+        //
+        // 说明：这一层是"真机行为"的自动化替身。模型在**新会话**里根本发不出
+        // run_command（它不在注入的工具定义里，模型只能从列表里选），只有带旧历史
+        // 的会话才会复读 —— 那种场景无法在测试里真机重放，故用本用例覆盖同一条链路。
+        val provider = ScriptedProvider(
+            assistant(
+                finishReason = "tool_calls",
+                toolCalls = listOf(toolCall("call-1", "run_command", """{"command":"id"}""")),
+            ),
+            assistant(content = "已改用 terminal", finishReason = "stop"),
+        )
+        var executed = false
+
+        AgentModelClient.complete(
+            config = modelConfig(),
+            prompt = "执行 id",
+            toolExecutor = AgentModelClient.ToolExecutor {
+                executed = true
+                AgentModelClient.ToolResult("unexpected")
+            },
+            provider = provider,
+        )
+
+        assertFalse("run_command 绝不应触达执行器（执行分支仍在，靠能力目录层兜住）", executed)
+        val feedback = provider.requests[1].getJSONObjectFromEnd(1).getString("content")
+        assertTrue("须给出迁移引导：$feedback", feedback.contains("terminal"))
+        assertTrue("须回显旧名与等价调用：$feedback", feedback.contains("run_command"))
+    }
     @Test
     fun contradictoryStopReasonNeverExecutesToolCalls() {
         listOf("stop", "content_filter", "refusal").forEach { finishReason ->
