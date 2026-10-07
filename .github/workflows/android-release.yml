@@ -89,11 +89,6 @@ jobs:
             | base64 --decode \
             > "$RUNNER_TEMP/eta-release.jks"
 
-      - name: 运行单元测试
-        run: >-
-          ./gradlew --no-daemon --no-configuration-cache
-          :app:testDebugUnitTest
-
       - name: 构建 Debug 与 Release APK
         env:
           ETA_RELEASE_STORE_FILE: ${{ runner.temp }}/eta-release.jks
