@@ -117,8 +117,14 @@ jobs:
             exit 1
           fi
 
-          debug_apk="app/build/outputs/apk/debug/app-debug.apk"
-          release_apk="app/build/outputs/apk/release/app-release.apk"
+          # APK 文件名由 Gradle 按 versionName 生成（Eta-vX.Y.Z.apk / Eta-vX.Y.Z-debug+<sha>.apk），
+          # 用通配符查找，避免与产物命名规则耦合。
+          debug_apk="$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -n1)"
+          release_apk="$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1)"
+          if [[ -z "$debug_apk" || -z "$release_apk" ]]; then
+            echo "::error::未找到 APK 产物（debug=$debug_apk release=$release_apk）。"
+            exit 1
+          fi
           output_dir="$RUNNER_TEMP/apks"
           apksigner_path="$(find "$ANDROID_HOME/build-tools" \
             -type f -name apksigner | sort -V | tail -n 1)"
