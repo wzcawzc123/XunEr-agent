@@ -1045,7 +1045,7 @@
   <string name="linux_environment_unavailable">The current Root environment cannot create an isolated mount namespace or chroot</string>
   <string name="linux_stage_failed">%1$s failed. Check the network or try again later</string>
   <string name="linux_apk_analysis_ready">APK analysis tools are ready</string>
-  <string name="ui_androguard_2b8d4f">Androguard</string>
+  <string name="ui_androguard_2b8d4f" translatable="false">Androguard</string>
   <string name="linux_androguard_tools_ready">Androguard 4.1.4 is ready. It parses APK manifests, decodes resources, inspects code, and verifies signatures</string>
   <string name="linux_androguard_tools_summary">Install Androguard 4.1.4 (Python reverse-engineering toolkit) into an isolated environment. It can parse APK manifest, decode resources, inspect code, and verify signatures</string>
   <string name="linux_androguard_tools_installed">Androguard 4.1.4 installed</string>
