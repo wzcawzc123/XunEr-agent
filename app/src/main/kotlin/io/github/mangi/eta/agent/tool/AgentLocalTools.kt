@@ -1036,12 +1036,17 @@ internal class AgentLocalTools(
             )
         }
         if (requestedSpace == "screen") {
-            val (width, height) = space?.let { it.screenWidth to it.screenHeight }
-                ?: deviceController.screenDimensions()
-            if (x !in 0 until width || y !in 0 until height) {
-                throw InvalidToolArgumentException(
-                    "屏幕坐标超出范围：($x,$y) not in ${width}x$height",
-                )
+            // screen 坐标本身就是设备屏幕坐标：拿不到尺寸时跳过范围校验，让"设备能力不可用"
+            // 由后续检查报告，而不是把合法参数误判为非法（无障碍未连接时即如此）。
+            val dimensions = space?.let { it.screenWidth to it.screenHeight }
+                ?: runCatching { deviceController.screenDimensions() }.getOrNull()
+            if (dimensions != null) {
+                val (width, height) = dimensions
+                if (x !in 0 until width || y !in 0 until height) {
+                    throw InvalidToolArgumentException(
+                        "屏幕坐标超出范围：($x,$y) not in ${width}x$height",
+                    )
+                }
             }
             return ScreenPoint(x, y)
         }
