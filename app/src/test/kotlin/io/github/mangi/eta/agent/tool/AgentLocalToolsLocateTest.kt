@@ -88,7 +88,7 @@ class AgentLocalToolsLocateTest {
             observation("o-blank", nodes = listOf(node(1, "打开")))
         }
         val payload = JSONObject(tools.execute(call("""{"query":"  "}""")).content)
-        assertEquals("INVALID_TOOL_ARGUMENTS", payload.getString("code"))
+        assertEquals("INVALID_ARGUMENT", payload.getString("code"))
         assertFalse("空 query 不应触发快照抓取", providerCalled)
         tools.close()
     }

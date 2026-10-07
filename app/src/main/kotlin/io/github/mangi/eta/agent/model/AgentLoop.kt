@@ -384,7 +384,7 @@ internal class AgentLoop(
                 code = if (toolCallValidator.isRedactedReplay(toolCall)) {
                     "REDACTED_ARGUMENTS_REPLAYED"
                 } else {
-                    "INVALID_TOOL_ARGUMENTS"
+                    "INVALID_ARGUMENT"
                 },
                 message = validationError,
             )

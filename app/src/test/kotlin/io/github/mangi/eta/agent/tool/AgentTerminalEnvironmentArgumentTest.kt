@@ -33,7 +33,7 @@ class AgentTerminalEnvironmentArgumentTest {
 
             val payload = JSONObject(result.content)
             assertFalse("不可识别的 environment 不能被静默当成 android", payload.getBoolean("ok"))
-            assertEquals("INVALID_TOOL_ARGUMENTS", payload.getString("code"))
+            assertEquals("INVALID_ARGUMENT", payload.getString("code"))
         }
     }
 

@@ -61,7 +61,7 @@ internal class CharacterMemoryTools(
         } catch (failure: AgentMemoryException) {
             result(error(failure.code, failure.message ?: "角色记忆操作失败"))
         } catch (_: JSONException) {
-            result(error("INVALID_TOOL_ARGUMENTS", "角色记忆工具参数无效"))
+            result(error("INVALID_ARGUMENT", "角色记忆工具参数无效"))
         }
     }
 

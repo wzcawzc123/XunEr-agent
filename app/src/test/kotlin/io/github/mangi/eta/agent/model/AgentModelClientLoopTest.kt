@@ -53,7 +53,7 @@ class AgentModelClientLoopTest {
         val provider = ScriptedProvider(listOf(
             { _, _ -> assistant(finishReason = "tool_calls", toolCalls = listOf(toolCall("local-search", "web_search", """{"query":"example"}"""))) },
             { request, _ ->
-                assertTrue(request.messages.toString().contains("INVALID_TOOL_ARGUMENTS"))
+                assertTrue(request.messages.toString().contains("INVALID_ARGUMENT"))
                 assistant(content = "已使用可用能力", finishReason = "stop")
             },
         ))
@@ -84,7 +84,7 @@ class AgentModelClientLoopTest {
                 ))
             },
             { request, _ ->
-                assertTrue(request.messages.toString().contains("INVALID_TOOL_ARGUMENTS"))
+                assertTrue(request.messages.toString().contains("INVALID_ARGUMENT"))
                 assistant(content = "完成", finishReason = "stop")
             },
         ))
@@ -528,7 +528,7 @@ class AgentModelClientLoopTest {
             provider.requests[1]
                 .getJSONObjectFromEnd(1)
                 .getString("content")
-                .contains("INVALID_TOOL_ARGUMENTS")
+                .contains("INVALID_ARGUMENT")
         )
     }
 

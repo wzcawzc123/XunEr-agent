@@ -470,7 +470,7 @@ internal class AgentLocalTools(
                 AgentMemoryMutation.Clear(revision)
             }
             else -> throw AgentMemoryException(
-                code = "INVALID_TOOL_ARGUMENTS",
+                code = "INVALID_ARGUMENT",
                 message = "不支持的记忆写入模式 $mode；可用：replace_section / replace_range / append / clear。",
             )
         }
@@ -570,7 +570,7 @@ internal class AgentLocalTools(
     private fun locate(args: JSONObject): String {
         val query = args.optString("query")
         if (query.isBlank()) {
-            return errorResult("INVALID_TOOL_ARGUMENTS", "query 不能为空：给出要定位的文本/描述/viewId 子串")
+            return errorResult("INVALID_ARGUMENT", "query 不能为空：给出要定位的文本/描述/viewId 子串")
         }
         val maxNodes = args.optInt("max_nodes", 120).coerceIn(1, 120)
         val observation = screenObservationProvider?.invoke(
@@ -1165,7 +1165,7 @@ internal class AgentLocalTools(
         if (!isValidTerminalEnvironmentArgument(requestedEnvironment)) {
             return JSONObject()
                 .put("ok", false)
-                .put("code", "INVALID_TOOL_ARGUMENTS")
+                .put("code", "INVALID_ARGUMENT")
                 .put("message", "environment 仅支持 android/linux，实际收到：$requestedEnvironment")
                 .toString()
         }
