@@ -1037,7 +1037,6 @@
   <string name="linux_busybox_unavailable">Root 环境缺少可用的 BusyBox 或必要 applet</string>
   <string name="linux_environment_unavailable">当前 Root 环境无法创建隔离 mount namespace 或 chroot</string>
   <string name="linux_stage_failed">%1$s失败，请检查网络或稍后重试</string>
-  <string name="linux_apk_analysis_ready">APK 分析工具已经就绪</string>
   <string name="linux_base_required">请先安装当前选中的 Linux 基础环境</string>
   <string name="linux_insufficient_space">空间不足：至少需要 %1$s，当前剩余 %2$s</string>
   <string name="linux_apk_analysis_installed">JADX、Apktool、smali 与 baksmali 安装完成</string>
