@@ -118,6 +118,16 @@
   <string name="linux_files_error_not_file">不是普通文件</string>
   <string name="linux_files_binary_hint">二进制文件，无法预览</string>
   <string name="linux_files_truncated_hint">内容过大，仅显示开头部分</string>
+  <string name="linux_apk_analysis_ready">APK 分析工具已就绪</string>
+  <string name="linux_androguard_tools_ready">Androguard 4.1.4 已就绪。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
+  <string name="linux_androguard_tools_summary">在隔离环境中安装 Androguard 4.1.4（Python 逆向工程工具集）。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
+  <string name="linux_androguard_tools_installed">Androguard 4.1.4 已安装</string>
+  <string name="linux_androguard_tools_ready_short">Androguard 工具已就绪</string>
+  <string name="linux_androguard_stage_failed">%1$s 失败。请稍后重试</string>
+  <string name="linux_androguard_stage_checking">正在检查 Linux 基础环境</string>
+  <string name="linux_androguard_stage_installing">正在安装 Androguard 4.1.4</string>
+  <string name="linux_androguard_stage_verifying">正在校验 Androguard 命令</string>
+  <string name="linux_androguard_stage_complete">Androguard 工具已就绪</string>
   <string name="route_model_providers">模型提供商</string>
   <string name="route_provider_details">Provider 详情</string>
   <string name="route_new_provider">新建提供商</string>

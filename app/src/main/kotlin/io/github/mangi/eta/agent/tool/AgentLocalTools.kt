@@ -219,6 +219,10 @@ internal class AgentLocalTools(
                 "scroll" -> afterAction(deviceController.scroll(args.optString("direction"), args.optString("amount")).also { contentVersion++ })
                 "scroll_element" -> afterAction(scrollElement(args).also { contentVersion++ })
                 "type_text" -> afterAction(typeText(args))
+                // 旧会话或旧入口仍可能请求这些工具名；保留执行路径，但不再出现在模型目录里。
+                "input_text" -> afterAction(inputText(args))
+                "replace_text" -> afterAction(replaceText(args))
+                "clear_text" -> afterAction(clearText(args))
                 "set_clipboard" -> textResult(setClipboard(args))
                 "get_clipboard" -> textResult(getClipboard())
                 "paste_text" -> afterAction(pasteText(args))
@@ -809,19 +813,20 @@ internal class AgentLocalTools(
     }
 
     private fun tap(args: JSONObject): String {
-        ensureCoordinateFreshness()
         val point = convertPoint(
             x = args.optInt("x"),
             y = args.optInt("y"),
             coordinateSpace = args.optString("coordinate_space")
         )
+        // 参数契约优先（上游 3.3.0）：缺失或非法的 coordinate_space 必须先回 INVALID_ARGUMENT，
+        // 随后再做本 fork 的观察新鲜度检查（F1）。
+        ensureCoordinateFreshness()
         AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
         showTap(point.x, point.y)
         return deviceController.tap(point.x, point.y)
     }
 
     private fun tapArea(args: JSONObject): String {
-        ensureCoordinateFreshness()
         val x1 = args.optInt("x1")
         val y1 = args.optInt("y1")
         val x2 = args.optInt("x2")
@@ -829,6 +834,7 @@ internal class AgentLocalTools(
         val coordinateSpace = args.optString("coordinate_space")
         val first = convertPoint(x1, y1, coordinateSpace)
         val second = convertPoint(x2, y2, coordinateSpace)
+        ensureCoordinateFreshness()
         val point = ScreenPoint(
             x = ((first.x.toLong() + second.x.toLong()) / 2L).toInt(),
             y = ((first.y.toLong() + second.y.toLong()) / 2L).toInt(),
@@ -870,12 +876,12 @@ internal class AgentLocalTools(
     }
 
     private fun longPress(args: JSONObject): String {
-        ensureCoordinateFreshness()
         val point = convertPoint(
             x = args.optInt("x"),
             y = args.optInt("y"),
             coordinateSpace = args.optString("coordinate_space")
         )
+        ensureCoordinateFreshness()
         val durationMs = args.optInt("duration_ms", 800)
         AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.LONG_PRESS)
         showLongPress(point.x, point.y, durationMs)
