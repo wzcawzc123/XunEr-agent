@@ -30,7 +30,23 @@ internal class AgentContextCompactor(
         val end = compactEnd(history)
             ?: throw failure("CONTEXT_NOT_COMPACTABLE", "没有可安全压缩的完整历史批次。")
         val protectedUser = history.getOrNull(latestUser)?.takeIf { latestUser < end }
-        val source = JSONArray(history.take(end).filterNot { it === protectedUser })
+        val inRange = history.take(end)
+        // 多代检查点：最近的一条旧检查点原样保留、不参与重写，更早的检查点才合并进新摘要。
+        // 这样"摘要的摘要"不会每轮把上一代重写一遍，显著减缓多代压缩的信息漂移。
+        val keptCheckpointIndexes = inRange.withIndex()
+            .filter { it.value.optBoolean("_eta_context_summary") }
+            .map { it.index }
+            .takeLast(KEEP_RECENT_CHECKPOINTS)
+            .toSet()
+        val source = JSONArray()
+        val keptCheckpoints = JSONArray()
+        inRange.forEachIndexed { index, message ->
+            when {
+                message === protectedUser -> Unit
+                index in keptCheckpointIndexes -> keptCheckpoints.put(message)
+                else -> source.put(message)
+            }
+        }
         val durable = AgentConversationCodec.transcript(source, 0, sensitiveIds)
         if (durable.isEmpty()) throw failure("CONTEXT_NOT_COMPACTABLE", "没有可压缩的历史内容。")
         val safe = durable.map { message ->
@@ -50,6 +66,7 @@ internal class AgentContextCompactor(
         val anchor = anchorText(history)
         val result = JSONArray()
         for (index in 0 until systemCount) result.put(messages.getJSONObject(index))
+        for (index in 0 until keptCheckpoints.length()) result.put(keptCheckpoints.getJSONObject(index))
         result.put(AgentConversationCodec.toJsonObject(AgentModelClient.ConversationMessage(
             role = "assistant",
             content = buildString {
@@ -123,18 +140,21 @@ internal class AgentContextCompactor(
      */
     private fun anchorText(history: List<JSONObject>): String? {
         history.forEach { message ->
-            if (!message.optBoolean("contextSummary")) return@forEach
+            if (!message.optBoolean("_eta_context_summary")) return@forEach
             val found = ANCHOR_BLOCK.find(message.optString("content"))?.groupValues?.get(1)?.trim()
             if (!found.isNullOrBlank()) return found
         }
         return history.firstOrNull {
-            it.optString("role") == "user" && !it.has("_eta_observation") && !it.optBoolean("contextSummary")
+            it.optString("role") == "user" && !it.has("_eta_observation") && !it.optBoolean("_eta_context_summary")
         }?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
     }
 
     companion object {
         /** 压缩后至少要比压缩前小这个百分比，才值得提交（否则视为无效压缩）。 */
         const val MIN_REDUCTION_PERCENT = 80
+
+        /** 原样保留、不参与重写的检查点代数（1 = 只保最近一代，更早的合并进新摘要）。 */
+        const val KEEP_RECENT_CHECKPOINTS = 1
 
         const val ANCHOR_HEADER = "[原始任务（逐字保留，勿改写）]"
 

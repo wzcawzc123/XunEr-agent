@@ -152,6 +152,45 @@ class AgentContextCostGuardTest {
         assertTrue("压缩后必须显著小于原文", compacted.toString().length < before.length)
     }
 
+    /**
+     * 多代检查点：上一代摘要原样保留、不被重写，只有更早的检查点才合并进新摘要。
+     *
+     * 这是「长对话不失忆」的第二道保险（第一道是需求锚点）：避免"摘要的摘要"每轮把
+     * 上一代重写一遍而累积漂移。
+     */
+    @Test
+    fun previousCheckpointIsKeptInsteadOfBeingRewritten() {
+        val previous = AgentConversationCodec.toJsonObject(AgentModelClient.ConversationMessage(
+            role = "assistant",
+            content = "[Eta 上下文摘要：先前历史]\n旧检查点标记：阶段一已完成 A、B。\n\n" +
+                "${AgentContextCompactor.ANCHOR_HEADER}\n把压缩策略做成八成触发",
+            contextSummary = true,
+        ))
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "固定约束"))
+        messages.put(previous)
+        (1..40).forEach { turn ->
+            messages.put(AgentConversationCodec.userTextMessage("第 $turn 轮追问"))
+            messages.put(AgentConversationCodec.toJsonObject(
+                AgentModelClient.ConversationMessage("assistant", "进展 $turn ".repeat(400)),
+            ))
+        }
+        val compacted = AgentContextCompactor(config, provider { _, _ -> response("## 原始需求与意图\n- 新检查点") }, AgentRunController())
+            .compact(messages, 1, emptySet())
+        val summaries = (0 until compacted.length())
+            .map { compacted.getJSONObject(it) }
+            .filter { it.optBoolean("_eta_context_summary") }
+        assertEquals("应保留旧检查点与新检查点各一条", 2, summaries.size)
+        assertTrue(
+            "旧检查点必须原样保留（不被重写）",
+            summaries.first().optString("content").contains("旧检查点标记"),
+        )
+        assertTrue(
+            "新检查点必须生成",
+            summaries.last().optString("content").contains("新检查点"),
+        )
+        assertTrue("锚点必须继续逐字在场", compacted.toString().contains("把压缩策略做成八成触发"))
+    }
+
     private fun trimHistory() = listOf(
         AgentModelClient.ConversationMessage("user", "旧任务"),
         AgentModelClient.ConversationMessage("assistant", "长".repeat(780_000)),

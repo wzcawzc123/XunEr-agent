@@ -120,7 +120,7 @@ class AgentContextRecoveryTest {
 
     @Test
     fun invalidSummaryDoesNotRetryAndKeepsOriginalHistory() {
-        for ((content, stop) in listOf("" to "stop", "半截" to "length", "长".repeat(12_001) to "stop")) {
+        for ((content, stop) in listOf("" to "stop", "半截" to "length", "长".repeat(16_001) to "stop")) {
             val messages = messages()
             val original = messages.toString()
             var requests = 0
