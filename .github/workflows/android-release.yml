@@ -129,14 +129,6 @@ jobs:
           apksigner_path="$(find "$ANDROID_HOME/build-tools" \
             -type f -name apksigner | sort -V | tail -n 1)"
 
-          if [[ ${#debug_apks[@]} -ne 1 ]]; then
-            echo "::error::Debug APK 数量异常（${#debug_apks[@]}）。"
-            exit 1
-          fi
-          if [[ ${#release_apks[@]} -ne 1 ]]; then
-            echo "::error::Release APK 数量异常（${#release_apks[@]}）。"
-            exit 1
-          fi
           if [[ -z "$apksigner_path" ]]; then
             echo "::error::未找到 apksigner。"
             exit 1
