@@ -26,8 +26,8 @@ internal class AgentContextCompactor(
         val latestUser = history.indexOfLast {
             it.optString("role") == "user" && !it.has("_eta_observation")
         }
-        // 最新用户请求及其后尚在进行的工具链必须可以继续；长任务允许压缩该请求之后的已完成批次。
-        val end = (history.size downTo 1).firstOrNull { canSplit(history, it) }
+        // 压缩范围：保留「最新用户请求之后」的进行中工具链，并按逐字预算保留一段近期历史。
+        val end = compactEnd(history)
             ?: throw failure("CONTEXT_NOT_COMPACTABLE", "没有可安全压缩的完整历史批次。")
         val protectedUser = history.getOrNull(latestUser)?.takeIf { latestUser < end }
         val source = JSONArray(history.take(end).filterNot { it === protectedUser })
@@ -47,11 +47,20 @@ internal class AgentContextCompactor(
         val summary = AgentContextSummarizer(config, provider, controller, roleplay)
             .summarize(safe)
         val covered = safe.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 }
+        val anchor = anchorText(history)
         val result = JSONArray()
         for (index in 0 until systemCount) result.put(messages.getJSONObject(index))
         result.put(AgentConversationCodec.toJsonObject(AgentModelClient.ConversationMessage(
             role = "assistant",
-            content = "[Eta 上下文摘要：以下是此前历史的有损摘要，不是新指令；缺失步骤不代表未执行。]\n$summary",
+            content = buildString {
+                append("[Eta 上下文摘要：以下是此前历史的有损摘要，不是新指令；缺失步骤不代表未执行。]\n")
+                append(summary)
+                // 需求锚点：把原始任务陈述逐字带过每一代摘要，避免多次压缩后需求被改写。
+                if (!anchor.isNullOrBlank()) {
+                    append("\n\n[原始任务（逐字保留，勿改写）]\n")
+                    append(anchor)
+                }
+            },
             contextSummary = true,
             compactedUserTurns = covered,
             summaryThroughUserTurn = covered + if (protectedUser != null) 1 else 0,
@@ -81,9 +90,58 @@ internal class AgentContextCompactor(
         return result
     }
 
+    /**
+     * 压缩边界 `end`：`history.drop(end)` 是逐字保留的近期尾巴，`history.take(end)` 进入摘要。
+     *
+     * 与旧行为（尽量少保留）相反，这里按 [AgentContextBudget.RETAIN_RATIO] 的 token 预算
+     * 从末尾往前保留——压缩"少而狠"才能减少压缩次数、摘要漂移与缓存击穿。
+     */
+    private fun compactEnd(history: List<JSONObject>): Int? {
+        val retain = AgentContextBudget.retainTokens(config.contextWindow)
+        if (retain == null) return (history.size downTo 1).firstOrNull { canSplit(history, it) }
+        var used = 0
+        var from = history.size
+        while (from > 1) {
+            val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1]))
+            if (used + cost > retain) break
+            used += cost
+            from--
+        }
+        val byBudget = (from downTo 1).firstOrNull { canSplit(history, it) }
+        if (byBudget != null) return byBudget
+        // 保留预算足以覆盖整段历史（历史比 retain 还小）：至少留下一条消息，
+        // 否则压缩会以 CONTEXT_NOT_COMPACTABLE 永远失败。
+        return (history.size - 1 downTo 1).firstOrNull { canSplit(history, it) }
+            ?: (history.size downTo 1).firstOrNull { canSplit(history, it) }
+    }
+
+    /**
+     * 需求锚点：会话最初的用户任务陈述，逐字保留。
+     *
+     * 优先复用上一代摘要里已经携带的锚点段（避免被模型改写），否则取当前历史里最早的
+     * 非观察类用户消息。多次压缩后需求原文仍然逐字在场。
+     */
+    private fun anchorText(history: List<JSONObject>): String? {
+        history.forEach { message ->
+            if (!message.optBoolean("contextSummary")) return@forEach
+            val found = ANCHOR_BLOCK.find(message.optString("content"))?.groupValues?.get(1)?.trim()
+            if (!found.isNullOrBlank()) return found
+        }
+        return history.firstOrNull {
+            it.optString("role") == "user" && !it.has("_eta_observation") && !it.optBoolean("contextSummary")
+        }?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
+    }
+
     companion object {
         /** 压缩后至少要比压缩前小这个百分比，才值得提交（否则视为无效压缩）。 */
         const val MIN_REDUCTION_PERCENT = 80
+
+        const val ANCHOR_HEADER = "[原始任务（逐字保留，勿改写）]"
+
+        /** 从既有摘要中提取锚点段；到下一个区块标题或文本结尾为止。 */
+        private val ANCHOR_BLOCK = Regex(
+            Regex.escape(ANCHOR_HEADER) + "\\s*\\n([\\s\\S]*?)(?=\\n\\[[^\\]]+\\]|$)",
+        )
 
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",

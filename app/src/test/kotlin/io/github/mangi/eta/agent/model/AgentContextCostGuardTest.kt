@@ -11,8 +11,8 @@ import org.junit.Test
 /**
  * 上下文成本护栏（spec：`docs/specs/context-cost-guard.md`）。
  *
- * 起因：真机会话 conv-3d2f1ce4 在 75 万触发线下单轮 input 达 749,916 tokens，
- * 压缩失败后每轮重试一次全量摘要请求，额度瞬间耗尽（HTTP 402）。
+ * 阈值公式对齐 deepseek-ai/deepseek-harness `compaction-basic`（MIT）：
+ * `min(W × thresholdRatio, W − 输出预留 − 余量)`，保留比例同为 0.16。
  */
 class AgentContextCostGuardTest {
     private val config = AgentModelClient.ModelConfig(
@@ -21,15 +21,19 @@ class AgentContextCostGuardTest {
     )
 
     @Test
-    fun triggerLineIsCappedByAbsoluteLimitForLargeWindows() {
-        assertEquals(200_000, AgentContextBudget.triggerTokens(1_000_000))
-        assertEquals(200_000, AgentContextBudget.triggerTokens(900_000))
-        assertEquals(192_000, AgentContextBudget.triggerTokens(256_000))
-        assertEquals(96_000, AgentContextBudget.triggerTokens(128_000))
+    fun triggerAndRetainBudgetsFollowHarnessFormula() {
+        // W = 1,048,576：reserve = min(16384, W/16) = 16384；headroom = min(65536, W/8) = 65536
+        // pressureBudget = W − 16384 − 65536 = 966,656；byRatio = W × 0.8 = 838,860 → 取小 = 838,860
+        assertEquals(838_860, AgentContextBudget.triggerTokens(1_048_576))
+        assertEquals(165_150, AgentContextBudget.retainTokens(1_048_576))
+        assertEquals(800_000, AgentContextBudget.triggerTokens(1_000_000))
+        assertEquals(204_800, AgentContextBudget.triggerTokens(256_000))
+        assertEquals(102_400, AgentContextBudget.triggerTokens(128_000))
+        assertEquals(64_000, AgentContextBudget.triggerTokens(80_000))
         assertNull(AgentContextBudget.triggerTokens(null))
         assertNull(AgentContextBudget.triggerTokens(0))
-        assertFalse(AgentContextBudget(1_000_000).shouldCompact(199_999))
-        assertTrue(AgentContextBudget(1_000_000).shouldCompact(200_000))
+        assertFalse(AgentContextBudget(1_048_576).shouldCompact(838_859))
+        assertTrue(AgentContextBudget(1_048_576).shouldCompact(838_860))
     }
 
     @Test
@@ -81,14 +85,13 @@ class AgentContextCostGuardTest {
     }
 
     /**
-     * R6：摘要熔断后，硬裁剪线必须从「窗口」降到「触发线」。
-     *
-     * 窗口 900_000 → 触发线 200_000；历史约 78 万（未超窗口）。首轮摘要失败后，
-     * 若仍按窗口兜底，第二轮会整份重发约 78 万 tokens；修复后应被裁到触发线量级。
+     * 80% 档（W = 900_000 → 触发线 720_000）下，摘要熔断后硬裁剪线必须降到触发线，
+     * 否则每轮仍会整份发出超线上下文。
      */
     @Test
     fun failedCompactionFallsBackToTrimAtTriggerLine() {
         val windowConfig = config.copy(contextWindow = 900_000)
+        val trigger = AgentContextBudget.triggerTokens(900_000)!!
         val events = mutableListOf<AgentEvent>()
         val estimates = mutableListOf<Int>()
         var chatRounds = 0
@@ -113,13 +116,40 @@ class AgentContextCostGuardTest {
         )
         assertTrue("应完成两轮对话", chatRounds >= 2)
         assertTrue(
-            "摘要熔断后第二轮必须裁到触发线量级，实测 ${estimates.getOrNull(1)}",
-            (estimates.getOrNull(1) ?: Int.MAX_VALUE) < 300_000,
+            "摘要熔断后第二轮必须裁到触发线（$trigger）以内，实测 ${estimates.getOrNull(1)}",
+            (estimates.getOrNull(1) ?: Int.MAX_VALUE) < trigger,
         )
         assertTrue(
             "硬裁剪必须可观测（HistoryTrimmed）",
             events.filterIsInstance<AgentEvent.HistoryTrimmed>().isNotEmpty(),
         )
+    }
+
+    /**
+     * 压缩必须同时做到：逐字带过需求锚点、保留一段近期历史（`retainRatio` 预算）。
+     *
+     * 这是「80% 才压缩」能成立的前提——压缩次数少了，但每次都要保住需求原文与近期上下文，
+     * 否则多代摘要会漂移，模型越来越看不懂用户到底要什么。
+     */
+    @Test
+    fun compactionCarriesVerbatimAnchorAndKeepsRecentTail() {
+        val anchor = "原始需求：把显示模块的压缩触发线改成窗口的八成，并且不要丢掉我的原始需求。"
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "固定约束"))
+        messages.put(AgentConversationCodec.userTextMessage(anchor))
+        (1..40).forEach { turn ->
+            messages.put(AgentConversationCodec.userTextMessage("第 $turn 轮追问"))
+            messages.put(AgentConversationCodec.toJsonObject(
+                AgentModelClient.ConversationMessage("assistant", "进展 $turn ".repeat(400)),
+            ))
+        }
+        val before = messages.toString()
+        val compacted = AgentContextCompactor(config, provider { _, _ -> response("## 原始需求与意图\n- 改触发线") }, AgentRunController())
+            .compact(messages, 1, emptySet())
+        val text = compacted.toString()
+        assertTrue("锚点段必须带标题", text.contains(AgentContextCompactor.ANCHOR_HEADER))
+        assertTrue("需求锚点必须逐字保留", text.contains(anchor))
+        assertTrue("最近一轮必须逐字保留（retainRatio 预算）", text.contains("进展 40"))
+        assertTrue("压缩后必须显著小于原文", compacted.toString().length < before.length)
     }
 
     private fun trimHistory() = listOf(

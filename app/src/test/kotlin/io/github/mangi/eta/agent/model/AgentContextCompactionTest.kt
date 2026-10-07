@@ -97,7 +97,7 @@ class AgentContextCompactionTest {
         assertEquals(listOf("完成最新请求"), result.transcript.map { it.content })
         val snapshot = checkNotNull(result.contextSnapshot)
         assertTrue(snapshot.messages.any { it.contextSummary })
-        assertEquals("最新请求必须保留", snapshot.messages.last().content)
+        assertTrue("最新用户请求必须逐字保留", snapshot.messages.any { it.role == "user" && it.content == "最新请求必须保留" })
         assertEquals(9, snapshot.consumedUserTurns)
         assertTrue(events.filterIsInstance<AgentEvent.ContextCompaction>().any { it.phase == "completed" })
         assertTrue(snapshots.all { AgentContextSnapshot.decode(it.encode()) == it })
@@ -249,8 +249,8 @@ class AgentContextCompactionTest {
     @Test
     fun budgetUsesModelWindowAndUsageCalibrationWithoutCountingImageBase64() {
         val budget = AgentContextBudget(10_000)
-        assertFalse(budget.shouldCompact(7499))
-        assertTrue(budget.shouldCompact(7500))
+        assertFalse(budget.shouldCompact(7999))
+        assertTrue(budget.shouldCompact(8000))
         assertFalse(budget.shouldCompact(0))
         assertFalse(AgentContextBudget(null).shouldCompact(Int.MAX_VALUE))
         assertEquals(4, AgentContextBudget.textTokens("中文测试"))

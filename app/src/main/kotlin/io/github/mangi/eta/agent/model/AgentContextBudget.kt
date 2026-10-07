@@ -24,26 +24,68 @@ internal class AgentContextBudget(private val window: Int?) {
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
-        /** 触发压缩的窗口占用比例。从 0.85 降到 0.75，为系统提示、工具 schema 和本轮增长留出 25% 安全余量。 */
-        const val TRIGGER_RATIO = 0.75
+        /**
+         * 触发压缩的窗口占用比例（0.8，与 DeepSeek Harness 的 `thresholdRatio` 默认值一致）。
+         *
+         * 阈值取两个约束的较小者：窗口比例，以及「窗口 − 输出预留 − 余量」。
+         * 参考实现：deepseek-ai/deepseek-harness `packages/compaction/compaction-basic/src/config.ts`
+         * 的 `resolveCompactSpec`（MIT）。
+         */
+        const val TRIGGER_RATIO = 0.8
 
         /**
-         * 触发线的绝对上限（tokens）。
+         * 路由请求的输出预留（tokens）。
          *
-         * 大窗口模型（100 万级）按比例算出的触发线会让单轮成本失控：真机实测
-         * （2026-10-07，会话 conv-3d2f1ce4）在 75 万触发线下单轮 input 达 749,916 tokens，
-         * 且压缩会改写历史前缀触发缓存击穿（该轮缓存命中率从 99.9% 掉到 9.4%，等于全价重算）。
-         * 上限让触发线不随窗口无限放大：窗口越大，越不能把「还装得下」当成「应该装满」。
+         * harness 取"生效信封的 maxTokens"；本工程的 [AgentModelClient.ModelConfig] 暂无请求级
+         * 输出上限，故取保守常量。若将来引入请求级 maxTokens，应改为读取实际值。
          */
-        const val ABSOLUTE_TRIGGER_CAP = 200_000
-        const val RECENT_MESSAGES = 4
-        const val RECENT_RATIO = 0.20
-        const val MAX_OVERFLOW_ATTEMPTS = 3
+        const val OUTPUT_RESERVE_TOKENS = 16_384
 
-        /** 触发压缩的占用阈值：窗口比例与绝对上限取小；窗口无效时返回 null（不触发）。 */
-        fun triggerTokens(window: Int?): Int? = window?.takeIf { it > 0 }?.let {
-            minOf((it * TRIGGER_RATIO).toInt(), ABSOLUTE_TRIGGER_CAP)
+        /** 额外压力余量（tokens），与 harness 默认 65536 一致。 */
+        const val HEADROOM_TOKENS = 65_536
+
+        /**
+         * 逐字保留的近期历史比例（相对「窗口 − 输出预留」），与 harness 默认 0.16 一致。
+         *
+         * 保留足够的近期上下文，能让压缩"少而狠"：压完常驻 ≈ retain + 摘要，
+         * 之后要重新长到触发线才会再压，压缩次数（以及随之而来的摘要漂移与缓存击穿）都随之下降。
+         */
+        const val RETAIN_RATIO = 0.16
+
+        /** 触发线的绝对上限；0 表示不设上限（按 harness 行为纯比例）。 */
+        const val ABSOLUTE_TRIGGER_CAP = 0
+
+        const val RECENT_MESSAGES = 4
+
+        /** 触发压缩的占用阈值：窗口比例与「窗口 − 输出预留 − 余量」取小；窗口无效时返回 null。 */
+        fun triggerTokens(window: Int?): Int? {
+            val w = window?.takeIf { it > 0 } ?: return null
+            val resolved = minOf((w * TRIGGER_RATIO).toInt(), pressureBudgetTokens(w))
+            if (resolved <= 0) return null
+            return if (ABSOLUTE_TRIGGER_CAP > 0) minOf(resolved, ABSOLUTE_TRIGGER_CAP) else resolved
         }
+
+        /** 压缩后逐字保留的近期历史预算；窗口无效时返回 null（保留全部由调用方决定）。 */
+        fun retainTokens(window: Int?): Int? {
+            val w = window?.takeIf { it > 0 } ?: return null
+            val messageBudget = w - outputReserveTokens(w)
+            if (messageBudget <= 0) return null
+            return (messageBudget * RETAIN_RATIO).toInt()
+        }
+
+        /**
+         * 输出预留：小窗口下按比例收缩。
+         *
+         * harness 在加载期直接报配置错误（要求「窗口 − 输出预留 − 余量」为正）；Eta 允许用户
+         * 给任意模型填任意窗口，故按比例退化，保证小窗口模型仍能自动压缩。
+         */
+        fun outputReserveTokens(window: Int): Int = minOf(OUTPUT_RESERVE_TOKENS, window / 16)
+
+        /** 额外压力余量：同样按窗口收缩。 */
+        fun headroomTokens(window: Int): Int = minOf(HEADROOM_TOKENS, window / 8)
+
+        private fun pressureBudgetTokens(window: Int): Int =
+            window - outputReserveTokens(window) - headroomTokens(window)
 
         fun textTokens(text: String): Int {
             var ascii = 0

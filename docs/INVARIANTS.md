@@ -14,7 +14,7 @@
 | F5 | `memory_get` 分页必须给出 `next_start_line` + `paging_hint`；末页停止提示；query 结果不带分页字段 | `agent\/tool\/AgentLocalTools.kt`（memory 分发） | `AgentMemoryGetPagingTest`（3 例） | ✅ |
 | F6 | 核心记忆按 heading 分段**全量合并**注入，超预算按行截断（UTF-16 安全）并报告续读，不得只取第一段 | `agent\/memory\/AgentMemoryContextBuilder.kt` | `AgentMemoryContextBuilderTest.everyCoreHeadingSectionIsMergedIntoTheInjectedCore` 等 6 例 | ✅ |
 | F7 | `read_image` 结果必须携带 `image_width`\/`image_height`（原图像素尺寸）与“与 screen 不一致禁止推算坐标”提示 | `agent\/tool\/AgentImageTools.kt` | `AgentImageToolsTest.readImageReportsPixelDimensionsAndCoordinateWarning`（Robolectric，CI 侧验证） | ✅ |
-| F8 | 上下文成本护栏：压缩触发线 = `min(窗口×0.75, 200_000)`；压缩失败即熔断（本 run 内不再重试非强制压缩，`force` 不受限）；压缩降幅不足 20% 判 `CONTEXT_NO_REDUCTION` 且不得改写上下文；熔断后硬裁剪线降到触发线 | `agent\/model\/AgentContextBudget.kt`（`triggerTokens`\/`ABSOLUTE_TRIGGER_CAP`）、`AgentContextSession.kt`（`compactionBlocked`\/`compactionBlockedForRun`）、`AgentContextCompactor.kt`（`MIN_REDUCTION_PERCENT`）、`AgentLoop.kt`（熔断后 `trimWindow`） | `AgentContextCostGuardTest`（5 例，含 `failedCompactionFallsBackToTrimAtTriggerLine`）+ `AgentContextRecoveryTest`（触发线阈值用例） | ✅ |
+| F8 | 上下文成本护栏：触发线 = `min(floor(窗口×0.8), 窗口−输出预留−余量)`（小窗口按 W/16、W/8 收缩）；压缩按 `(窗口−输出预留)×0.16` 逐字保留尾部；需求锚点逐字带过每代摘要；压缩失败即熔断（本 run 内不再重试非强制压缩）；降幅不足 20% 判 `CONTEXT_NO_REDUCTION`；熔断后硬裁剪线降到触发线 | `agent/model/AgentContextBudget.kt`（`triggerTokens`/`retainTokens`）、`AgentContextCompactor.kt`（`compactEnd`/`anchorText`/`MIN_REDUCTION_PERCENT`）、`AgentContextSession.kt`（`compactionBlocked`）、`AgentContextSummarizer.kt`（8 小节模板）、`AgentLoop.kt`（熔断后 `trimWindow`） | `AgentContextCostGuardTest`（6 例）+ `AgentContextRecoveryTest`（触发线阈值用例） | ✅ |
 
 ## 已知缺口（如实记录，不假装覆盖）
 
