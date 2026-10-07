@@ -1,6 +1,6 @@
 # Spec: 上下文成本护栏（context-cost-guard）
 
-状态：待实现（2026-10-07 批准，默认决策见「Open Questions」）
+状态：已实现并发布（v3.8.6，commit c899528；CI run 37563252104 全绿），待真机复验 input 峰值
 模块 id：`context-cost-guard`
 
 ## 背景与证据（真机）
