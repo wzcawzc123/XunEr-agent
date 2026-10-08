@@ -11,9 +11,26 @@ internal class AgentContextBudget(private val window: Int?) {
 
     fun observe(usage: AgentTokenUsage?, requestEstimate: Int) {
         val input = usage?.inputTokens ?: usage?.contextTokens ?: return
-        if (input > 0 && requestEstimate > 0) {
-            calibration = (input.toDouble() / requestEstimate).coerceIn(1.0, 8.0)
-        }
+        observeTokens(input, requestEstimate)
+    }
+
+    /**
+     * 用实测 input tokens 校准本地估算。
+     *
+     * 真机取证（2026-10-08，会话「性能调度模块-新会话」）：估算 / 实测 = 4.82，
+     * 本地估算把上下文夸大了近五倍，导致硬裁剪在实测仅 28.5 万时就按“已超 100 万窗口”触发，
+     * 旧消息被纯丢弃而摘要从未更新。
+     *
+     * 校准必须**双向**：估算既可能高估（中文按 1 字/token、JSON 序列化膨胀），也可能低估，
+     * 因此下限不能锁在 1.0（原实现的 coerceIn(1.0, 8.0) 结构性禁止向下修正）。
+     *
+     * @param inputTokens 服务端实测 input tokens
+     * @param requestEstimate 发出该请求前的本地估算
+     */
+    fun observeTokens(inputTokens: Int?, requestEstimate: Int) {
+        if (inputTokens == null || inputTokens <= 0 || requestEstimate <= 0) return
+        calibration = (inputTokens.toDouble() / requestEstimate)
+            .coerceIn(MIN_CALIBRATION, MAX_CALIBRATION)
     }
 
     fun estimate(messages: JSONArray, tools: JSONArray): Int =
@@ -24,6 +41,12 @@ internal class AgentContextBudget(private val window: Int?) {
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
+        /** 校准系数下限：允许向下修正到 1/10（估算高估时靠它拉回实测附近）。 */
+        private const val MIN_CALIBRATION = 0.1
+
+        /** 校准系数上限：防止低估导致估算过小、该裁剪时不裁剪而撞窗口。 */
+        private const val MAX_CALIBRATION = 8.0
+
         /**
          * 触发压缩的窗口占用比例（0.8，与 DeepSeek Harness 的 `thresholdRatio` 默认值一致）。
          *

@@ -131,12 +131,10 @@ internal class AgentLoop(
             } else {
                 window
             }
-            if (trimWindow != null && trimWindow > 0 &&
-                AgentContextBudget.rawEstimate(requestMessages, roundTools) >= trimWindow
-            ) {
-                val systemEstimate = AgentContextBudget.rawEstimate(
+            val expectedTokens = context.budgetEstimate(requestMessages, roundTools)
+            if (trimWindow != null && trimWindow > 0 && expectedTokens >= trimWindow) {
+                val systemEstimate = context.budgetEstimate(
                     JSONArray().apply { for (index in 0 until systemCount) put(messages.getJSONObject(index)) },
-                    JSONArray(),
                 )
                 val history = (systemCount until messages.length()).map {
                     AgentConversationCodec.fromJsonObject(messages.getJSONObject(it))
@@ -151,14 +149,15 @@ internal class AgentLoop(
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )
-                if (AgentContextBudget.rawEstimate(requestMessages, roundTools) >= trimWindow) {
+                val afterTrimTokens = context.budgetEstimate(requestMessages, roundTools)
+                if (afterTrimTokens >= trimWindow) {
                     // 摘要+硬裁都救不回来(如 system 本身接近/超过窗口)：返回可恢复的结构化错误，
                     // 不发必然失败的请求，也不让任务死得不明不白。
                     throw AgentModelFailure(
                         "CONTEXT_EXHAUSTED",
                         false,
                         "上下文在摘要压缩与硬裁剪后仍超过窗口(约 " +
-                            "${AgentContextBudget.rawEstimate(requestMessages, roundTools)} ≥ $trimWindow)。" +
+                            "$afterTrimTokens ≥ $trimWindow)。" +
                             "请新开会话继续任务，或先手动压缩历史；本会话记录未丢失。",
                     )
                 }
@@ -200,6 +199,8 @@ internal class AgentLoop(
                 discardPendingToolImageMessage()
             }
             context.observeInputTokens(roundInputTokens)
+            // 用本轮实测校准本地估算；估算只影响判据与裁剪，不改变实际发送内容。
+            context.observeBudget(roundInputTokens, AgentContextBudget.rawEstimate(requestMessages, roundTools))
             round = completedRound.round
             val providerResponse = completedRound.response
 

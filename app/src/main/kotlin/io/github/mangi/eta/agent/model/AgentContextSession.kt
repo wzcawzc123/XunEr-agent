@@ -37,6 +37,7 @@ internal class AgentContextSession(
         val message = messages.getJSONObject(it)
         message.optInt("_eta_compacted_users") + if (message.optString("role") == "user") 1 else 0
     }
+    private val budget by lazy { AgentContextBudget(contextWindow) }
     private var committedSnapshot: AgentContextSnapshot? = null
 
     fun snapshot(): AgentContextSnapshot? = committedSnapshot
@@ -53,6 +54,13 @@ internal class AgentContextSession(
     fun observeInputTokens(tokens: Int?) {
         inputTokens = tokens?.takeIf { it >= 0 }
     }
+
+    /** 用实测校准本地估算；AgentLoop 在收到 usage 后调用。 */
+    fun observeBudget(inputTokens: Int?, requestEstimate: Int) = budget.observeTokens(inputTokens, requestEstimate)
+
+    /** 校准后的上下文估算；裁剪判据用它而不是未校准的 rawEstimate。 */
+    fun budgetEstimate(messages: JSONArray, tools: JSONArray = JSONArray()): Int =
+        budget.estimate(messages, tools)
 
     fun userAppended() {
         consumedUserTurns++
