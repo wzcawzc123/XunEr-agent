@@ -133,6 +133,47 @@ class AgentLocalToolsLocateTest {
         tools.close()
     }
 
+    @Test
+    fun locateMissListsVisibleTextAsRewriteHintInsteadOfInvitingGuessing() {
+        // 2026-10-08 真机取证：LOCATE_MISS 曾被当成"改用目测"的许可，导致同一目标连点 4 次。
+        // 判据：MISS 载荷必须给出可改写的屏幕原文，并明确否定目测。
+        val bitmap = Bitmap.createBitmap(1440, 3216, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(Color.rgb(0x10, 0x20, 0x30))
+        val image = try {
+            AgentImageCodec.fromScreenBitmap(bitmap, source = "screen")
+        } finally {
+            bitmap.recycle()
+        }
+        val tools = AgentLocalTools(
+            context = RuntimeEnvironment.getApplication() as Context,
+            logger = NoOpLogger,
+            rootAvailable = { false },
+            screenObservationProvider = { options ->
+                if (options.includeScreenshot) {
+                    observation("o-shot", nodes = emptyList(), image = image)
+                } else {
+                    observation("o-tree", nodes = listOf(node(3, "设置")))
+                }
+            },
+            textRecognizerFactory = {
+                object : ScreenTextRecognizer {
+                    override fun recognize(bitmap: Bitmap): List<RecognizedText> = listOf(
+                        RecognizedText("设置", Rect(100, 100, 200, 200)),
+                        RecognizedText("显示", Rect(100, 300, 200, 400)),
+                    )
+                }
+            },
+        )
+
+        val payload = JSONObject(tools.execute(call("""{"query":"COSMemory"}""")).content)
+        assertEquals("payload=$payload", "LOCATE_MISS", payload.getString("code"))
+        val message = payload.getString("message")
+        assertTrue("应列出可见文本作为改写线索：$message", message.contains("当前屏幕可见文本"))
+        assertTrue("候选应含屏幕原文：$message", message.contains("设置") && message.contains("显示"))
+        assertTrue("应明确否定目测：$message", message.contains("不是改用目测的信号"))
+        tools.close()
+    }
+
     private fun call(args: String) = AgentModelClient.ToolCall(
         id = "call-locate",
         name = "locate_on_screen",

@@ -624,6 +624,7 @@ internal class AgentLocalTools(
                     errorResult(
                         "LOCATE_MISS",
                         "树（${nodes.size} 节点）无匹配且 OCR 不可用（OCR诊断：$ocrDiag）；" +
+                            visibleTextHint(nodes.map { node -> node.text }) +
                             "改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标",
                     )
                 }
@@ -632,8 +633,9 @@ internal class AgentLocalTools(
                 return errorResult(
                     "LOCATE_MISS",
                     "树（${nodes.size} 节点）与 OCR 都没有匹配“${query.trim()}”的文本；" +
-                        "优先改写为屏幕上实际可见的原文（按钮/标签文字）重查，或提高 max_nodes、" +
-                        "observe_screen 查看树，禁止凭空猜坐标",
+                        visibleTextHint(ocr.visibleTexts.ifEmpty { nodes.map { node -> node.text } }) +
+                        "这不是改用目测的信号：请改写成屏幕上的原文重查（最多两次不同关键词），" +
+                        "禁止凭空猜坐标或直接目测连点",
                 )
             }
         }
@@ -688,8 +690,24 @@ internal class AgentLocalTools(
         return payload.toString()
     }
 
+    /**
+     * 把屏幕可见文本压成一行提示，作为 LOCATE_MISS 的改写线索。
+     *
+     * 去重、去空、限条数（12）与单条长度（24 字符），避免错误载荷本身变成新的大段上下文。
+     */
+    private fun visibleTextHint(texts: List<String>, limit: Int = 12): String {
+        val cleaned = texts.map { text -> text.trim() }
+            .filter { text -> text.isNotEmpty() }
+            .distinct()
+            .take(limit)
+        if (cleaned.isEmpty()) return ""
+        return "当前屏幕可见文本：" + cleaned.joinToString("、") { text -> text.take(24) } + "；"
+    }
+
     private data class OcrOutcome(
         val matches: List<ScreenLocator.Match>,
+        /** 本次 OCR 识别到的全部文本（不只匹配项），MISS 时回给模型当改写线索。 */
+        val visibleTexts: List<String>,
         val imageWidth: Int,
         val imageHeight: Int,
         val screenWidth: Int,
@@ -769,6 +787,7 @@ internal class AgentLocalTools(
             }
             OcrOutcome(
                 matches = matches,
+                visibleTexts = candidates.map { candidate -> candidate.text },
                 imageWidth = bitmap.width,
                 imageHeight = bitmap.height,
                 screenWidth = screen?.first ?: bitmap.width,

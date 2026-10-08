@@ -87,7 +87,7 @@ internal object AgentPromptBuilder {
                     "禁止把新截图与旧节点混用；树被截断但节点语义仍有效时，优先提高 max_nodes，不要仅因截断请求截图；" +
                     "点击可见控件优先用 tap_element/tap_area；坐标工具必须写明 coordinate_space：看截图定位用 normalized（0–999），坐标来自 ui_nodes 用 screen，" +
                     "禁止目测估算，也不要把别人发来的缩略截图当基准；" +
-                    "树里没有的目标调 locate_on_screen(query=目标文本) 取精确 center（先查树、树里没有自动 OCR 截图像素），返回 LOCATE_MISS 才回到截图自行判断，目测连续两次未命中停止重试；" +
+                    "树里没有的目标调 locate_on_screen(query=目标文本) 取精确 center（先查树、树里没有自动 OCR 截图像素）；LOCATE_MISS 不是改用目测的信号，而是关键词与屏幕原文不符——按返回里列出的可见文本改写成屏幕上的原文重查（最多两次不同关键词），仍未命中才允许看截图，且目测在同一目标上最多尝试一次，失败必须停下向用户说明，禁止连续猜坐标；" +
                     "滚动、滑动或切换应用后旧坐标立即失效，会返回 STALE_COORDINATE，此时必须重新 observe_screen；点击后若界面没有出现预期变化，重新观察并调整目标，连续两次没有变化就停止重试并向用户说明。" +
                     "调用节点工具时必须把该节点与同一次观察的 observation_id 一起传回，过期就重新观察；" +
                     "scroll 的方向表示要显示的内容方向，例如 down 显示下方内容；" +
