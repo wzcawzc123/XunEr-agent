@@ -116,6 +116,9 @@ internal class AgentLoop(
             var requestMessages = AssistantScreenContextProjection.project(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
+            // 出站请求前先做零模型的工具结果修剪（确定性、幂等，只改本次请求副本）。
+            // 修剪后内容落在预算内，重复执行不再变化，因此每轮前缀一致，不牺牲缓存命中。
+            requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
             // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的请求发出。
             // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的
             // round1（尚无用量回执）巨型历史原样发出、trim 与 M1.2 降级同轮被挡。
