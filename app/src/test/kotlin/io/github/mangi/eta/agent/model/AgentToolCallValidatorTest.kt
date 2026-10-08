@@ -11,6 +11,43 @@ import org.junit.Test
 
 class AgentToolCallValidatorTest {
     @Test
+    fun xmlStyleStickyResidueIsRejectedWithTargetedGuidance() {
+        // 2026-10-08 真机取证：模型把参数写成 XML 形态并粘包，action 值成了
+        // `exec><parameter = command>…`。落在枚举字段会被取值校验挡住，
+        // 落到 command 这类自由文本字段却会原样交给 shell —— 必须在统一入口拦下。
+        val validator = validator(xmlGuardSchema())
+
+        val message = validator.validate(
+            call("""{"action":"exec><parameter = command>/tmp/ub 2>&1","command":"echo hi"}""")
+        )
+
+        assertNotNull("粘包残渣必须被拒绝", message)
+        assertTrue("应点明 XML 残留：$message", message.orEmpty().contains("XML 标签残留"))
+        assertTrue("应点明字段名：$message", message.orEmpty().contains("action"))
+    }
+
+    @Test
+    fun legitimateXmlTextArgumentsAreNotBlocked() {
+        // 反例：真的在处理 XML/HTML（grep 搜标签、写 XML 文件）不得被误伤。
+        val validator = validator(xmlGuardSchema())
+
+        assertNull(validator.validate(call("""{"command":"grep '<parameter' config.xml"}""")))
+        assertNull(validator.validate(call("""{"command":"echo '<a>text</a>' > out.xml"}""")))
+    }
+
+    private fun xmlGuardSchema(): JSONObject = JSONObject(
+        """
+        {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string"},
+            "command": {"type": "string"}
+          }
+        }
+        """.trimIndent()
+    )
+
+    @Test
     fun localRefAndAnyOfAcceptEitherDeclaredShape() {
         val validator = validator(
             JSONObject(

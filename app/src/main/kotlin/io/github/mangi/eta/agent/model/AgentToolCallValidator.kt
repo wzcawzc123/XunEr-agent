@@ -11,6 +11,24 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         val root: JSONObject,
     )
 
+    /**
+     * XML 风格 tool call 的粘包残渣标记。
+     *
+     * 背景（2026-10-08 真机取证）：模型把参数写成 XML 形态并粘包，例如 action 值成了
+     * `exec><parameter = command>…`。落在枚举字段上会被取值校验挡住，落到 command 这类
+     * 自由文本字段则会被原样交给 shell 执行 —— 这里在统一入口兜住。
+     *
+     * 只在明确的粘包形态上触发：`grep '<parameter' config.xml` 含 `<parameter`
+     * 但缺闭合标签与粘包前缀，不会被误伤。
+     */
+    private val xmlResidueMarkers = listOf(
+        "</parameter>",
+        "><parameter ",
+        "<parameter name=",
+        "</invoke>",
+        "</function_calls>",
+    )
+
     private val schemasByName: Map<String, ToolSchema> = buildMap {
         for (index in 0 until tools.length()) {
             val function = tools.optJSONObject(index)?.optJSONObject("function") ?: continue
@@ -26,6 +44,7 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
             .getOrElse { return "参数不是有效的 JSON object" }
         if (isRedactedPayload(arguments)) return REDACTED_REPLAY_GUIDANCE
+        findXmlResidue(arguments)?.let { residue -> return xmlResidueGuidance(residue.first, residue.second) }
         return validateValue(
             value = arguments,
             schema = toolSchema.parameters,
@@ -44,6 +63,26 @@ internal class AgentToolCallValidator(tools: JSONArray) {
     private fun isRedactedPayload(value: JSONObject): Boolean {
         if (value.has(REDACTED_KEY)) return true
         return REDACTED_MARKERS.all { value.has(it) }
+    }
+
+    /** 递归检出参数值里的 XML 粘包残渣；返回命中的字段路径与标记。 */
+    private fun findXmlResidue(value: Any?, path: String = ""): Pair<String, String>? = when (value) {
+        is String -> xmlResidueMarkers.firstOrNull { marker -> value.contains(marker) }
+            ?.let { marker -> path to marker }
+        is JSONObject -> value.keys().asSequence().mapNotNull { key ->
+            findXmlResidue(value.opt(key), if (path.isEmpty()) key else "$path.$key")
+        }.firstOrNull()
+        is JSONArray -> (0 until value.length()).asSequence().mapNotNull { index ->
+            findXmlResidue(value.opt(index), "$path[$index]")
+        }.firstOrNull()
+        else -> null
+    }
+
+    /** 残渣命中的对症引导：点明字段与标记，并给出正确写法。 */
+    private fun xmlResidueGuidance(path: String, marker: String): String {
+        val field = path.ifBlank { "arguments" }
+        return "参数「$field」的值里检测到 XML 标签残留（$marker）：这次工具调用被写成了 XML 风格。" +
+            "请改用纯 JSON 字符串传参，每个参数的值只放内容本身，不要包含 <parameter …> 这类标签。"
     }
 
     private fun validateValue(
