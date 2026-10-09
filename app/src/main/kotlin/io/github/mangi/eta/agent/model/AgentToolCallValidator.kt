@@ -82,7 +82,8 @@ internal class AgentToolCallValidator(tools: JSONArray) {
     private fun xmlResidueGuidance(path: String, marker: String): String {
         val field = path.ifBlank { "arguments" }
         return "参数「$field」的值里检测到 XML 标签残留（$marker）：这次工具调用被写成了 XML 风格。" +
-            "请改用纯 JSON 字符串传参，每个参数的值只放内容本身，不要包含 <parameter …> 这类标签。"
+            "请改用纯 JSON 字符串传参，形如 {\"action\":\"exec\",\"command\":\"ls -la\"}；" +
+            "每个参数的值只放内容本身，不要包含 <parameter …> 这类标签。"
     }
 
     private fun validateValue(

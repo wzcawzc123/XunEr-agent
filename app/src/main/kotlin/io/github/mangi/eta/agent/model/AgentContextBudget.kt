@@ -7,7 +7,11 @@ import kotlin.math.ceil
 
 /** usage 只校准同一模型的请求估算，不把累计计费用量当作窗口占用。 */
 internal class AgentContextBudget(private val window: Int?) {
-    private var calibration = 1.0
+    /**
+     * 校准系数。**未获得实测前使用保守初值**：校准值不跨 run 存活（AgentLoop 每次运行都新建
+     * Session/Budget），而本地估算已知高估（真机实测 4.82 倍），若首轮按 1.0 计就会误触发硬裁剪。
+     */
+    private var calibration = DEFAULT_CALIBRATION
 
     fun observe(usage: AgentTokenUsage?, requestEstimate: Int) {
         val input = usage?.inputTokens ?: usage?.contextTokens ?: return
@@ -41,6 +45,9 @@ internal class AgentContextBudget(private val window: Int?) {
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
+        /** 未获得实测前的保守初值（真机实测估算高估约 4.82 倍，按 1/4 折算）。 */
+        private const val DEFAULT_CALIBRATION = 0.25
+
         /** 校准系数下限：允许向下修正到 1/10（估算高估时靠它拉回实测附近）。 */
         private const val MIN_CALIBRATION = 0.1
 

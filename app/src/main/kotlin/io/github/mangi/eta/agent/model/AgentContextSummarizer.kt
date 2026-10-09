@@ -11,12 +11,35 @@ internal class AgentContextSummarizer(
     private val controller: AgentRunController,
     private val roleplay: Boolean,
 ) {
+    /**
+     * 生成检查点摘要，并**校验固定小节是否齐全**。
+     *
+     * 真机取证（2026-10-09，会话「内存管理模块-新会话」）：模型漏掉 `## 关键上下文` 整节，
+     * 该节承载的用户偏好 / 约束 / 未决问题随之全部消失（实测关键词命中均为 0 次）。固定结构
+     * 的设计意图本就是"防止模型丢掉关键类别"，故在此补上原本缺失的校验：缺节则带明确提示
+     * 重试一次；**重试仍不合规则接受首版** —— 缺一节远好于让压缩失败，后者会连带熔断
+     * （后续全靠硬裁剪，损失更大）。
+     */
     fun summarize(history: List<AgentModelClient.ConversationMessage>): String {
+        val first = requestSummary(history, missingHint = null)
+        val missing = missingSections(first)
+        if (missing.isEmpty() || missing.size > MAX_RETRYABLE_MISSING) return first
+        val hint = "你上一次的输出缺少这些小节：" + missing.joinToString("、") +
+            "。请补齐全部小节并保持给定顺序；某节没有内容时写「(无)」。"
+        val retry = runCatching { requestSummary(history, missingHint = hint) }.getOrNull()
+        return if (retry != null && missingSections(retry).isEmpty()) retry else first
+    }
+
+    private fun requestSummary(
+        history: List<AgentModelClient.ConversationMessage>,
+        missingHint: String?,
+    ): String {
         controller.throwIfCancelled()
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", instruction()))
             .put(AgentConversationCodec.userTextMessage(buildString {
                 append("待整理的历史：\n")
                 history.forEach { append(AgentConversationCodec.toJsonObject(it)).append('\n') }
+                if (missingHint != null) append('\n').append(missingHint).append('\n')
             }))
         val response = provider.complete(
             ProviderRequest(config, messages, JSONArray(), purpose = ProviderRequestPurpose.COMPACTION),
@@ -80,7 +103,7 @@ internal class AgentContextSummarizer(
         "CONTEXT_SUMMARY_INVALID", false, "模型未返回完整且有界的摘要，原始上下文已保留。",
     )
 
-    private companion object {
+    internal companion object {
         /**
          * 摘要上限（字符）。
          *
@@ -88,5 +111,29 @@ internal class AgentContextSummarizer(
          * （80% 档下等于压缩失效）。上限仍保留，避免摘要无限膨胀长期占用上下文。
          */
         const val MAX_SUMMARY_CHARS = 16_000
+
+        /**
+         * 允许触发重试的最大缺失节数。
+         *
+         * 只缺个别节 —— 模型基本按格式走、偶有遗漏，重试一次通常能补齐（真机样本正是缺 1 节）。
+         * 缺失过半说明模型压根没按结构输出，重试也难补救，直接接受首版以免浪费一次调用。
+         */
+        private const val MAX_RETRYABLE_MISSING = 3
+
+        /** 固定小节标题（顺序即声明顺序）；生成后据此校验结构完整性。 */
+        private val SECTION_TITLES = listOf(
+            "## 原始需求与意图",
+            "## 关键技术概念",
+            "## 文件与代码",
+            "## 错误与修复",
+            "## 待办事项",
+            "## 当前工作",
+            "## 下一步",
+            "## 关键上下文",
+        )
+
+        /** 缺失的小节标题（按声明顺序）。测试可见，故为 internal。 */
+        internal fun missingSections(summary: String): List<String> =
+            SECTION_TITLES.filterNot { title -> summary.contains(title) }
     }
 }

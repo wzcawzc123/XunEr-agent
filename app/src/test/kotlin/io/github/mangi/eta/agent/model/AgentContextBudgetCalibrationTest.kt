@@ -34,10 +34,14 @@ class AgentContextBudgetCalibrationTest {
     }
 
     @Test
-    fun `未观测时校准系数为 1 不改变估算`() {
+    fun `未观测时使用保守初值避免首轮误裁剪`() {
+        // 校准值不跨 run 存活（每次 run 新建 Session），而本地估算已知高估（真机 4.82 倍）；
+        // 因此"首轮"必须按保守比例折算，否则会误触发硬裁剪。
         val budget = AgentContextBudget(1_000_000)
         val messages = JSONArray()
-        assertEquals(AgentContextBudget.rawEstimate(messages), budget.estimate(messages, JSONArray()))
+        val raw = AgentContextBudget.rawEstimate(messages)
+        val estimated = budget.estimate(messages, JSONArray())
+        assertTrue("未观测时应小于原始估算（estimated=$estimated raw=$raw）", estimated < raw)
     }
 
     @Test

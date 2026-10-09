@@ -38,7 +38,9 @@ class AgentContextCompactionTest {
         val original = "历史事实".repeat(40_000)
         var requests = 0
         val events = mutableListOf<AgentEvent>()
-        val result = AgentModelClient.complete(config, "继续", AgentModelClient.ToolExecutor { error("不应执行工具") },
+        // 校准默认值改为保守初值（未获实测前按 1/4 折算），这里同步调小窗口，
+        // 保留"历史远超窗口必被硬裁"这个原意；仅本用例生效，不动共享 fixture。
+        val result = AgentModelClient.complete(config.copy(contextWindow = 20_000), "继续", AgentModelClient.ToolExecutor { error("不应执行工具") },
             history = listOf(AgentModelClient.ConversationMessage("assistant", original)),
             onEvent = events::add,
             provider = provider { request, _ ->
@@ -256,10 +258,10 @@ class AgentContextCompactionTest {
         assertEquals(4, AgentContextBudget.textTokens("中文测试"))
         assertEquals(2, AgentContextBudget.textTokens("abcdef"))
         val messages = JSONArray().put(AgentConversationCodec.userTextMessage("文本"))
-        val base = budget.estimate(messages, JSONArray())
-        budget.observe(AgentTokenUsage(inputTokens = base * 2), base)
-        assertEquals(base * 2, budget.estimate(messages, JSONArray()))
-        assertTrue(AgentContextBudget.rawEstimate(messages, JSONArray().put("tool".repeat(100))) > base)
+        val raw = AgentContextBudget.rawEstimate(messages)
+        budget.observe(AgentTokenUsage(inputTokens = raw * 2), raw)
+        assertEquals(raw * 2, budget.estimate(messages, JSONArray()))
+        assertTrue(AgentContextBudget.rawEstimate(messages, JSONArray().put("tool".repeat(100))) > raw)
         fun image(bytes: Int) = JSONArray().put(AgentConversationCodec.userMessage("图片", listOf(
             AgentModelClient.ModelImage("data:image/png;base64," + "A".repeat(bytes), "image/png", bytes),
         )))
