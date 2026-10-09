@@ -135,7 +135,7 @@ internal class AgentContextBudget(private val window: Int?) {
                     val text = JSONArray()
                     for (partIndex in 0 until parts.length()) {
                         val part = parts.optJSONObject(partIndex) ?: continue
-                        if (part.optString("type") in setOf("image_url", "input_image", "image")) {
+                        if (AgentConversationCodec.isImageBlock(part)) {
                             tokens += 4096
                         } else text.put(part)
                     }

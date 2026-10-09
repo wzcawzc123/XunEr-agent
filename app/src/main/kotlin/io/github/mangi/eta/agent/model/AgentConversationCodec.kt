@@ -110,13 +110,13 @@ internal object AgentConversationCodec {
     }
 
     /**
-     * 纯文本模型（supportsVision=false）发送前剥离全部图片块，原地改写 messages。
+     * 纯文本模型（supportsVision=false）出站请求发送前剥离全部图片块。
      * 覆盖：image_url（Chat）、input_image（Responses）、image/source（Anthropic）。
+     * 返回剥离后的新数组；无可剥内容时返回原引用。不修改入参（持久历史保持原样）。
      */
-    fun stripImagesForTextOnlyModel(messages: JSONArray) {
-        val placeholder = JSONObject()
-            .put("type", "text")
-            .put("text", "[图片已忽略：当前模型不支持图片输入]")
+    fun stripImagesForTextOnlyModel(messages: JSONArray): JSONArray {
+        val cleanedMessages = JSONArray()
+        var changed = false
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             val content = message.opt("content") as? JSONArray ?: continue
@@ -124,19 +124,33 @@ internal object AgentConversationCodec {
             var removed = false
             for (itemIndex in 0 until content.length()) {
                 val item = content.optJSONObject(itemIndex) ?: continue
-                val type = item.optString("type")
-                if (type == "image_url" || type == "input_image" || item.has("source")) {
+                if (isImageBlock(item)) {
                     removed = true
                     continue
                 }
                 cleaned.put(item)
             }
             if (removed) {
-                cleaned.put(placeholder)
-                message.put("content", cleaned)
+                // 纯图片消息才补占位符保住请求合法；已有文本的消息只删图片块，不追加冗余提示。
+                if (cleaned.length() == 0) {
+                    cleaned.put(
+                        JSONObject()
+                            .put("type", "text")
+                            .put("text", "[图片已忽略：当前模型不支持图片输入]")
+                    )
+                }
+                cleanedMessages.put(JSONObject(message.toString()).put("content", cleaned))
+                changed = true
+            } else {
+                cleanedMessages.put(message)
             }
         }
+        return if (changed) cleanedMessages else messages
     }
+
+    /** 统一的图片块判定：Chat image_url、Responses input_image、Anthropic image/source。 */
+    internal fun isImageBlock(item: JSONObject): Boolean =
+        item.optString("type") in setOf("image_url", "input_image", "image") || item.has("source")
 
     private fun String.isProviderImageReference(): Boolean =
         startsWith("https://", ignoreCase = true) ||
@@ -360,7 +374,7 @@ internal object AgentConversationCodec {
         var omittedImage = false
         for (index in 0 until source.length()) {
             val item = source.optJSONObject(index) ?: continue
-            if (item.optString("type") in setOf("image_url", "input_image", "image") || item.has("source")) {
+            if (isImageBlock(item)) {
                 omittedImage = true
                 continue
             }

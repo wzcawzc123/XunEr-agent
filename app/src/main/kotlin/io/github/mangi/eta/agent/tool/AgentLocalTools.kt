@@ -506,9 +506,15 @@ internal class AgentLocalTools(
         if (!browserToolsEnabled()) {
             return textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页浏览工具"))
         }
+        // 纯文本模型（supportsVision=false）：浏览器截图静默降级为不附图片，对齐 observeScreen 行为。
+        val effectiveArgs = if (supportsVision()) {
+            args
+        } else {
+            JSONObject(args.toString()).apply { put("read_image", false) }
+        }
         val result = AgentBrowserSession.execute(
             context = context,
-            args = args,
+            args = effectiveArgs,
             runId = browserRunId,
             toolCallId = toolCallId,
         )

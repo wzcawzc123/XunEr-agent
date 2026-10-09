@@ -417,6 +417,84 @@ class AgentModelClientLoopTest {
     }
 
     @Test
+    fun textOnlyModelStripsToolImagesFromEveryOutboundRequest() {
+        val provider = ScriptedProvider(
+            assistant(
+                finishReason = "tool_calls",
+                toolCalls = listOf(toolCall("call-1", "observe_screen", "{}")),
+            ),
+            assistant(content = "完成", finishReason = "stop"),
+        )
+
+        AgentModelClient.complete(
+            config = modelConfig().copy(supportsVision = false),
+            prompt = "观察",
+            toolExecutor = AgentModelClient.ToolExecutor { _ ->
+                AgentModelClient.ToolResult(
+                    content = JSONObject().put("ok", true).toString(),
+                    images = listOf(
+                        AgentModelClient.ModelImage(
+                            reference = "data:image/png;base64,AA==",
+                            mimeType = "image/png",
+                            bytes = 1,
+                        )
+                    ),
+                )
+            },
+            provider = provider,
+        )
+
+        // 纯文本模型：每一轮出站请求（含工具图片观察那一轮）都不得出现任何图片块。
+        provider.requests.forEach { request ->
+            for (index in 0 until request.length()) {
+                val content = request.getJSONObject(index).opt("content")
+                if (content !is JSONArray) continue
+                for (partIndex in 0 until content.length()) {
+                    val part = content.optJSONObject(partIndex) ?: continue
+                    assertFalse(
+                        "出站请求不应包含图片块: ${part.toString().take(120)}",
+                        AgentConversationCodec.isImageBlock(part),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun visionModelKeepsToolImagesInOutboundRequests() {
+        val provider = ScriptedProvider(
+            assistant(
+                finishReason = "tool_calls",
+                toolCalls = listOf(toolCall("call-1", "observe_screen", "{}")),
+            ),
+            assistant(content = "看到了", finishReason = "stop"),
+        )
+
+        AgentModelClient.complete(
+            config = modelConfig(),
+            prompt = "观察",
+            toolExecutor = AgentModelClient.ToolExecutor { _ ->
+                AgentModelClient.ToolResult(
+                    content = JSONObject().put("ok", true).toString(),
+                    images = listOf(
+                        AgentModelClient.ModelImage(
+                            reference = "data:image/png;base64,AA==",
+                            mimeType = "image/png",
+                            bytes = 1,
+                        )
+                    ),
+                )
+            },
+            provider = provider,
+        )
+
+        // 视觉模型：图片观察正常进入出站请求（锁现有行为，防剥离误伤）。
+        assertTrue(
+            provider.requests.any { request -> request.toString().contains("data:image/png") }
+        )
+    }
+
+    @Test
     fun toolScreenshotIsConsumedByExactlyOneModelRequest() {
         val screenshot = "data:image/png;base64,c2NyZWVu"
         val provider = ScriptedProvider(

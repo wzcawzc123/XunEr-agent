@@ -119,6 +119,11 @@ internal class AgentLoop(
             // 出站请求前先做零模型的工具结果修剪（确定性、幂等，只改本次请求副本）。
             // 修剪后内容落在预算内，重复执行不再变化，因此每轮前缀一致，不牺牲缓存命中。
             requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
+            // 纯文本模型（supportsVision=false）：出站前剥离全部图片块（初始附件与循环中工具截图都覆盖）。
+            // 只改出站副本，持久 messages 保持原样；剥离后预算估算口径与真实请求一致。
+            if (!config.supportsVision) {
+                requestMessages = AgentConversationCodec.stripImagesForTextOnlyModel(requestMessages)
+            }
             // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的请求发出。
             // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的
             // round1（尚无用量回执）巨型历史原样发出、trim 与 M1.2 降级同轮被挡。

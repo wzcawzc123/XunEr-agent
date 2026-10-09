@@ -119,9 +119,7 @@ internal object AgentModelClient {
             rootAvailable = initialCapabilities.rootAvailable,
             roleplayContext = roleplayContext,
         )
-        if (!config.supportsVision) {
-            AgentConversationCodec.stripImagesForTextOnlyModel(messages)
-        }
+        // 图片剥离统一由 AgentLoop 每轮出站前执行（含循环中新增的工具截图），持久 messages 保持原样。
         if (rewriteReply) {
             messages.put(messages.length() - 1, AgentConversationCodec.userTextMessage(
                 "请只改写下面这条角色回复，保持已有事实与实际工具结果，以当前角色设定改善表达。" +
