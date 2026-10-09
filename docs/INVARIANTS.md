@@ -25,8 +25,10 @@
    （`ACTION_OUTCOME_UNKNOWN` 仅覆盖“无法确认”场景）。结构化 locate\/命中校验
    属于 M2（见修复方案），不在本表范围内。
 3. **F8 的成本侧未覆盖**：护栏只约束「占用与压缩行为」，尚无 `miss + 0.1×hit` 成本口径
-   记账与 UI 可视（spec `docs/specs/context-cost-guard.md` 的 R5），也无摘要输入截断（R4）、
-   硬裁剪 `TARGET_RATIO=0.95` 与触发线之间空档（R6）的处理。真机复验（长会话 input 峰值 ≤ 20 万）待新版本装机后进行。
+   记账与 UI 可视（spec `docs/specs/context-cost-guard.md` 的 R5），也无硬裁剪 `TARGET_RATIO=0.95`
+   与触发线之间空档（R6）的处理。**R4（摘要输入截断）已落地**：摘要输入按 `min(窗口/2, 512k)`（下限 32k）
+   字符预算从最旧端截断，covered 只计实际进摘要的轮次，见 `AgentContextCompactor.boundSummaryInput`。
+   真机复验（长会话 input 峰值 ≤ 20 万）待新版本装机后进行。
 
 ## 测试门禁（验收规则）
 

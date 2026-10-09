@@ -149,8 +149,9 @@ internal class AgentContextSession(
 
     companion object {
         /**
-         * 触发压缩的窗口占用比例（fork 策略：0.85 → 0.75，为系统提示、工具 schema 与本轮增长留出余量）。
-         * 真源在 [AgentContextBudget]，实际阈值还要与绝对上限取小，见 `triggerTokens`。
+         * 触发压缩的窗口占用比例（0.8，与 deepseek-harness 的 thresholdRatio 默认值一致；
+         * fork 早期曾用 0.85 → 0.75，v3.9.0 起定版 0.8）。
+         * 真源在 [AgentContextBudget]，实际阈值取窗口比例与「窗口 − 输出预留 − 余量」的较小者，见 `triggerTokens`。
          */
         const val TRIGGER_RATIO = AgentContextBudget.TRIGGER_RATIO
     }

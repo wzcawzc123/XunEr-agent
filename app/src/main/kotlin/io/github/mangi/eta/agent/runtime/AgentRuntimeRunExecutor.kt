@@ -236,6 +236,8 @@ internal class AgentRuntimeRunExecutor(
                     characterMemoryTools.execute(call)
                 } else routingExecutor.execute(call)
             }
+            // 快照内容未变化时不重复写库：压缩后每轮都会发布快照，内容相同则跳过。
+            var lastContextWrite: String? = null
             val completedResponse = AgentModelClient.complete(
                 config = request.config,
                 sessionId = request.effectiveModelSessionId,
@@ -247,7 +249,11 @@ internal class AgentRuntimeRunExecutor(
                 compactOnly = request.operation == AgentRuntimeWire.OP_COMPACT,
                 onContextSnapshot = { snapshot ->
                     val committed = snapshot.copy(operationId = request.runId)
-                    AgentRunCheckpointStore.saveContext(appContext, request.runId, committed)
+                    val encoded = committed.encode()
+                    if (encoded != lastContextWrite) {
+                        AgentRunCheckpointStore.saveContext(appContext, request.runId, committed)
+                        lastContextWrite = encoded
+                    }
                     session.updateContext(committed)
                 },
                 onTranscript = { transcript ->

@@ -17,6 +17,8 @@ import org.json.JSONArray
  *
  * 注意：裁剪只影响**本次发给模型的上下文**，不改动持久化的 `history`/`journal`，
  * 因此用户侧记录不会丢失，只是模型看不到最旧的一段。
+ * 本次 run 的 `messages` 数组会被就地替换为裁剪结果，后续轮次与终态快照基于裁剪后历史；
+ * 恢复/续接时仍从完整持久历史 + transcript 重建，故裁剪是逐 run 生效的最后一道保险。
  */
 internal object AgentHistoryTrimmer {
 

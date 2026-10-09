@@ -35,9 +35,11 @@ internal object AgentRuntimeHistoryReducer {
             val users = state.history.indices.filter { state.history[it].role == "user" }
             val laterHistory = if (extra > 0) state.history.drop(users.takeLast(extra).first()) else emptyList()
             // 快照与 transcript 独立落盘；崩溃时仍须接上快照之后已完成的批次。
+            // 双通道落库存在先后，进程死亡可能使 covered 略大于 additions；
+            // 越界时按 additions 上界收敛，宁可少拼 transcript 也不让整次结果应用失败。
             val covered = validSnapshot.consumedTranscriptMessages ?: additions.size
-            require(covered in 0..additions.size || additions.isEmpty()) { "Invalid context transcript boundary" }
-            validSnapshot.messages + additions.drop(covered) + laterHistory + pendingSupplements
+            val boundedCovered = if (additions.isEmpty()) 0 else covered.coerceIn(0, additions.size)
+            validSnapshot.messages + additions.drop(boundedCovered) + laterHistory + pendingSupplements
         } else state.history + additions + pendingSupplements
         return Outcome(
             state = state.copy(

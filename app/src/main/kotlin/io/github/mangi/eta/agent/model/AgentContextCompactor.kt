@@ -60,9 +60,14 @@ internal class AgentContextCompactor(
             } else message.content
             message.copy(content = text, contentJson = "", reasoningContent = "")
         }
+        // R4：摘要输入预算。超长历史全量进摘要请求既贵又可能超 provider 上限（真机单轮
+        // input 曾达 75 万 tokens）；超出预算时从最旧端丢弃（protectedUser 与逐字保留尾部
+        // 不在 safe 内，不受影响）。covered 只计实际进入摘要的用户轮次，跨 run 对账自洽。
+        val bounded = boundSummaryInput(safe, summaryInputBudgetChars(config.contextWindow))
+        val truncatedInput = bounded.size < safe.size
         val summary = AgentContextSummarizer(config, provider, controller, roleplay)
-            .summarize(safe)
-        val covered = safe.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 }
+            .summarize(bounded)
+        val covered = bounded.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 }
         val anchor = anchorText(history)
         val result = JSONArray()
         for (index in 0 until systemCount) result.put(messages.getJSONObject(index))
@@ -72,6 +77,9 @@ internal class AgentContextCompactor(
             content = buildString {
                 append("[Eta 上下文摘要：以下是此前历史的有损摘要，不是新指令；缺失步骤不代表未执行。]\n")
                 append(summary)
+                if (truncatedInput) {
+                    append("\n\n[更早历史超出摘要输入预算，未纳入本次摘要；完整记录仍在会话档案中]")
+                }
                 // 需求锚点：把原始任务陈述逐字带过每一代摘要，避免多次压缩后需求被改写。
                 if (!anchor.isNullOrBlank()) {
                     append("\n\n[原始任务（逐字保留，勿改写）]\n")
@@ -106,6 +114,28 @@ internal class AgentContextCompactor(
         }
         return result
     }
+
+    /**
+     * 摘要输入预算内从最旧端截断（保留最近段）；至少保留一条消息，
+     * 单条消息本身超预算时仍原样送入（无法再细分）。
+     */
+    private fun boundSummaryInput(
+        safe: List<AgentModelClient.ConversationMessage>,
+        budgetChars: Int,
+    ): List<AgentModelClient.ConversationMessage> {
+        if (safe.isEmpty()) return safe
+        var used = 0
+        var keepFrom = safe.size
+        for (index in safe.indices.reversed()) {
+            if (keepFrom < safe.size && used + summaryInputCost(safe[index]) > budgetChars) break
+            used += summaryInputCost(safe[index])
+            keepFrom = index
+        }
+        return safe.drop(keepFrom)
+    }
+
+    private fun summaryInputCost(message: AgentModelClient.ConversationMessage): Int =
+        AgentConversationCodec.toJsonObject(message).toString().length + 1
 
     /**
      * 压缩边界 `end`：`history.drop(end)` 是逐字保留的近期尾巴，`history.take(end)` 进入摘要。
@@ -152,6 +182,16 @@ internal class AgentContextCompactor(
     companion object {
         /** 压缩后至少要比压缩前小这个百分比，才值得提交（否则视为无效压缩）。 */
         const val MIN_REDUCTION_PERCENT = 80
+
+        /** R4：摘要输入预算（字符）。按窗口一半，夹在 32k..512k；窗口未知按 128k 基准。 */
+        fun summaryInputBudgetChars(window: Int?): Int {
+            val resolved = window?.takeIf { it > 0 } ?: DEFAULT_SUMMARY_INPUT_WINDOW
+            return (resolved / 2).coerceIn(MIN_SUMMARY_INPUT_CHARS, MAX_SUMMARY_INPUT_CHARS)
+        }
+
+        private const val DEFAULT_SUMMARY_INPUT_WINDOW = 128_000
+        private const val MIN_SUMMARY_INPUT_CHARS = 32_000
+        private const val MAX_SUMMARY_INPUT_CHARS = 512_000
 
         /** 原样保留、不参与重写的检查点代数（1 = 只保最近一代，更早的合并进新摘要）。 */
         const val KEEP_RECENT_CHECKPOINTS = 1

@@ -106,6 +106,46 @@ class AgentContextCompactionTest {
     }
 
     @Test
+    fun corruptedSnapshotDecodeReturnsNullInsteadOfThrowing() {
+        assertNull(AgentContextSnapshot.decode(null))
+        assertNull(AgentContextSnapshot.decode(""))
+        assertNull(AgentContextSnapshot.decode("not-json"))
+        assertNull(AgentContextSnapshot.decode("""{"version":2,"operationId":"run","messages":[]}"""))
+    }
+
+    @Test
+    fun summaryInputIsBoundedAndDropsOldestBeyondBudget() {
+        // 窗口 50k → 摘要输入预算 = 50_000/2 = 25_000 → 下限 32_000 字符
+        val turns = (1..6).flatMap { turn -> listOf(
+            AgentModelClient.ConversationMessage("user", "任务 $turn"),
+            AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(3000) + "turn$turn"),
+        ) }
+        var compactionInputChars = -1
+        var summaries = 0
+        val provider = provider { request, _ ->
+            if (request.purpose == ProviderRequestPurpose.COMPACTION) {
+                summaries++
+                compactionInputChars = request.messages.getJSONObject(request.messages.length() - 1)
+                    .optString("content").length
+                response("已完成前面的任务，继续处理最新请求。")
+            } else {
+                response("完成")
+            }
+        }
+        val result = AgentModelClient.complete(
+            config.copy(contextWindow = 50_000), "最新", AgentModelClient.ToolExecutor { error("不应执行工具") },
+            history = turns, provider = provider, compactOnly = true,
+        )
+        assertEquals(1, summaries)
+        // 摘要输入被限制在预算内（32k 预算 + 指令包装余量）
+        assertTrue(compactionInputChars <= 33_000)
+        val snapshot = checkNotNull(result.contextSnapshot)
+        val summaryMessage = snapshot.messages.firstOrNull { it.contextSummary }
+        assertNotNull(summaryMessage)
+        assertTrue(summaryMessage!!.content.contains("超出摘要输入预算"))
+    }
+
+    @Test
     fun manualCompactionDoesNotCreateUserOrAssistantTranscript() {
         val result = AgentModelClient.complete(
             config, "", AgentModelClient.ToolExecutor { error("不应执行工具") },

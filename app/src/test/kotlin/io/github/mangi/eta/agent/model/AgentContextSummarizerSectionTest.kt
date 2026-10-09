@@ -1,5 +1,7 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.agent.runtime.AgentRunController
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,5 +58,65 @@ class AgentContextSummarizerSectionTest {
     @Test
     fun `空内容视为全部缺失`() {
         assertEquals(8, AgentContextSummarizer.missingSections("").size)
+    }
+
+    // ── summarize 重试编排：缺 1-3 节 → 重试一次；重试仍缺 → 接受首版；缺失过半 → 不重试 ──
+
+    @Test
+    fun `缺 1 节时重试一次并采用补齐版本`() {
+        val sparse = allSections.substringBefore("## 关键上下文")
+        val requests = mutableListOf<ProviderRequest>()
+        val summarizer = summarizer(mutableListOf(sparse, allSections)) { requests += it }
+        val result = summarizer.summarize(listOf(AgentModelClient.ConversationMessage("user", "历史")))
+        assertEquals(2, requests.size)
+        assertTrue(requests[1].messages.getJSONObject(1).getString("content").contains("缺少这些小节：## 关键上下文"))
+        assertEquals(allSections, result)
+    }
+
+    @Test
+    fun `重试仍缺小节时接受首版`() {
+        val sparse = allSections.substringBefore("## 关键上下文")
+        val stillSparse = allSections.substringBefore("## 下一步")
+        val requests = mutableListOf<ProviderRequest>()
+        val summarizer = summarizer(mutableListOf(sparse, stillSparse)) { requests += it }
+        val result = summarizer.summarize(listOf(AgentModelClient.ConversationMessage("user", "历史")))
+        assertEquals(2, requests.size)
+        // summarize 对输出做了 trim，首版尾部换行会被去掉
+        assertEquals(sparse.trim(), result)
+    }
+
+    @Test
+    fun `缺失过半时不重试直接采用首版`() {
+        val sparse = "## 原始需求与意图\n- a\n## 下一步\n- b"
+        val requests = mutableListOf<ProviderRequest>()
+        val summarizer = summarizer(mutableListOf(sparse)) { requests += it }
+        val result = summarizer.summarize(listOf(AgentModelClient.ConversationMessage("user", "历史")))
+        assertEquals(1, requests.size)
+        assertEquals(sparse, result)
+    }
+
+    private fun summarizer(
+        responses: MutableList<String>,
+        onRequest: (ProviderRequest) -> Unit = {},
+    ): AgentContextSummarizer {
+        val config = AgentModelClient.ModelConfig(
+            baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture",
+            systemPrompt = "", contextWindow = 128_000,
+        )
+        val provider = object : AgentProviderClient {
+            override val id = "fixture"
+            override val capabilities = ProviderCapabilities(EndpointKind.CHAT_COMPLETIONS, true, true, true, true, false, false)
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                onRequest(request)
+                return ProviderResponse(
+                    JSONObject().put("role", "assistant").put("content", responses.removeAt(0)).put("finish_reason", "stop"),
+                )
+            }
+        }
+        return AgentContextSummarizer(config, provider, AgentRunController(), roleplay = false)
     }
 }

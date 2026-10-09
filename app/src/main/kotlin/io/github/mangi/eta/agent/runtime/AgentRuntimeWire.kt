@@ -558,18 +558,20 @@ internal object AgentRuntimeWire {
     }
 
     fun runResultFromBundle(bundle: Bundle): RunResult =
-        AgentWireText.read(bundle, "complete_result_json")?.let { json.decodeFromString<RunResult>(it) } ?: RunResult(
-            contextSnapshot = AgentContextSnapshot.decode(bundle.getString("context_snapshot")),
-            contextSnapshotRef = bundle.getString("context_snapshot_ref").orEmpty(),
-            operation = bundle.getString("operation") ?: OP_CHAT,
-            rewriteTargetMessageId = bundle.getString("rewrite_target_message_id"),
-            runId = bundle.getString(KEY_RUN_ID).orEmpty(),
-            ok = bundle.getBoolean(KEY_OK),
-            content = bundle.getString(KEY_CONTENT).orEmpty(),
-            error = bundle.getString(KEY_ERROR),
-            reasoningContent = bundle.getString(KEY_REASONING_CONTENT).orEmpty(),
-            transcript = AgentConversationCodec.decodeTranscript(bundle.getString(KEY_TRANSCRIPT_JSON)),
-        )
+        AgentWireText.read(bundle, "complete_result_json")
+            ?.let { raw -> runCatching { json.decodeFromString<RunResult>(raw) }.getOrNull() }
+            ?: RunResult(
+                contextSnapshot = AgentContextSnapshot.decode(bundle.getString("context_snapshot")),
+                contextSnapshotRef = bundle.getString("context_snapshot_ref").orEmpty(),
+                operation = bundle.getString("operation") ?: OP_CHAT,
+                rewriteTargetMessageId = bundle.getString("rewrite_target_message_id"),
+                runId = bundle.getString(KEY_RUN_ID).orEmpty(),
+                ok = bundle.getBoolean(KEY_OK),
+                content = bundle.getString(KEY_CONTENT).orEmpty(),
+                error = bundle.getString(KEY_ERROR),
+                reasoningContent = bundle.getString(KEY_REASONING_CONTENT).orEmpty(),
+                transcript = AgentConversationCodec.decodeTranscript(bundle.getString(KEY_TRANSCRIPT_JSON)),
+            )
 
     fun toBundle(completedRun: CompletedRun): Bundle = completedRun.toBundle(compactForDrain = false)
 

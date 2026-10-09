@@ -71,11 +71,13 @@ docs/reviews/                                          → 审查与取证留档
 沿用现有风格：内部类 + 常量集中在 `companion object`，注释说明"为什么"而非"做什么"。
 
 ```kotlin
-/** 触发线的绝对上限：窗口越大，比例阈值越容易让单轮成本失控。 */
-const val ABSOLUTE_TRIGGER_CAP = 200_000
+/** 触发线的绝对上限：0 = 不设上限（当前定版，纯比例，与 harness 行为一致）。 */
+const val ABSOLUTE_TRIGGER_CAP = 0
 
 fun triggerTokens(window: Int?): Int? =
-    window?.takeIf { it > 0 }?.let { minOf((it * TRIGGER_RATIO).toInt(), ABSOLUTE_TRIGGER_CAP) }
+    window?.takeIf { it > 0 }?.let {
+        minOf((it * TRIGGER_RATIO).toInt(), it - outputReserveTokens(it) - headroomTokens(it))
+    }
 ```
 
 ## Testing Strategy
@@ -90,7 +92,7 @@ JUnit4 单测，覆盖三处行为；不依赖真机与网络。判据偏向"可
 
 ## Success Criteria
 
-- [ ] `triggerTokens(1_000_000) == 200_000`，`triggerTokens(256_000) == 192_000`（有单测）
+- [x] `triggerTokens(1_000_000) == 800_000`，`triggerTokens(256_000) == 204_800`（有单测；`ABSOLUTE_TRIGGER_CAP=0` 不设上限）
 - [ ] 模拟摘要连续失败：同一 run 内 `summarize` 只被调用 1 次；`force` 仍可调用
 - [ ] 压缩产物高于触发线时抛 `CONTEXT_NO_REDUCTION` 且保留原始 messages
 - [ ] 全量单测与 CI 全绿
@@ -98,6 +100,6 @@ JUnit4 单测，覆盖三处行为；不依赖真机与网络。判据偏向"可
 
 ## Open Questions（无异议则按默认执行）
 
-1. `ABSOLUTE_TRIGGER_CAP = 200_000` —— 默认 20 万（约为 10 万级 system+工具 schema 的 2 倍余量）。可调。
+1. `ABSOLUTE_TRIGGER_CAP = 0` —— v3.9.0 定版为不设上限（纯比例，与 harness 一致；早期曾拟 20 万绝对上限，后因小窗口模型反而受压弃用）。如未来引入请求级输出上限再评估。
 2. 熔断粒度 —— 默认"本 run 内不再重试"，跨 run 自动恢复（不落盘状态）。
-3. R4/R5/R6 —— 本次不做，另立任务。
+3. R4（摘要输入截断）已落地；R5（成本记账/UI 可视）与 R6（硬裁剪与触发线之间空档）另立任务。

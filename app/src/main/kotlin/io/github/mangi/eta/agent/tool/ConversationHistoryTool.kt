@@ -14,15 +14,17 @@ internal class ConversationHistoryTool(
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult {
         val args = JSONObject(toolCall.argumentsJson)
         val query = args.optString("query")
-        require(query.length <= 500)
+        if (query.length > 500) return invalid("query 超过 500 字符")
         var index = args.optInt("message_index", 0)
         var offset = args.optInt("offset", 0)
         var remaining = args.optInt("max_chars", 8000)
-        require(index >= 0 && offset >= 0 && remaining in 256..8000)
+        if (index < 0 || offset < 0 || remaining !in 256..8000) {
+            return invalid("message_index/offset 不能为负，max_chars 须在 256..8000")
+        }
         // 续读固定同一份历史，不能追着本工具新产生的日志无限读取。
         if (readSnapshot == null || (index == 0 && offset == 0)) readSnapshot = loader()
         val history = checkNotNull(readSnapshot)
-        require(index <= history.size)
+        if (index > history.size) return invalid("message_index 超出历史范围")
         val entries = JSONArray()
         while (index < history.size && remaining > 0 && entries.length() < 20) {
             val message = history[index]
@@ -32,7 +34,7 @@ internal class ConversationHistoryTool(
                 offset = 0
                 continue
             }
-            require(offset <= text.length)
+            if (offset > text.length) return invalid("offset 超出消息文本长度")
             var end = minOf(text.length, offset + remaining)
             if (end < text.length && end > offset && text[end - 1].isHighSurrogate()) end--
             if (end == offset && offset < text.length) break
@@ -51,4 +53,12 @@ internal class ConversationHistoryTool(
             .put("has_more", index < history.size)
             .put("next_message_index", index).put("next_offset", offset).toString())
     }
+
+    private fun invalid(message: String) = AgentModelClient.ToolResult(
+        content = JSONObject()
+            .put("ok", false)
+            .put("code", "INVALID_ARGUMENT")
+            .put("message", message)
+            .toString(),
+    )
 }

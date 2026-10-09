@@ -183,6 +183,19 @@ class AgentRuntimeWireTest {
     }
 
     @Test
+    fun corruptedCompleteResultJsonFallsBackToFieldDecodeInsteadOfThrowing() {
+        val result = AgentRuntimeWire.RunResult("corrupt-1", true, "正文内容",
+            reasoningContent = "推理", operation = AgentRuntimeWire.OP_CHAT)
+        val bundle = AgentRuntimeWire.toBundle(result).apply {
+            putString("complete_result_json", "这不是 JSON")
+        }
+        val restored = AgentRuntimeWire.runResultFromBundle(bundle)
+        assertEquals("corrupt-1", restored.runId)
+        assertTrue(restored.ok)
+        assertEquals("正文内容", restored.content)
+    }
+
+    @Test
     fun modelSessionSurvivesIpcAndLegacyRequestsUseConversationIdentity() {
         val request = AgentRuntimeWire.RunRequest(
             runId = "run-session", prompt = "测试",

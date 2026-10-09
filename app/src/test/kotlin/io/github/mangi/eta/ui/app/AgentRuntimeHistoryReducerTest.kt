@@ -3,6 +3,7 @@ package io.github.mangi.eta.ui.app
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.ui.model.AgentChatUiState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -89,5 +90,26 @@ class AgentRuntimeHistoryReducerTest {
         assertTrue(live.alreadyApplied)
         assertEquals(transcript, live.state.history)
         assertEquals(listOf("run-1"), live.state.appliedRuntimeRunIds)
+    }
+
+    @Test
+    fun snapshotCoverageBeyondTranscriptConvergesInsteadOfThrowing() {
+        val summary = AgentModelClient.ConversationMessage("assistant", "摘要", contextSummary = true)
+        val state = AgentChatUiState(
+            messages = emptyList(),
+            history = listOf(AgentModelClient.ConversationMessage("user", "旧约束")),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        val additions = listOf(AgentModelClient.ConversationMessage("assistant", "快照后完成"))
+        // 崩溃时序：快照先落库、transcript 未落库 → 快照声称覆盖 3 条，实际只有 1 条
+        val snapshot = io.github.mangi.eta.agent.model.AgentContextSnapshot(
+            operationId = "run", messages = listOf(summary),
+            consumedUserTurns = 1, consumedTranscriptMessages = additions.size + 2,
+        )
+        val result = AgentRuntimeHistoryReducer.apply(state, "run", additions, snapshot)
+        assertFalse(result.alreadyApplied)
+        // 越界被收敛：additions 全部视为已覆盖，不抛异常、不重放；journal 保留完整记录
+        assertEquals(listOf(summary), result.state.history)
+        assertEquals(listOf("旧约束", "快照后完成"), result.state.journal.map { it.content })
     }
 }

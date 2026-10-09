@@ -35,4 +35,22 @@ class ConversationHistoryToolTest {
         assertEquals(1, result.getJSONArray("entries").length())
         assertEquals(1, result.getJSONArray("entries").getJSONObject(0).getInt("message_index"))
     }
+
+    @Test fun invalidArgumentsReturnStructuredErrorInsteadOfThrowing() {
+        val tool = ConversationHistoryTool { listOf(AgentModelClient.ConversationMessage("assistant", "正文")) }
+        val longQuery = "x".repeat(501)
+        val cases = listOf(
+            """{"query":"$longQuery"}""" to "query 超过",
+            """{"message_index":-1}""" to "message_index",
+            """{"max_chars":100}""" to "max_chars",
+            """{"offset":9999}""" to "offset 超出",
+            """{"message_index":99}""" to "超出历史范围",
+        )
+        for ((arguments, expectedFragment) in cases) {
+            val result = JSONObject(tool.execute(AgentModelClient.ToolCall("c", "conversation_history", arguments)).content)
+            assertFalse("参数应被拒绝而非抛异常: $arguments", result.getBoolean("ok"))
+            assertEquals("INVALID_ARGUMENT", result.getString("code"))
+            assertTrue("错误消息应说明原因: $arguments", result.getString("message").contains(expectedFragment))
+        }
+    }
 }
