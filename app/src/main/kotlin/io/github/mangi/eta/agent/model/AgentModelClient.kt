@@ -199,7 +199,20 @@ internal object AgentModelClient {
             },
         )
         val result = try {
-            if (compactOnly) loop.compactOnly() else loop.run()
+            if (compactOnly) {
+                try {
+                    loop.compactOnly()
+                } catch (failure: AgentModelFailure) {
+                    // 手动压缩：无可压缩内容不是失败（对齐 harness "No compactable history yet"），
+                    // 返回成功且无快照；正常压缩成功必有快照，UI 据此区分「完成」与「无需压缩」。
+                    if (failure.code == "CONTEXT_NOT_COMPACTABLE") {
+                        return ModelResponse.Text(content = "", contextSnapshot = null, transcript = emptyList())
+                    }
+                    throw failure
+                }
+            } else {
+                loop.run()
+            }
         } catch (throwable: Throwable) {
             throw AgentModelExecutionException(
                 cause = throwable,

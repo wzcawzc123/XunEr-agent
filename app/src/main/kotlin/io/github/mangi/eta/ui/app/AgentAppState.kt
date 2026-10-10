@@ -1697,10 +1697,13 @@ internal class AgentAppState(
             } else null)
             return
         }
+        // 压缩前历史条数：detail 计量用（applyConversationHistoryResult 之后 history 已被替换）
+        val historyBefore = conversationsById[conversationIdForRun(runId)]?.history?.size ?: 0
+        val compactionDetail = AgentCompactionDetail.forResult(result.ok, result.contextSnapshot, historyBefore, result.error)
         updateRunTrace(runId) { messages ->
             runMessageProjector.finishContextCompaction(runId,
                 runMessageProjector.finalizeRun(runId, messages),
-                if (result.ok) "上下文压缩完成" else result.error ?: "上下文压缩已停止")
+                compactionDetail)
         }
         if (result.contextSnapshotRef.isBlank()) {
             applyConversationHistoryResult(runId, result.transcript, result.contextSnapshot, !result.ok || result.contextSnapshot != null)
@@ -1712,7 +1715,7 @@ internal class AgentAppState(
                         runId = runId,
                         messages = messages,
                         ok = result.ok,
-                        detail = if (result.ok) "上下文压缩完成" else result.error ?: "上下文压缩失败",
+                        detail = compactionDetail,
                     )
                 }
             else -> {

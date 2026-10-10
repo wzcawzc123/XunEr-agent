@@ -114,6 +114,24 @@ class AgentContextCompactionTest {
     }
 
     @Test
+    fun manualCompactionWithNothingToCompactReturnsSuccessWithoutSnapshot() {
+        var summaries = 0
+        val provider = provider { request, _ ->
+            summaries++
+            response("不应被调用：无可压缩历史")
+        }
+        val result = AgentModelClient.complete(
+            config, "", AgentModelClient.ToolExecutor { error("不应执行工具") },
+            history = emptyList(), compactOnly = true, provider = provider,
+        )
+        // 对齐 harness "No compactable history yet"：无可压缩内容是成功而非失败
+        assertEquals("", result.content)
+        assertNull(result.contextSnapshot)
+        assertTrue(result.transcript.isEmpty())
+        assertEquals(0, summaries)
+    }
+
+    @Test
     fun summaryInputIsBoundedAndDropsOldestBeyondBudget() {
         // 窗口 50k → 摘要输入预算 = 50_000/2 = 25_000 → 下限 32_000 字符
         val turns = (1..6).flatMap { turn -> listOf(

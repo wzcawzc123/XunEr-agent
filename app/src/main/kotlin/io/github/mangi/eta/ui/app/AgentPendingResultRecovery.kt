@@ -56,7 +56,7 @@ internal object AgentPendingResultRecovery {
                     runId = runId,
                     messages = state.messages,
                     ok = result.ok,
-                    detail = if (result.ok) "上下文压缩完成" else result.error ?: "上下文压缩失败",
+                    detail = AgentCompactionDetail.forResult(result.ok, result.contextSnapshot, state.history.size, result.error),
                 )), false)
         }
 
