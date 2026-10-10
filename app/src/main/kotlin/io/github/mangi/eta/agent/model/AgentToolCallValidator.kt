@@ -23,8 +23,11 @@ internal class AgentToolCallValidator(tools: JSONArray) {
      */
     private val xmlResidueMarkers = listOf(
         "</parameter>",
-        "><parameter ",
+        "><parameter ",      // 半角空格形态（既有）
+        "><parameter=",      // 半角等号、无空格形态
+        "><parameter＝",     // 全角等号形态（真机取证 2026-10-10：模型输出全角标点 XML 并粘包）
         "<parameter name=",
+        "<parameter＝",      // 全角等号开标签、无粘包前缀
         "</invoke>",
         "</function_calls>",
     )
@@ -42,7 +45,7 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         val toolSchema = schemasByName[call.name]
             ?: return retiredToolGuidance(call.name) ?: "工具未在本次运行的能力目录中声明"
         val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
-            .getOrElse { return "参数不是有效的 JSON object" }
+            .getOrElse { return malformedArgumentsGuidance(call.argumentsJson) }
         if (isRedactedPayload(arguments)) return REDACTED_REPLAY_GUIDANCE
         findXmlResidue(arguments)?.let { residue -> return xmlResidueGuidance(residue.first, residue.second) }
         return validateValue(
@@ -84,6 +87,20 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         return "参数「$field」的值里检测到 XML 标签残留（$marker）：这次工具调用被写成了 XML 风格。" +
             "请改用纯 JSON 字符串传参，形如 {\"action\":\"exec\",\"command\":\"ls -la\"}；" +
             "每个参数的值只放内容本身，不要包含 <parameter …> 这类标签。"
+    }
+
+    /**
+     * 参数不是合法 JSON 时的对症引导：全角引号 / XML 形态分别点明，
+     * 避免模型只看到笼统的"不是有效的 JSON object"而不知道错在哪。
+     */
+    private fun malformedArgumentsGuidance(raw: String): String {
+        if (raw.contains(FULLWIDTH_QUOTE) || raw.contains(LEFT_DOUBLE_QUOTE) || raw.contains(RIGHT_DOUBLE_QUOTE)) {
+            return "参数使用了全角引号（“ ” 或 “），JSON 的键与值必须用半角双引号 \" 包裹"
+        }
+        if (raw.contains("<parameter") || raw.contains("</parameter")) {
+            return "参数包含 XML 标签（<parameter …>），请改用纯 JSON 字符串传参，每个参数值只放内容本身"
+        }
+        return "参数不是有效的 JSON object"
     }
 
     private fun validateValue(
@@ -576,6 +593,11 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         const val MAX_REPORTED_BRANCH_FAILURES = 3
         const val REDACTED_KEY = "_redacted"
         val REDACTED_MARKERS = listOf("_note", "_fields")
+
+        /** 全角引号（U+FF02 / U+201C / U+201D）：JSON 解析失败时的对症引导用。 */
+        const val FULLWIDTH_QUOTE = "\uFF02"
+        const val LEFT_DOUBLE_QUOTE = "\u201C"
+        const val RIGHT_DOUBLE_QUOTE = "\u201D"
 
         /** 脱敏占位不是参数：取值不可恢复，唯一出路是重新取数。 */
         const val REDACTED_REPLAY_GUIDANCE =

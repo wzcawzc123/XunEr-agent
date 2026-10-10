@@ -35,6 +35,40 @@ class AgentToolCallValidatorTest {
         assertNull(validator.validate(call("""{"command":"echo '<a>text</a>' > out.xml"}""")))
     }
 
+    @Test
+    fun fullwidthXmlStickyResidueIsRejectedWithTargetedGuidance() {
+        // 2026-10-10 真机取证：模型输出全角等号的 XML 风格参数并粘包（exec><parameter＝command>…），
+        // 全角形态此前漏过粘包检测、落到枚举报错误导模型反复重试。
+        val validator = validator(xmlGuardSchema())
+        val cases = listOf(
+            """{"action":"exec><parameter＝command>head -25 /data/x","command":"ls"}""",
+            """{"action":"<parameter＝command>ls -t /data/ | grep x"}""",
+            """{"action":"exec><parameter=command>ls","command":"echo"}""",
+        )
+        for (arguments in cases) {
+            val message = validator.validate(call(arguments))
+            assertNotNull("全角粘包必须被拒绝：$arguments", message)
+            assertTrue("应点明 XML 残留：$message", message.orEmpty().contains("XML 标签残留"))
+        }
+    }
+
+    @Test
+    fun fullwidthQuotedArgumentsAreGuidedToHalfwidthQuotes() {
+        val validator = validator(xmlGuardSchema())
+        // org.json 对全角引号宽容（完整形态可解析成功）；用缺闭合形态触发解析失败路径。
+        val message = validator.validate(call("""{“action”:“exec”"""))
+        assertNotNull("全角引号且缺闭合的参数应被拒绝", message)
+        assertTrue("应点明全角引号：$message", message.orEmpty().contains("全角引号"))
+    }
+
+    @Test
+    fun xmlTextArgumentsRemainUnblockedAfterMarkerExpansion() {
+        // 反例回归：标记扩展不得误伤真实 XML/HTML 处理。
+        val validator = validator(xmlGuardSchema())
+        assertNull(validator.validate(call("""{"command":"grep '<parameter' config.xml"}""")))
+        assertNull(validator.validate(call("""{"command":"echo '<a>text</a>' > out.xml"}""")))
+    }
+
     private fun xmlGuardSchema(): JSONObject = JSONObject(
         """
         {

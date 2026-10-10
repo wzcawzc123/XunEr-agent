@@ -122,6 +122,46 @@ class AnthropicMessagesProviderTest {
     }
 
     @Test
+    fun unparseableToolUseInputIsKeptInHistoryInsteadOfSilentlyBecomingEmptyObject() {
+        // 2026-10-10 真机取证：模型输出全角 XML 粘包参数（非 JSON）时，tool_use input 回写
+        // 此前静默降级为空对象，同一 run 后续轮次模型看到空 input 重复猜测参数。改为保留原文标记。
+        val stream = buildString {
+            append(blockStart(0, JSONObject().put("type", "tool_use").put("id", "toolu_bad")
+                .put("name", "terminal").put("input", JSONObject())))
+            append(blockDelta(0, JSONObject().put("type", "input_json_delta")
+                .put("partial_json", "exec><parameter＝command>ls")))
+            append(blockStop(0))
+            append(event("message_delta", JSONObject().put("delta", JSONObject().put("stop_reason", "tool_use"))))
+            append(event("message_stop", JSONObject()))
+        }
+        lateinit var assistant: JSONObject
+        withAnthropicServer(stream) { baseUrl ->
+            assistant = AnthropicMessagesProvider.complete(providerRequest(baseUrl), AgentRunController()).assistantMessage
+        }
+        val calls = AgentConversationCodec.parseToolCalls(assistant)
+        // 拒绝路径不受影响：tool_calls arguments 保留原文（validator 据此拦 XML 粘包）
+        assertEquals("exec><parameter＝command>ls", calls[0].argumentsJson)
+        val assistantHistory = AgentConversationCodec.assistantHistoryMessage(assistant, calls)
+        val messages = JSONArray()
+            .put(AgentConversationCodec.userTextMessage("执行"))
+            .put(assistantHistory)
+            .put(AgentConversationCodec.toolResultMessage(calls[0], AgentModelClient.ToolResult("结果")))
+        val requestBody = AtomicReference<String>()
+        withAnthropicServer(event("message_stop", JSONObject()), onRequest = requestBody::set) { baseUrl ->
+            AnthropicMessagesProvider.complete(
+                providerRequest(baseUrl).copy(messages = messages),
+                AgentRunController(),
+            )
+        }
+        // 同一 run 后续轮次回放 tool_use 时，input 保留原文标记而非空对象
+        val blocks = JSONObject(requestBody.get()).getJSONArray("messages").getJSONObject(1).getJSONArray("content")
+        val toolUse = (0 until blocks.length()).map { blocks.getJSONObject(it) }
+            .first { it.getString("type") == "tool_use" }
+        assertTrue("非 JSON input 不得静默变空对象", toolUse.getJSONObject("input").getBoolean("_eta_unparseable"))
+        assertEquals("exec><parameter＝command>ls", toolUse.getJSONObject("input").getString("raw"))
+    }
+
+    @Test
     fun inputSchemaDropsTopLevelCombinatorsButKeepsNestedOnesAndLocalSchema() {
         val tools = JSONArray().also { array ->
             AgentWebToolCatalog.appendTo(array)

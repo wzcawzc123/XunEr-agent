@@ -12,6 +12,8 @@ import org.json.JSONObject
 internal object AnthropicMessagesProvider : AgentProviderClient {
     private const val DEFAULT_MAX_TOKENS = 4096
     private const val ADAPTIVE_MODEL_DEFAULT_MAX_TOKENS = 16_384
+    /** 非 JSON tool_use input 回写时保留的原文长度上限。 */
+    private const val MAX_UNPARSEABLE_RAW_CHARS = 2_000
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val TOP_LEVEL_COMBINATORS = listOf("oneOf", "anyOf", "allOf")
 
@@ -544,8 +546,16 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
         cachedTokens = later.cachedTokens ?: cachedTokens,
     )
 
-    private fun parseJsonObject(raw: String): JSONObject =
-        runCatching { JSONObject(raw.ifBlank { "{}" }) }.getOrDefault(JSONObject())
+    private fun parseJsonObject(raw: String): JSONObject {
+        if (raw.isBlank()) return JSONObject()
+        return runCatching { JSONObject(raw) }.getOrElse {
+            // 非 JSON 的 tool_use input 不再静默降级为空对象：历史回写保留原文标记，
+            // 避免后续模型看到空 input 重复猜测参数（XML 粘包等格式错乱仍由 validator 拦截）。
+            JSONObject()
+                .put("_eta_unparseable", true)
+                .put("raw", raw.take(MAX_UNPARSEABLE_RAW_CHARS))
+        }
+    }
 
     private fun JSONObject.firstInt(vararg keys: String): Int? {
         for (key in keys) {
