@@ -506,7 +506,7 @@ class AgentConversationStoreTest {
         assertTrue(other.history.isEmpty())
         assertTrue(other.journal.isEmpty())
         assertEquals("其他", snapshot.titles.getValue("conv-other"))
-        assertEquals(listOf(UserMessageUi("other-user", "其他会话")), snapshot.previews.getValue("conv-other"))
+        assertEquals(UserMessageUi("other-user", "其他会话"), snapshot.previews.getValue("conv-other"))
     }
 
     @Test
