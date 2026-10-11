@@ -467,6 +467,109 @@ class AgentConversationStoreTest {
     }
 
     @Test
+    fun loadSnapshotLoadsOnlySelectedConversationMessages() = runBlocking {
+        val selectedState = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("selected-user", "选中会话")),
+            history = listOf(
+                io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "选中会话")
+            ),
+            journal = listOf(
+                io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "选中会话")
+            ),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        val otherState = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("other-user", "其他会话")),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        AgentConversationStore.save(
+            context = context,
+            selectedConversationId = "conv-selected",
+            conversationsById = mapOf("conv-selected" to selectedState, "conv-other" to otherState),
+            titles = mapOf("conv-selected" to "选中", "conv-other" to "其他"),
+            updatedAt = mapOf("conv-selected" to 2L, "conv-other" to 1L),
+        )
+
+        val snapshot = AgentConversationStore.load(context)
+
+        assertEquals("conv-selected", snapshot.selectedConversationId)
+        val selected = snapshot.conversationsById.getValue("conv-selected")
+        assertTrue(selected.messagesLoaded)
+        assertEquals(listOf(UserMessageUi("selected-user", "选中会话")), selected.messages)
+        assertEquals(listOf(UserMessageUi("selected-user", "选中会话")), selected.history)
+        val other = snapshot.conversationsById.getValue("conv-other")
+        assertFalse(other.messagesLoaded)
+        assertTrue(other.messages.isEmpty())
+        assertTrue(other.history.isEmpty())
+        assertTrue(other.journal.isEmpty())
+        assertEquals("其他", snapshot.titles.getValue("conv-other"))
+        assertEquals(listOf(UserMessageUi("other-user", "其他会话")), snapshot.previews.getValue("conv-other"))
+    }
+
+    @Test
+    fun savingWhileConversationUnloadedDoesNotDeleteStoredMessages() = runBlocking {
+        val a = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("a-user", "A 会话")),
+            history = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "A 会话")),
+            journal = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "A 会话")),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        val b = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("b-user", "B 消息一"), UserMessageUi("b-user-2", "B 消息二")),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        AgentConversationStore.save(
+            context = context,
+            selectedConversationId = "conv-a",
+            conversationsById = mapOf("conv-a" to a, "conv-b" to b),
+            titles = mapOf("conv-a" to "A", "conv-b" to "B"),
+            updatedAt = mapOf("conv-a" to 2L, "conv-b" to 1L),
+        )
+
+        // 重启：选中 A，B 未载入（messagesLoaded=false）
+        val snapshot = AgentConversationStore.load(context)
+        val unloadedB = snapshot.conversationsById.getValue("conv-b")
+        assertFalse(unloadedB.messagesLoaded)
+
+        // 以该快照重建持久化（模拟重启后的保存路径），保存一次：B 的消息区必须原样保留
+        val persistence = AgentConversationPersistence(snapshot)
+        persistence.save(context, snapshot.copy(titles = snapshot.titles + ("conv-b" to "改名后的 B")))
+
+        assertEquals(
+            listOf(UserMessageUi("b-user", "B 消息一"), UserMessageUi("b-user-2", "B 消息二")),
+            AgentConversationStore.loadConversation(context, "conv-b")!!.messages,
+        )
+        assertEquals("改名后的 B", AgentConversationStore.load(context).titles.getValue("conv-b"))
+    }
+
+    @Test
+    fun lazyLoadConversationRestoresFullMessagesAndCheckpoint() = runBlocking {
+        val history = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "assistant", content = "历史"))
+        val state = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("user-1", "请求"), AgentMessageUi("assistant-1", "回答")),
+            history = history, journal = history, input = "", isStreaming = false, thinkingEnabled = true,
+        )
+        AgentConversationStore.save(
+            context = context,
+            selectedConversationId = "conv-lazy",
+            conversationsById = mapOf("conv-lazy" to state),
+            titles = mapOf("conv-lazy" to "懒加载"),
+            updatedAt = mapOf("conv-lazy" to 1L),
+        )
+        AgentConversationStore.load(context)
+
+        val restored = AgentConversationStore.loadConversation(context, "conv-lazy")!!
+
+        assertTrue(restored.messagesLoaded)
+        assertEquals(
+            listOf(UserMessageUi("user-1", "请求"), AgentMessageUi("assistant-1", "回答")),
+            restored.messages,
+        )
+        assertEquals(history, restored.history)
+        assertEquals(history, restored.journal)
+    }
+
+    @Test
     fun savingEmptySnapshotClearsPreviouslyPersistedConversations() {
         runBlocking {
             AgentConversationStore.save(

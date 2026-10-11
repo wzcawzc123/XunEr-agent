@@ -82,6 +82,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -128,6 +129,12 @@ internal class AgentAppState(
     private var conversationsById: Map<String, AgentChatHomeUiState> = initialConversations.conversationsById
     private var conversationTitles: Map<String, String> = initialConversations.titles
     private var conversationUpdatedAt: Map<String, Long> = initialConversations.updatedAt
+    /** 未载入会话的最后一条消息（列表预览）；已载入会话由 messages 实时派生。 */
+    private var conversationPreviews: Map<String, AgentChatMessageUi> = initialConversations.previews
+    /** 选中未载入会话时的懒加载任务：新选择时取消旧任务并校验目标仍为当前选中。 */
+    private var lazyLoadConversationJob: Job? = null
+    /** 续跑入口在懒加载等待期间的防重入。 */
+    private var resumeLoadInProgress = false
 
     var homeState by mutableStateOf(
         selectedConversationId?.let(conversationsById::get) ?: emptyChatState(defaultThinkingEnabled)
@@ -290,6 +297,7 @@ internal class AgentAppState(
             conversationsById = snapshot.conversationsById
             conversationTitles = snapshot.titles
             conversationUpdatedAt = snapshot.updatedAt
+            conversationPreviews = snapshot.previews
             conversationPersistence = AgentConversationPersistence(snapshot)
             fileAttachmentOwnerVersion += 1
             homeState = selectedConversationId
@@ -416,7 +424,7 @@ internal class AgentAppState(
                 }
             }
             orphanRewrites.forEach { (conversationId, runId) ->
-                conversationsById[conversationId]?.let { state ->
+                ensureConversationLoaded(conversationId)?.let { state ->
                     updateConversation(conversationId, RoleplayConversationReducer.applyRewrite(state, runId,
                         AgentRuntimeWire.RunResult(runId, false, "", "重新生成已中断，原回复已保留。",
                             operation = AgentRuntimeWire.OP_REWRITE_REPLY)))
@@ -443,7 +451,7 @@ internal class AgentAppState(
     }
 
     /** 把安全事件恢复为 UI 轨迹；半截回复不进入模型 history，设备工具也不会重放。 */
-    private fun restoreCheckpointTrace(
+    private suspend fun restoreCheckpointTrace(
         checkpoint: AgentRunCheckpointStore.Checkpoint,
         interrupted: Boolean,
     ): Boolean {
@@ -452,7 +460,8 @@ internal class AgentAppState(
         val conversationId = AgentUiHandoffPayload
             .from(checkpoint.handoff.payload)
             .conversationId
-        val existing = conversationsById[conversationId] ?: return false
+        // 未载入会话先从库补载全量，避免恢复覆盖空消息或跳过恢复丢掉中断进度。
+        val existing = ensureConversationLoaded(conversationId) ?: return false
         if (AgentRuntimeHistoryReducer.wasApplied(existing, runId)) return false
         if (checkpoint.operation == AgentRuntimeWire.OP_REWRITE_REPLY) {
             val restored = RoleplayConversationReducer.restorePendingRewrite(existing, runId, checkpoint.rewriteTargetMessageId)
@@ -502,12 +511,12 @@ internal class AgentAppState(
         return true
     }
 
-    private fun startReattachedRun(checkpoint: AgentRunCheckpointStore.Checkpoint) {
+    private suspend fun startReattachedRun(checkpoint: AgentRunCheckpointStore.Checkpoint) {
         val runId = checkpoint.runId
         val conversationId = AgentUiHandoffPayload
             .from(checkpoint.handoff.payload)
             .conversationId
-        val existing = conversationsById[conversationId] ?: return
+        val existing = ensureConversationLoaded(conversationId) ?: return
         if (currentRunId != null || AgentRuntimeHistoryReducer.wasApplied(existing, runId)) return
 
         runConversationIds[runId] = conversationId
@@ -591,7 +600,7 @@ internal class AgentAppState(
         }
     }
 
-    private fun importExternalRun(archivedRun: AgentRunArchiveStore.ArchivedRun): String? {
+    private suspend fun importExternalRun(archivedRun: AgentRunArchiveStore.ArchivedRun): String? {
         val runId = archivedRun.result.runId.ifBlank { archivedRun.handoff.id }
         if (runId.isBlank()) return null
         val payload = AgentExternalArchivePayload.from(archivedRun.handoff.payload) ?: return null
@@ -602,7 +611,8 @@ internal class AgentAppState(
         val archivedEffort = payload.reasoningEffort
             ?: payload.thinkingEnabled?.let(ReasoningEffort::fromLegacy)
             ?: ReasoningEffort.fromLegacy(defaultThinkingEnabled)
-        val existingState = conversationsById[conversationId] ?: emptyChatState(
+        // 未载入会话先从库补载全量，避免导入在空消息上覆盖丢历史。
+        val existingState = ensureConversationLoaded(conversationId) ?: emptyChatState(
             archivedEffort.enablesReasoning
         ).copy(reasoningEffort = archivedEffort)
         val alreadyImported = AgentRuntimeHistoryReducer.wasApplied(existingState, runId) ||
@@ -733,6 +743,8 @@ internal class AgentAppState(
         fileAttachmentOwnerVersion += 1
         selectedConversationId = conversationId
         homeState = state
+        // 未载入会话先以轻量占位显示（messages 空 + messagesLoaded=false），异步补载全量消息。
+        if (!state.messagesLoaded) lazyLoadConversation(conversationId)
         refreshConversationModel()
         if (state.modelId != null && providers.enabledModel(state.modelId) == null) {
             modelPickerState.selectedModel?.let { fallback ->
@@ -745,6 +757,43 @@ internal class AgentAppState(
         }
         conversationPaneState = conversationPaneState.copy(selectedConversationId = conversationId)
         persistConversations()
+    }
+
+    /** 选中未载入会话时异步补载全量消息；加载期间用户再切换会取消旧任务，完成时校验仍为当前选中。 */
+    private fun lazyLoadConversation(conversationId: String) {
+        lazyLoadConversationJob?.cancel()
+        lazyLoadConversationJob = scope.launch(Dispatchers.IO) {
+            val loaded = AgentConversationStore.loadConversation(appContext, conversationId)
+            withContext(Dispatchers.Main.immediate) {
+                if (loaded == null) return@withContext
+                conversationsById = conversationsById + (conversationId to loaded)
+                loaded.messages.lastOrNull()?.let { last ->
+                    conversationPreviews = conversationPreviews + (conversationId to last)
+                }
+                if (selectedConversationId == conversationId) {
+                    homeState = loaded
+                    refreshConversationModel()
+                    refreshConversationSummaries()
+                }
+            }
+        }
+    }
+
+    /**
+     * 确保目标会话消息已载入（恢复/导入/续跑/导出等跨会话入口用）。
+     * 未载入会话直接从库补载全量并写回状态；必须在 Main 上下文调用（内部执行 IO 挂起）。
+     */
+    private suspend fun ensureConversationLoaded(conversationId: String): AgentChatHomeUiState? {
+        val state = conversationsById[conversationId] ?: return null
+        if (state.messagesLoaded) return state
+        val loaded = withContext(Dispatchers.IO) {
+            AgentConversationStore.loadConversation(appContext, conversationId)
+        } ?: return null
+        conversationsById = conversationsById + (conversationId to loaded)
+        loaded.messages.lastOrNull()?.let { last ->
+            conversationPreviews = conversationPreviews + (conversationId to last)
+        }
+        return loaded
     }
 
     fun createConversation() {
@@ -829,11 +878,15 @@ internal class AgentAppState(
 
     fun exportConversationMarkdown(conversationId: String): String? {
         val state = conversationsById[conversationId] ?: return null
+        // 未载入会话先同步补载全量消息（导出为一次性用户操作，阻塞可接受）。
+        val fullState = if (state.messagesLoaded) state else runBlocking(Dispatchers.IO) {
+            AgentConversationStore.loadConversation(appContext, conversationId)
+        } ?: return null
         val title = conversationTitles[conversationId]?.takeIf { it.isNotBlank() }
             ?: appContext.getString(R.string.conversation_unnamed)
         return ConversationMarkdownExporter.export(
             title = title,
-            messages = state.messages,
+            messages = fullState.messages,
             labels = ConversationMarkdownExporter.Labels(
                 user = appContext.getString(R.string.conversation_export_user),
                 assistant = appContext.getString(R.string.conversation_export_assistant),
@@ -1188,8 +1241,34 @@ internal class AgentAppState(
      */
     fun resumeInterruptedRun() {
         val pending = resumableInterruptedRun ?: return
-        if (currentRunId != null) return
-        val state = conversationsById[pending.conversationId] ?: return
+        if (currentRunId != null || resumeLoadInProgress) return
+        val loaded = conversationsById[pending.conversationId]?.takeIf { it.messagesLoaded }
+        if (loaded != null) {
+            resumeInterruptedRunNow(pending, loaded)
+            return
+        }
+        if (conversationsById[pending.conversationId] == null) {
+            resumableInterruptedRun = null
+            return
+        }
+        // 目标会话未载入：先异步补载全量消息，完成后再重入本函数（防重入）。
+        resumeLoadInProgress = true
+        scope.launch(Dispatchers.IO) {
+            val restored = AgentConversationStore.loadConversation(appContext, pending.conversationId)
+            withContext(Dispatchers.Main.immediate) {
+                resumeLoadInProgress = false
+                if (restored != null) {
+                    conversationsById = conversationsById + (pending.conversationId to restored)
+                    restored.messages.lastOrNull()?.let { last ->
+                        conversationPreviews = conversationPreviews + (pending.conversationId to last)
+                    }
+                }
+                if (resumableInterruptedRun == pending) resumeInterruptedRun()
+            }
+        }
+    }
+
+    private fun resumeInterruptedRunNow(pending: ResumableInterruptedRun, state: AgentChatHomeUiState) {
         launchConversationRun(
             conversationId = pending.conversationId,
             runId = java.util.UUID.randomUUID().toString(),
@@ -1950,7 +2029,8 @@ internal class AgentAppState(
                 conversationUpdatedAt[id] ?: 0L
             }
             .map { (id, state) ->
-                val lastMessage = state.messages.lastOrNull()
+                // 未载入会话用启动时缓存的最后一条消息做预览，避免列表显示"暂无消息"。
+                val lastMessage = if (state.messagesLoaded) state.messages.lastOrNull() else conversationPreviews[id]
                 ConversationSummaryUi(
                     id = id,
                     title = conversationTitles[id].orEmpty().ifBlank {

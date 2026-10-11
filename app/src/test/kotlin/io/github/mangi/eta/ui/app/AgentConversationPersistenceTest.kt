@@ -10,6 +10,7 @@ import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -166,6 +167,33 @@ class AgentConversationPersistenceTest {
         assertEquals(listOf("user", "thinking", "later", "answer"),
             reloaded.conversationsById.getValue("active").messages.map { it.id })
         assertTrue(reloaded.unalignedConversationIds.isEmpty())
+    }
+
+    @Test
+    fun unloadedConversationMessageZoneIsUntouchedWhileMetadataPersists() = runBlocking {
+        // 先全量保存 A/B；模拟重启后 B 未载入（messagesLoaded=false）
+        val persistence = AgentConversationPersistence()
+        persistence.save(context, snapshot(mapOf("active" to state("active"), "other" to state("other"))))
+        val loaded = AgentConversationStore.load(context)
+        assertFalse(loaded.conversationsById.getValue("other").messagesLoaded)
+        assertTrue(loaded.conversationsById.getValue("active").messagesLoaded)
+        installAudit()
+
+        // 未载入会话的 metadata（title/updatedAt）变更必须落库，消息区保持原样
+        val next = loaded.copy(
+            titles = loaded.titles + ("other" to "改名"),
+            updatedAt = loaded.updatedAt + ("other" to 9L),
+        )
+        AgentConversationPersistence(loaded).save(context, next)
+
+        assertEquals(0, events("conversation_messages", "other-user"))
+        assertEquals(0, events("conversation_messages", "other-thinking"))
+        val rows = EtaDatabase.get(context).conversationDao().conversationEntities().associateBy { it.id }
+        assertEquals("改名", rows.getValue("other").title)
+        assertEquals(9L, rows.getValue("other").updatedAt)
+        // 消息仍在库中（懒加载可完整恢复）
+        val restored = AgentConversationStore.loadConversation(context, "other")!!
+        assertEquals(listOf("other-user", "other-thinking"), restored.messages.map { it.id })
     }
 
     private fun state(id: String): AgentChatHomeUiState {

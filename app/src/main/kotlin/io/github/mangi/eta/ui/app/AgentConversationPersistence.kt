@@ -36,13 +36,14 @@ internal class AgentConversationPersistence(initial: AgentConversationStore.Snap
         val roleplayMessages: RoleplayMessageState,
         val modelId: String?,
         val messages: List<AgentChatMessageUi>,
+        val messagesLoaded: Boolean,
         val history: List<AgentModelClient.ConversationMessage>,
         val journal: List<AgentModelClient.ConversationMessage>,
     ) {
         constructor(state: AgentChatHomeUiState, title: String, updatedAt: Long) : this(
             title, updatedAt, state.reasoningEffort, state.appliedRuntimeRunIds,
             state.roleplay, if (state.roleplay == null) RoleplayMessageState() else state.roleplayMessages,
-            state.modelId, state.messages, state.history, state.journal.ifEmpty { state.history },
+            state.modelId, state.messages, state.messagesLoaded, state.history, state.journal.ifEmpty { state.history },
         )
 
         fun sameMetadata(other: Content): Boolean =

@@ -10,6 +10,8 @@ import io.github.mangi.eta.data.model.ReasoningEffort
 @Immutable
 internal data class AgentChatUiState(
     val messages: List<AgentChatMessageUi>,
+    /** false 表示该会话消息未载入（启动懒加载），仅载 metadata；选中或恢复时再从库补载。 */
+    val messagesLoaded: Boolean = true,
     val history: List<AgentModelClient.ConversationMessage> = emptyList(),
     // 完整脱敏历史独立于模型投影；摘要替换 history 时不覆盖 journal。
     val journal: List<AgentModelClient.ConversationMessage> = emptyList(),
