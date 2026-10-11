@@ -496,7 +496,10 @@ class AgentConversationStoreTest {
         val selected = snapshot.conversationsById.getValue("conv-selected")
         assertTrue(selected.messagesLoaded)
         assertEquals(listOf(UserMessageUi("selected-user", "选中会话")), selected.messages)
-        assertEquals(listOf(UserMessageUi("selected-user", "选中会话")), selected.history)
+        assertEquals(
+            listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "选中会话")),
+            selected.history,
+        )
         val other = snapshot.conversationsById.getValue("conv-other")
         assertFalse(other.messagesLoaded)
         assertTrue(other.messages.isEmpty())
