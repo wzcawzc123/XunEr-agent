@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private var requestedConversationId by mutableStateOf<String?>(null)
     private var appliedPredictiveBackEnabled = true
     private var speechSettingsRequested by mutableStateOf(false)
+    private var terminalRequested by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +69,8 @@ class MainActivity : ComponentActivity() {
                         onRequestedConversationOpened = { requestedConversationId = null; intent?.action = null },
                         openSpeechSettings = speechSettingsRequested,
                         onSpeechSettingsOpened = { speechSettingsRequested = false; intent?.action = null },
+                        openTerminal = terminalRequested,
+                        onTerminalOpened = { terminalRequested = false; intent?.action = null },
                         onAssistantConversationOpened = { opened ->
                             assistantConversationKey = null
                             if (opened) {
@@ -88,6 +91,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateAssistantHandoff(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_TERMINAL) {
+            terminalRequested = true
+            return
+        }
         if (intent?.action == ACTION_SPEECH_SETTINGS) {
             speechSettingsRequested = true
             return
@@ -145,5 +152,7 @@ class MainActivity : ComponentActivity() {
         /** 运行浮层的结果卡片回到本体：App 发起的 run 带会话 ID，直接打开该会话；缺省时只回到首页。 */
         const val ACTION_OPEN_CONVERSATION_ID = "io.github.mangi.eta.action.OPEN_CONVERSATION_ID"
         const val EXTRA_CONVERSATION_ID = "io.github.mangi.eta.extra.CONVERSATION_ID"
+        /** 后台命令完成通知点击：跳转到终端会话。 */
+        const val ACTION_OPEN_TERMINAL = "io.github.mangi.eta.action.OPEN_TERMINAL"
     }
 }

@@ -1333,4 +1333,12 @@
   <string name="tool_web_search_description">未使用 Provider 托管搜索时检索公开网页，返回标题、链接与摘要，无需额外 API Key。</string>
   <string name="tool_fetch_url">读取网页正文</string>
   <string name="tool_fetch_url_description">读取静态网页正文并分页续读；不执行网页脚本或共享浏览器登录状态。</string>
+<string name="terminal_key_paste">粘贴</string>
+<string name="terminal_keyboard_show">显示键盘</string>
+<string name="terminal_keyboard_hide">收起键盘</string>
+<string name="terminal_key_left">左</string>
+<string name="terminal_key_up">上</string>
+<string name="terminal_key_down">下</string>
+<string name="terminal_key_right">右</string>
+<string name="terminal_key_enter">回车</string>
 </resources>

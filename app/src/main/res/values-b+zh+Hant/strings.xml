@@ -1298,4 +1298,12 @@
   <string name="speech_credentials_lost">語音憑據無法解密，請重新填寫並儲存</string>
   <string name="speech_save_retry">請重試</string>
   <string name="system_notice_model_retry">模型請求重試</string>
+<string name="terminal_key_paste">貼上</string>
+<string name="terminal_keyboard_show">顯示鍵盤</string>
+<string name="terminal_keyboard_hide">收起鍵盤</string>
+<string name="terminal_key_left">左</string>
+<string name="terminal_key_up">上</string>
+<string name="terminal_key_down">下</string>
+<string name="terminal_key_right">右</string>
+<string name="terminal_key_enter">Enter 鍵</string>
 </resources>

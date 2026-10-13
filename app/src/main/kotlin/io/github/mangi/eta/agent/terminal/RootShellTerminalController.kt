@@ -16,6 +16,7 @@ internal class RootShellTerminalController(
     private val linuxRootfsPathProvider: ((TerminalEnvironment) -> String?)? = null,
     private val processSupervisor: ShellProcessSupervisor = ShellProcessSupervisor(),
     private val detachedSupervisor: DetachedTaskSupervisor? = null,
+    private val backgroundJobs: BackgroundTerminalJobs? = null,
     private val linuxSharedMountsProvider: () -> List<SharedFolderMount> = { emptyList() },
     private val selectedLinuxEnvironmentProvider: () -> TerminalEnvironment = {
         TerminalEnvironment.ALPINE
@@ -73,6 +74,9 @@ internal class RootShellTerminalController(
 
     fun terminalAction(args: JSONObject): String {
         TerminalToolContract.validate(args)?.let { return errorJson(it.code, it.message) }
+        if (args.optString("action").equals("terminal_job", ignoreCase = true)) {
+            return terminalJob(args)
+        }
         return terminalAction(
             action = args.getString("action"),
             command = args.optString("command"),
@@ -430,6 +434,30 @@ internal class RootShellTerminalController(
             .put("stdout_truncated", job.stdout.isTruncated())
             .put("stderr_truncated", !job.mergeStderr && (job.stderr.isTruncated() || stderrRaw.length > MAX_OUTPUT_CHARS))
             .toString()
+    }
+
+    /** 后台命令宿主（App 级常驻，跨 run 存活）：start/list/read/wait/stop。 */
+    private fun terminalJob(args: JSONObject): String {
+        val jobs = backgroundJobs ?: return errorJson("BACKGROUND_UNAVAILABLE", "后台命令宿主不可用")
+        return when (args.optString("action").lowercase()) {
+            "start" -> {
+                if (processSupervisor.isClosing) return errorJson("TERMINAL_CLOSED", "当前运行已结束，不能再启动任务")
+                val launcher = detachedSupervisor ?: return errorJson("BACKGROUND_UNAVAILABLE", "后台进程宿主不可用")
+                val environment = normalizeEnvironment(args.optString("environment", "android"))
+                val identity = normalizeIdentity(args.optString("identity").ifBlank { defaultIdentity(environment) })
+                environmentPreflight(identity, environment)?.let { return it }
+                val cwd = normalizeCwd(args.optString("cwd").ifBlank { null }, environment, identity)
+                val command = args.optString("command")
+                if (command.isBlank()) return errorJson("INVALID_ARGUMENT", "command 不能为空")
+                jobs.start(launcher, command, cwd, identity, environment,
+                    args.optString("description", "后台命令"), args.optLong("timeout_ms", 600_000))
+            }
+            "list" -> jobs.list(args.optBoolean("active_only", true))
+            "read" -> jobs.read(args.optString("job_id"), args.optInt("max_bytes", 16_000))
+            "wait" -> jobs.waitFor(args.optString("job_id"), args.optLong("wait_ms", 30_000)) { processSupervisor.isClosing }
+            "stop" -> jobs.stop(args.optString("job_id"))
+            else -> errorJson("UNSUPPORTED_TERMINAL_ACTION", "terminal_job action 仅支持 start/list/read/wait/stop")
+        }
     }
 
     private fun daemonStart(

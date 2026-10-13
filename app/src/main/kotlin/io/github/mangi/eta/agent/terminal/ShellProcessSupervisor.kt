@@ -505,7 +505,17 @@ internal class ShellProcessSupervisor(
         val pid: Long,
         val isolatedGroup: Boolean,
     )
+
+    /** 托管进程的归属快照：pid + 身份 token + 隔离组，供后台任务认领与防 PID 复用误杀。 */
+    internal fun ownershipOf(process: Process): ShellProcessOwnership? {
+        val metadata = synchronized(activeProcesses) { processMetadata[process] } ?: return null
+        val ownership = resolveProcessOwnership(metadata) ?: return null
+        return ShellProcessOwnership(ownership.pid, metadata.ownershipToken, ownership.isolatedGroup)
+    }
 }
+
+/** 托管进程的归属快照（文件级，供 DetachedTaskSupervisor/后台任务引用）。 */
+internal data class ShellProcessOwnership(val pid: Long, val token: String, val isolatedGroup: Boolean)
 
 /** 写入托管进程环境块的归属标记；巡检与停止前用它防止 PID 复用误杀。 */
 internal const val ETA_PROCESS_OWNER_ENV = "ETA_PROCESS_OWNER"

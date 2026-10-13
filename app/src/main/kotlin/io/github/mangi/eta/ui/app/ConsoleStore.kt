@@ -11,13 +11,18 @@ import io.github.mangi.eta.agent.terminal.TerminalEnvironment
 import io.github.mangi.eta.agent.terminal.TerminalRuntime
 import io.github.mangi.eta.agent.terminal.TerminalScreenBuffer
 import io.github.mangi.eta.agent.terminal.isLinux
+import io.github.mangi.eta.agent.terminal.TerminalKey
+import io.github.mangi.eta.agent.terminal.TerminalKeyEncoder
+import io.github.mangi.eta.agent.terminal.TerminalModifiers
 import io.github.mangi.eta.agent.terminal.ptySupported
 import io.github.mangi.eta.agent.terminal.terminalEnvironment
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +34,7 @@ import kotlinx.coroutines.withContext
 /** 控制台一帧画面：行对象身份稳定，渲染层按 Line.id 复用、按 Line.version 重排。 */
 @Immutable
 internal data class ConsoleFrame(
-    val lines: List<TerminalScreenBuffer.Line> = emptyList(),
+    val lines: List<TerminalScreenBuffer.RenderLine> = emptyList(),
     val screenRows: Int = 0,
     val cursorRow: Int = 0,
     val cursorCol: Int = 0,
@@ -85,8 +90,14 @@ internal class ConsoleStore(
         linuxSharedMountsProvider = { SharedFolderMounts.current() },
     )
     private val bufferLock = Any()
+    private var themeColors = 0L to 0L
     private val initialLinuxEnvironment =
         LinuxEnvironmentSettingsRepository.current(appContext).terminalEnvironment
+
+    /** 终端输入必须串行：功能键编码与文本写入交错会破坏 escape 序列；专用单线程保序。 */
+    private val inputDispatcher =
+        Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "eta-console-input").apply { isDaemon = true } }
+            .asCoroutineDispatcher()
 
     /** 每个会话独立的屏幕缓冲区；写入只能在 IO 线程持锁进行，UI 线程持锁读快照。 */
     private val buffers = mutableMapOf<String, TerminalScreenBuffer>()
@@ -241,8 +252,41 @@ internal class ConsoleStore(
     }
 
     fun write(text: String) {
+        if (text.isEmpty()) return
         val sessionId = _uiState.value.activeSessionId ?: return
-        scope.launch(Dispatchers.IO) { controller.write(sessionId, text) }
+        scope.launch(inputDispatcher) { controller.write(sessionId, text) }
+    }
+
+    /** 功能键按当前会话的光标键模式编码，程序切换 DECCKM 后无需界面感知。 */
+    fun sendKey(key: TerminalKey, modifiers: TerminalModifiers = TerminalModifiers.NONE) {
+        val applicationCursorKeys = activeBuffer { it.applicationCursorKeys } ?: return
+        write(TerminalKeyEncoder.key(key, modifiers, applicationCursorKeys))
+    }
+
+    fun sendText(text: String, modifiers: TerminalModifiers = TerminalModifiers.NONE) {
+        write(TerminalKeyEncoder.text(text, modifiers))
+    }
+
+    fun paste(text: String) {
+        val bracketed = activeBuffer { it.bracketedPaste } ?: return
+        write(TerminalKeyEncoder.paste(text, bracketed))
+    }
+
+    fun setThemeColors(foreground: Long, background: Long) {
+        synchronized(bufferLock) {
+            themeColors = foreground to background
+            buffers.values.forEach { it.applyTheme() }
+        }
+    }
+
+    private fun TerminalScreenBuffer.applyTheme() {
+        defaultForeground = themeColors.first
+        defaultBackground = themeColors.second
+    }
+
+    private fun <T> activeBuffer(read: (TerminalScreenBuffer) -> T): T? {
+        val sessionId = _uiState.value.activeSessionId ?: return null
+        return synchronized(bufferLock) { buffers[sessionId]?.let(read) }
     }
 
     fun close() {
@@ -342,7 +386,7 @@ internal class ConsoleStore(
         val frame = synchronized(bufferLock) {
             val current = buffers[sessionId] ?: return
             ConsoleFrame(
-                lines = current.lines(),
+                lines = current.renderLines(),
                 screenRows = current.rows,
                 cursorRow = current.cursorRow,
                 cursorCol = current.cursorCol,

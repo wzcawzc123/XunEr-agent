@@ -144,6 +144,7 @@ internal class AgentLocalTools(
             },
             linuxSharedMountsProvider = { SharedFolderMounts.current() },
         ),
+        backgroundJobs = io.github.mangi.eta.agent.terminal.TerminalRuntime.backgroundJobs(context),
         linuxSharedMountsProvider = { SharedFolderMounts.current() },
         selectedLinuxEnvironmentProvider = {
             LinuxEnvironmentSettingsRepository.current(context).terminalEnvironment

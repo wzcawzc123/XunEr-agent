@@ -111,6 +111,8 @@ fun AgentAppRoot(
     onRequestedConversationOpened: () -> Unit = {},
     openSpeechSettings: Boolean = false,
     onSpeechSettingsOpened: () -> Unit = {},
+    openTerminal: Boolean = false,
+    onTerminalOpened: () -> Unit = {},
     onAssistantConversationOpened: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -121,6 +123,12 @@ fun AgentAppRoot(
         if (openSpeechSettings) {
             if (backStack.lastOrNull() != AppRoute.SpeechSettings) backStack.add(AppRoute.SpeechSettings)
             onSpeechSettingsOpened()
+        }
+    }
+    LaunchedEffect(openTerminal) {
+        if (openTerminal) {
+            if (backStack.lastOrNull() != AppRoute.Terminal) backStack.add(AppRoute.Terminal)
+            onTerminalOpened()
         }
     }
     val navigator = remember(backStack) { AgentNavigator(backStack) }

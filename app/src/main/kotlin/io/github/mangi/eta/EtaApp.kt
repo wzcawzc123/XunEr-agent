@@ -49,6 +49,8 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
             return
         }
         TerminalRuntime.initialize(this)
+        // App 级后台命令宿主：启动时恢复跨重启的持久后台命令（守护任务挂靠前台执行服务租约）。
+        runCatching { applicationScope.launch { TerminalRuntime.backgroundJobs(this@EtaApp).resume() } }
         RootAccess.initialize(this)
         SettingsDataStore.init(this)
         val predictiveBackEnabled = runBlocking(Dispatchers.IO) {
