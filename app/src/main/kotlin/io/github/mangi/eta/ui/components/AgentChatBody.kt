@@ -101,6 +101,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -132,6 +133,8 @@ internal fun AgentChatBody(
     onResumeInterrupted: () -> Unit = {},
     input: String,
     isStreaming: Boolean,
+    /** false = 会话消息尚未载入（懒加载中）：显示加载占位并隐藏输入，避免空白/串会话。 */
+    messagesLoaded: Boolean = true,
     reasoningEffort: ReasoningEffort,
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
@@ -227,6 +230,7 @@ internal fun AgentChatBody(
             onResumeInterrupted = onResumeInterrupted,
             contextUsage = contextUsage,
             isStreaming = isStreaming,
+            messagesLoaded = messagesLoaded,
             reasoningEffort = reasoningEffort,
             availableReasoningEfforts = availableReasoningEfforts,
             pendingImages = pendingImages,
@@ -282,6 +286,7 @@ private fun AgentChatScaffold(
     onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
     isStreaming: Boolean,
+    messagesLoaded: Boolean,
     reasoningEffort: ReasoningEffort,
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
@@ -333,8 +338,9 @@ private fun AgentChatScaffold(
             bottom = 0.dp,
         ),
         bottomBar = {
-            AgentChatBottomBar(
-                messageBackdrop = messageBackdrop.takeIf { frostEnabled },
+            if (messagesLoaded) {
+                AgentChatBottomBar(
+                    messageBackdrop = messageBackdrop.takeIf { frostEnabled },
                 input = input,
                 modelPickerState = modelPickerState,
                 isCompacting = isCompacting,
@@ -363,10 +369,17 @@ private fun AgentChatScaffold(
                 onRemoveFileReference = onRemoveFileReference,
                 onCancelMessageEdit = onCancelMessageEdit,
             )
+            }
         },
     ) { innerPadding ->
         val bottomPadding = innerPadding.calculateBottomPadding()
-        if (!hasMessages) {
+        if (!hasMessages && !messagesLoaded) {
+            ChatLoadingState(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = bottomPadding),
+            )
+        } else if (!hasMessages) {
             EmptyChatState(
                 showSuggestions = showEmptySuggestions,
                 characterName = characterName,
@@ -1050,6 +1063,30 @@ internal fun shouldRequestInitialBottom(
     keepBottomAnchored: Boolean,
     isUserDragging: Boolean,
 ): Boolean = isStreaming && keepBottomAnchored && !isUserDragging
+
+@Composable
+/** 会话消息懒加载中的占位：切换未载入会话时显示，避免闪出空白/空会话引导页。 */
+private fun ChatLoadingState(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(bottom = 56.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator(
+                strokeWidth = 2.5.dp,
+                size = 28.dp,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "正在加载会话…",
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
 
 @Composable
 private fun EmptyChatState(

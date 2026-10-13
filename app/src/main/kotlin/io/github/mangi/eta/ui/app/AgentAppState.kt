@@ -763,9 +763,29 @@ internal class AgentAppState(
     private fun lazyLoadConversation(conversationId: String) {
         lazyLoadConversationJob?.cancel()
         lazyLoadConversationJob = scope.launch(Dispatchers.IO) {
-            val loaded = AgentConversationStore.loadConversation(appContext, conversationId)
+            val loaded = try {
+                AgentConversationStore.loadConversation(appContext, conversationId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
             withContext(Dispatchers.Main.immediate) {
-                if (loaded == null) return@withContext
+                if (loaded == null) {
+                    // 载入失败：把占位标记为已载入空态，避免聊天区永久停在"加载中"；再次切换会重新尝试。
+                    AndroidAgentLogger.warnThrottled("conversation_lazy_load_failed") {
+                        "Lazy load conversation failed: $conversationId"
+                    }
+                    if (selectedConversationId == conversationId) {
+                        conversationsById[conversationId]?.takeIf { !it.messagesLoaded }?.let { state ->
+                            val emptyLoaded = state.copy(messagesLoaded = true)
+                            conversationsById = conversationsById + (conversationId to emptyLoaded)
+                            homeState = emptyLoaded
+                            refreshConversationSummaries()
+                        }
+                    }
+                    return@withContext
+                }
                 conversationsById = conversationsById + (conversationId to loaded)
                 loaded.messages.lastOrNull()?.let { last ->
                     conversationPreviews = conversationPreviews + (conversationId to last)
@@ -787,7 +807,13 @@ internal class AgentAppState(
         val state = conversationsById[conversationId] ?: return null
         if (state.messagesLoaded) return state
         val loaded = withContext(Dispatchers.IO) {
-            AgentConversationStore.loadConversation(appContext, conversationId)
+            try {
+                AgentConversationStore.loadConversation(appContext, conversationId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
         } ?: return null
         conversationsById = conversationsById + (conversationId to loaded)
         loaded.messages.lastOrNull()?.let { last ->
