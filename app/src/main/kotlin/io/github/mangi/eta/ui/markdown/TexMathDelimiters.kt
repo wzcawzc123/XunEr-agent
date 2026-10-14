@@ -29,7 +29,9 @@ internal object TexMathDelimiters {
                     continue
                 }
                 if (fence != null) {
+                    // 围栏内整行跳过；空行时 lineEnd == index，不同步 lineStart 会原地踏步死循环。
                     index = lineEnd
+                    lineStart = lineEnd + 1
                     continue
                 }
             }
