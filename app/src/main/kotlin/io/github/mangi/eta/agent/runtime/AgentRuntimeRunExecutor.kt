@@ -12,6 +12,7 @@ import io.github.mangi.eta.agent.model.AgentModelFailure
 import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
+import io.github.mangi.eta.agent.memory.ConversationMemoryPins
 import io.github.mangi.eta.agent.roleplay.CharacterMemoryTools
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import io.github.mangi.eta.agent.mcp.McpRunSnapshot
@@ -33,6 +34,7 @@ import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 单次 Runtime run 的阻塞执行器。
@@ -75,6 +77,7 @@ internal class AgentRuntimeRunExecutor(
         var checkpointRecorder: AgentRunCheckpointRecorder? = null
         val timing = AgentRunTiming(AndroidAgentLogger)
 
+        var memoryConversationId: String? = null
         val result = try {
             val contextWindow = request.config.knownContextWindow
             checkpointRecorder = AgentRunCheckpointRecorder.create(appContext, request)
@@ -121,7 +124,11 @@ internal class AgentRuntimeRunExecutor(
             }
             val memoryContext = if (memoryEnabled) {
                 runCatching {
-                    AgentMemoryContextBuilder.build(
+                    // 记忆上下文按会话固定：多轮间系统提示逐字节不变，保住请求前缀缓存；
+                    // 外部修改/窗口变化时才重建（ConversationMemoryPins 内部按 revision 判定）。
+                    memoryConversationId = conversationId
+                    ConversationMemoryPins.contextFor(
+                        conversationId = conversationId,
                         snapshot = AgentMemoryRepository.snapshot(),
                         contextWindow = request.config.contextWindow,
                     )
@@ -234,7 +241,13 @@ internal class AgentRuntimeRunExecutor(
                     historyTool.execute(call)
                 } else if (call.name in CharacterMemoryTools.NAMES && characterMemoryTools != null) {
                     characterMemoryTools.execute(call)
-                } else routingExecutor.execute(call)
+                } else routingExecutor.execute(call).also { result ->
+                    if (call.name == "memory_write") {
+                        runCatching { JSONObject(result.content) }.getOrNull()
+                            ?.takeIf { it.optBoolean("ok") }
+                            ?.let { ConversationMemoryPins.recordOwnWrite(conversationId, it.optString("revision")) }
+                    }
+                }
             }
             // 快照内容未变化时不重复写库：压缩后每轮都会发布快照，内容相同则跳过。
             var lastContextWrite: String? = null
@@ -248,6 +261,8 @@ internal class AgentRuntimeRunExecutor(
                 rewriteReply = request.operation == AgentRuntimeWire.OP_REWRITE_REPLY,
                 compactOnly = request.operation == AgentRuntimeWire.OP_COMPACT,
                 onContextSnapshot = { snapshot ->
+                    // 压缩会把历史里的记忆写入摘要掉，下一轮需要重新注入最新记忆。
+                    ConversationMemoryPins.forget(memoryConversationId)
                     val committed = snapshot.copy(operationId = request.runId)
                     val encoded = committed.encode()
                     if (encoded != lastContextWrite) {
@@ -292,6 +307,8 @@ internal class AgentRuntimeRunExecutor(
                 rewriteTargetMessageId = request.rewriteTargetMessageId,
             )
         } catch (throwable: Throwable) {
+            // 失败时历史是否完整落盘不确定，放弃固定的记忆快照；记忆未变时重新注入的内容逐字节相同。
+            ConversationMemoryPins.forget(memoryConversationId)
             cancelled = runController.isCancelled || throwable is AgentRunCancelledException
             val modelFailure = throwable as? AgentModelExecutionException
             val message = if (cancelled) {
