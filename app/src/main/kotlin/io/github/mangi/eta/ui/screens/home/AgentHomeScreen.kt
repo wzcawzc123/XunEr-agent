@@ -7,6 +7,9 @@ import io.github.mangi.eta.ui.components.AgentChatBody
 import io.github.mangi.eta.ui.components.chatConversationCompositionKey
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
 import io.github.mangi.eta.ui.model.AgentHomeAction
+import androidx.compose.runtime.CompositionLocalProvider
+import io.github.mangi.eta.ui.components.LocalRoleplayChat
+import io.github.mangi.eta.ui.model.roleplayChatUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 
 /**
@@ -25,6 +28,7 @@ internal fun AgentHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     key(chatConversationCompositionKey(conversationKey)) {
+        CompositionLocalProvider(LocalRoleplayChat provides state.roleplayChatUi()) {
         AgentChatBody(
             messages = state.messages,
             modelPickerState = modelPickerState,
@@ -66,5 +70,6 @@ internal fun AgentHomeScreen(
             isDrawerOpen = isDrawerOpen,
             modifier = modifier,
         )
+        }
     }
 }
