@@ -1366,4 +1366,23 @@
 <string name="read_aloud_notification_title">Eta is reading aloud</string>
 <string name="model_picker_filter_all">All</string>
 <string name="model_picker_title">Choose model</string>
+<string name="provider_models_up_to_date">Up to date, no new models</string>
+<string name="provider_delete_models_pick_hint">Pick models to delete</string>
+<string name="provider_context_window_hint">Pick a common size or type one; used to decide when to compact</string>
+<string name="provider_context_window_invalid">Enter a positive integer</string>
+<string name="provider_context_window_value">About %1$s tokens</string>
+<string name="provider_context_window_usage">Conversations compact automatically as they approach this size</string>
+<string name="provider_auto_reasoning_detected">Detected automatically</string>
+<string name="remote_model_import_title">Add models</string>
+<string name="remote_model_import_summary">%1$d new models available</string>
+<string name="remote_model_import_pick_hint">Pick the models to add</string>
+<string name="remote_model_import_confirm">Add %1$d</string>
+<plurals name="provider_models_added">
+    <item quantity="one">Added %d model</item>
+    <item quantity="other">Added %d models</item>
+  </plurals>
+<plurals name="provider_delete_models_action">
+    <item quantity="one">Delete %d model</item>
+    <item quantity="other">Delete %d models</item>
+  </plurals>
 </resources>

@@ -1345,4 +1345,21 @@
 <string name="read_aloud_notification_title">Eta 正在朗读</string>
 <string name="model_picker_filter_all">全部</string>
 <string name="model_picker_title">选择模型</string>
+<string name="provider_models_up_to_date">已是最新，没有新模型</string>
+<string name="provider_delete_models_pick_hint">选择要删除的模型</string>
+<string name="provider_context_window_hint">选择常用大小或手动填写，用于判断何时自动压缩</string>
+<string name="provider_context_window_invalid">请输入正整数</string>
+<string name="provider_context_window_value">约 %1$s tokens</string>
+<string name="provider_context_window_usage">对话接近这个长度时会自动压缩</string>
+<string name="provider_auto_reasoning_detected">已自动识别</string>
+<string name="remote_model_import_title">添加模型</string>
+<string name="remote_model_import_summary">远端有 %1$d 个尚未添加的模型</string>
+<string name="remote_model_import_pick_hint">选择要添加的模型</string>
+<string name="remote_model_import_confirm">添加 %1$d 个</string>
+<plurals name="provider_models_added">
+    <item quantity="other">已添加 %d 个模型</item>
+  </plurals>
+<plurals name="provider_delete_models_action">
+    <item quantity="other">删除 %d 个模型</item>
+  </plurals>
 </resources>
