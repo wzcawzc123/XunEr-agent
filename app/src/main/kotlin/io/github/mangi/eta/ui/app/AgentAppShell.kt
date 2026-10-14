@@ -20,12 +20,28 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import io.github.mangi.eta.ui.components.CharacterAvatar
+import io.github.mangi.eta.ui.components.RoleplayChatUi
+import androidx.compose.foundation.layout.padding
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.ui.components.AdaptiveTopAppBar
 import io.github.mangi.eta.ui.components.ConversationSidePaneScaffold
@@ -58,12 +74,14 @@ import top.yukonga.miuix.kmp.window.WindowListPopup
  * - Settings 由标准二级页骨架自己提供 TopAppBar，壳层在此路由不重复绘制。
  */
 @Composable
-fun AgentAppShell(
+internal fun AgentAppShell(
     currentRoute: AppRoute?,
     isCurrentRoute: Boolean,
     conversationPaneState: ConversationPaneUiState?,
     isConversationPaneOpen: Boolean,
     onBack: () -> Unit,
+    homeCharacter: RoleplayChatUi? = null,
+    onOpenCharacter: () -> Unit = {},
     onOpenConversationPane: () -> Unit,
     onDismissConversationPane: () -> Unit,
     onSearchConversations: (String) -> Unit,
@@ -106,6 +124,8 @@ fun AgentAppShell(
                             color = topBarColor,
                             onBack = onBack,
                             onOpenConversationPane = onOpenConversationPane,
+                            homeCharacter = homeCharacter,
+                            onOpenCharacter = onOpenCharacter,
                             onNewConversation = onNewConversation,
                             onOpenTerminal = onOpenTerminal,
                             onLaunchKimiWeb = onLaunchKimiWeb,
@@ -165,6 +185,8 @@ private fun AgentTopBar(
     color: Color,
     onBack: () -> Unit,
     onOpenConversationPane: () -> Unit,
+    homeCharacter: RoleplayChatUi? = null,
+    onOpenCharacter: () -> Unit = {},
     onNewConversation: () -> Unit,
     onOpenTerminal: () -> Unit,
     onLaunchKimiWeb: () -> Unit,
@@ -183,6 +205,10 @@ private fun AgentTopBar(
                     modifier = Modifier.size(24.dp),
                     contentDescription = stringResource(R.string.action_conversation_history),
                 )
+            }
+            // 角色对话的身份标识放在顶栏左侧，点按进入角色详情；普通对话保持空标题。
+            homeCharacter?.let { character ->
+                CharacterTopBarIdentity(character = character, onClick = onOpenCharacter)
             }
         } else {
             MiuixBackButton(onClick = onBack)
@@ -369,4 +395,32 @@ private fun titleForRoute(route: AppRoute?): String = when (route) {
     is AppRoute.ModelProviderDetail -> stringResource(R.string.route_provider_details)
     is AppRoute.ModelProviderNew -> stringResource(R.string.route_new_provider)
     null -> stringResource(R.string.app_name)
+}
+
+@Composable
+private fun CharacterTopBarIdentity(character: RoleplayChatUi, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CharacterAvatar(
+            name = character.characterName,
+            avatarPath = character.avatarPath,
+            size = 32.dp,
+            shape = CircleShape,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = character.characterName,
+            style = MiuixTheme.textStyles.body1,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 160.dp),
+        )
+    }
 }
