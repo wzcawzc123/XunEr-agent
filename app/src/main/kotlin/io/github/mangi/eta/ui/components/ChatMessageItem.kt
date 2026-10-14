@@ -74,6 +74,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import io.github.mangi.eta.ui.components.CharacterAvatar
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
@@ -196,6 +198,8 @@ internal fun ChatMessageItem(
     onRegenerateMessage: (String) -> Unit = {},
     onSelectReplyCandidate: (String, Int) -> Unit = { _, _ -> },
 ) {
+    // 角色会话里所有 agent 回复都带署名头（语音浮层除外）；普通会话为 null 不加。
+    val character = LocalRoleplayChat.current.takeUnless { assistantOverlay }
     when (message) {
         is UserMessageUi -> UserMessageBubble(
             message = message,
@@ -206,20 +210,45 @@ internal fun ChatMessageItem(
             onDelete = { onDeleteMessage(message.id) },
             modifier = modifier,
         )
-        is AgentMessageUi -> AgentMessageBlock(
-            message = message,
-            allowSpeech = true,
-            assistantOverlay = assistantOverlay,
-            retainedStreamingState = retainedStreamingState,
-            showCopyAction = showCopyAction,
-            showMessageActions = showMessageActions,
-            messageActionsEnabled = messageActionsEnabled,
-            onDelete = { onDeleteMessage(message.id) },
-            onRegenerate = { onRegenerateMessage(message.id) },
-            onEdit = { onEditMessage(message.id) },
-            onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
-            modifier = modifier,
-        )
+        is AgentMessageUi -> {
+            if (character != null) {
+                Column(modifier = modifier) {
+                    CharacterReplyHeader(
+                        character = character,
+                        isGreeting = message.id.startsWith(GreetingMessagePrefix),
+                    )
+                    AgentMessageBlock(
+                        message = message,
+                        allowSpeech = true,
+                        assistantOverlay = assistantOverlay,
+                        retainedStreamingState = retainedStreamingState,
+                        showCopyAction = showCopyAction,
+                        showMessageActions = showMessageActions,
+                        messageActionsEnabled = messageActionsEnabled,
+                        onDelete = { onDeleteMessage(message.id) },
+                        onRegenerate = { onRegenerateMessage(message.id) },
+                        onEdit = { onEditMessage(message.id) },
+                        onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
+                        modifier = Modifier,
+                    )
+                }
+            } else {
+                AgentMessageBlock(
+                    message = message,
+                    allowSpeech = true,
+                    assistantOverlay = assistantOverlay,
+                    retainedStreamingState = retainedStreamingState,
+                    showCopyAction = showCopyAction,
+                    showMessageActions = showMessageActions,
+                    messageActionsEnabled = messageActionsEnabled,
+                    onDelete = { onDeleteMessage(message.id) },
+                    onRegenerate = { onRegenerateMessage(message.id) },
+                    onEdit = { onEditMessage(message.id) },
+                    onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
+                    modifier = modifier,
+                )
+            }
+        }
         is SystemNoticeMessageUi -> if (message.code == SystemNoticeCode.ContextCompaction) {
             ContextCompactionMarker(message = message, modifier = modifier)
         } else {
@@ -1070,6 +1099,46 @@ private fun SuggestionChipsRow(
                     color = MiuixTheme.colorScheme.onSurface,
                 )
             }
+        }
+    }
+}
+
+private const val GreetingMessagePrefix = "greeting-"
+
+/** 角色回复的署名行：小头像加角色名，开场白额外标注"故事开始"。 */
+@Composable
+private fun CharacterReplyHeader(character: RoleplayChatUi, isGreeting: Boolean) {
+    Row(
+        modifier = Modifier.padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CharacterAvatar(
+            name = character.characterName,
+            avatarPath = character.avatarPath,
+            size = 28.dp,
+            shape = CircleShape,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = character.characterName,
+            style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (isGreeting) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.chat_character_story_start),
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
         }
     }
 }

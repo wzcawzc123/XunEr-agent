@@ -1366,4 +1366,5 @@
 <string name="memory_mode_preview">预览</string>
 <string name="memory_mode_edit">编辑</string>
 <string name="memory_discard">放弃</string>
+<string name="chat_character_story_start">故事从这里开始</string>
 </resources>
