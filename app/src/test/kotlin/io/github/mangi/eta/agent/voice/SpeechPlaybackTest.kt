@@ -33,6 +33,7 @@ class SpeechPlaybackTest {
             try { audio(byteArrayOf(1, 2)); awaitCancellation() }
             finally { canceled++ }
         },
+        streamSynthesize = null,
         createOutput = { FakeOutput().also(outputs::add) },
     )
     @After fun close() { playback.stop(); scope.cancel() }
@@ -108,6 +109,7 @@ class SpeechPlaybackTest {
         val output = FakeOutput()
         val controller = SpeechPlaybackController(context, scope,
             synthesize = { _, _, _, audio -> audio(byteArrayOf(1, 2)) },
+            streamSynthesize = null,
             createOutput = { output },
         )
         try {
@@ -137,6 +139,7 @@ class SpeechPlaybackTest {
         }
         val controller = SpeechPlaybackController(context, scope,
             synthesize = { _, _, _, audio -> synthesized.incrementAndGet(); audio(byteArrayOf(1, 2)) },
+            streamSynthesize = null,
             createOutput = { output },
         )
         try {
