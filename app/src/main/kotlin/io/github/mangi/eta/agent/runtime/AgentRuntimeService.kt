@@ -144,6 +144,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private var hasExecutedForegroundTool = false
     /** 结果卡片"回到 Eta"打开的会话；只有 App 内发起的 run 才有，系统助手入口为 null。 */
     private var resultConversationId: String? = null
+    /** 外部入口（系统助手等）run 的来源与会话键，由界面导入归档后打开；null 时回首页。 */
+    private var resultArchive: Pair<String, String>? = null
     private val supplementsLock = Any()
     private val activeSupplements = mutableListOf<AgentUiHandoffPayload.Supplement>()
     private var nextSupplementIndex = 1
@@ -436,6 +438,14 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             ?.takeIf { it.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }
             ?.let { AgentUiHandoffPayload.from(it.payload).conversationId }
             ?.takeIf(String::isNotBlank)
+        resultArchive = request.handoff
+            ?.takeIf { it.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }
+            ?.let { handoff ->
+                AgentExternalArchivePayload.from(handoff.payload)
+                    ?.conversationKey
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { key -> handoff.source to key }
+            }
         synchronized(supplementsLock) {
             activeSupplements.clear()
             nextSupplementIndex = 1
@@ -1017,9 +1027,18 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .apply {
-                resultConversationId?.let { id ->
-                    action = MainActivity.ACTION_OPEN_CONVERSATION_ID
-                    putExtra(MainActivity.EXTRA_CONVERSATION_ID, id)
+                val conversationId = resultConversationId
+                val archive = resultArchive
+                when {
+                    conversationId != null -> {
+                        action = MainActivity.ACTION_OPEN_CONVERSATION_ID
+                        putExtra(MainActivity.EXTRA_CONVERSATION_ID, conversationId)
+                    }
+                    archive != null -> {
+                        action = MainActivity.ACTION_OPEN_ARCHIVED_CONVERSATION
+                        putExtra(MainActivity.EXTRA_HANDOFF_SOURCE, archive.first)
+                        putExtra(MainActivity.EXTRA_CONVERSATION_KEY, archive.second)
+                    }
                 }
             }
         val options = ActivityOptions.makeBasic().apply {

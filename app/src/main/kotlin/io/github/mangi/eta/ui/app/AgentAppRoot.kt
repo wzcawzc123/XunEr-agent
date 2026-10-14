@@ -113,6 +113,8 @@ fun AgentAppRoot(
     onSpeechSettingsOpened: () -> Unit = {},
     openTerminal: Boolean = false,
     onTerminalOpened: () -> Unit = {},
+    requestedArchivedConversation: ArchivedConversationRequest? = null,
+    onArchivedConversationOpened: () -> Unit = {},
     onAssistantConversationOpened: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -163,6 +165,15 @@ fun AgentAppRoot(
     }
 
     var conversationPaneOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(requestedArchivedConversation) {
+        val request = requestedArchivedConversation ?: return@LaunchedEffect
+        // 外部入口的结果要先导入归档才有会话；找不到时停在当前界面，不切到无关的会话。
+        if (agentState.openArchivedConversation(request.source, request.conversationKey)) {
+            conversationPaneOpen = false
+            navigator.popToHome()
+        }
+        onArchivedConversationOpened()
+    }
     var conversationRenameTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }
     var conversationDeleteTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }
     var conversationExportTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }

@@ -19,6 +19,7 @@ import io.github.mangi.eta.agent.voice.EtaAssistantOverlayService
 import io.github.mangi.eta.data.model.AppearanceThemeMode
 import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
 import io.github.mangi.eta.ui.app.AgentAppRoot
+import io.github.mangi.eta.ui.app.ArchivedConversationRequest
 import io.github.mangi.eta.ui.app.AgentAppTheme
 import io.github.mangi.eta.ui.app.PredictiveBackController
 import io.github.mangi.eta.ui.app.installStartupSplash
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
     private var appliedPredictiveBackEnabled = true
     private var speechSettingsRequested by mutableStateOf(false)
     private var terminalRequested by mutableStateOf(false)
+    private var requestedArchivedConversation by mutableStateOf<ArchivedConversationRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +73,8 @@ class MainActivity : ComponentActivity() {
                         onSpeechSettingsOpened = { speechSettingsRequested = false; intent?.action = null },
                         openTerminal = terminalRequested,
                         onTerminalOpened = { terminalRequested = false; intent?.action = null },
+                        requestedArchivedConversation = requestedArchivedConversation,
+                        onArchivedConversationOpened = { requestedArchivedConversation = null; intent?.action = null },
                         onAssistantConversationOpened = { opened ->
                             assistantConversationKey = null
                             if (opened) {
@@ -93,6 +97,16 @@ class MainActivity : ComponentActivity() {
     private fun updateAssistantHandoff(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_TERMINAL) {
             terminalRequested = true
+            return
+        }
+        if (intent?.action == ACTION_OPEN_ARCHIVED_CONVERSATION) {
+            val source = intent.getStringExtra(EXTRA_HANDOFF_SOURCE)?.takeIf(String::isNotBlank)
+            val key = intent.getStringExtra(EXTRA_CONVERSATION_KEY)?.takeIf(String::isNotBlank)
+            requestedArchivedConversation = if (source != null && key != null) {
+                ArchivedConversationRequest(source, key)
+            } else {
+                null
+            }
             return
         }
         if (intent?.action == ACTION_SPEECH_SETTINGS) {
@@ -154,5 +168,9 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_CONVERSATION_ID = "io.github.mangi.eta.extra.CONVERSATION_ID"
         /** 后台命令完成通知点击：跳转到终端会话。 */
         const val ACTION_OPEN_TERMINAL = "io.github.mangi.eta.action.OPEN_TERMINAL"
+        /** 系统助手等外部入口发起的 run 按来源与会话键归档，回到本体时打开对应的归档会话。 */
+        const val ACTION_OPEN_ARCHIVED_CONVERSATION = "io.github.mangi.eta.action.OPEN_ARCHIVED_CONVERSATION"
+        const val EXTRA_HANDOFF_SOURCE = "io.github.mangi.eta.extra.HANDOFF_SOURCE"
+        const val EXTRA_CONVERSATION_KEY = "io.github.mangi.eta.extra.CONVERSATION_KEY"
     }
 }
