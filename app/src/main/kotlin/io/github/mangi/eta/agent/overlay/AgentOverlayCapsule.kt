@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.Spring
@@ -81,6 +82,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun AgentOverlayCapsule(
     state: AgentOverlayState,
     expanded: Boolean,
+    yielded: Boolean = false,
     onToggleExpanded: () -> Unit,
     onCollapsedSettled: () -> Unit,
     onPause: () -> Unit,
@@ -121,6 +123,16 @@ internal fun AgentOverlayCapsule(
     val accent by animateColorAsState(overlayPhaseAccent(state.phase), tween(240), label = "capsule_accent")
     val statusText = state.status.localizedText()
     val expandDescription = stringResource(R.string.overlay_capsule_toggle, statusText)
+    // 为 Agent 手势让路：离开时快速上移收小淡出，回来时用弹簧落回，只改绘制层不触发重排。
+    val clearance by animateFloatAsState(
+        targetValue = if (yielded) 1f else 0f,
+        animationSpec = if (yielded) {
+            tween(durationMillis = 180, easing = FastOutLinearInEasing)
+        } else {
+            spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
+        },
+        label = "capsule_clearance",
+    )
     // 展开进度只驱动绘制层的透明度与位移，不参与测量；控制区用 AnimatedVisibility 只在两端各测一次。
     val expansion by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
@@ -143,8 +155,12 @@ internal fun AgentOverlayCapsule(
                     .graphicsLayer {
                         // 点击时轻微回弹，展开后保持原尺寸；只改绘制层，不触发重新布局。
                         val press = 1f - 0.03f * (1f - expansion) * expansion * 4f
-                        scaleX = press
-                        scaleY = press
+                        // 手势让路：收小 + 上移 + 淡出，透明度不参与布局。
+                        val shrink = 1f - 0.08f * clearance
+                        scaleX = press * shrink
+                        scaleY = press * shrink
+                        translationY = -12.dp.toPx() * clearance
+                        alpha = 1f - clearance
                     }
                     .shadow(10.dp, RoundedCornerShape(CapsuleCorner), ambientColor = accent, spotColor = accent)
                     .clip(RoundedCornerShape(CapsuleCorner))

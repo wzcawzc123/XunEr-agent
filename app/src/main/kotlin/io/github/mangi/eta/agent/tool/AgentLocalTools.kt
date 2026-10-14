@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Rect
 import android.util.Base64
 import io.github.mangi.eta.agent.media.MlKitScreenTextRecognizer
 import io.github.mangi.eta.agent.media.ScreenTextRecognizer
@@ -25,6 +26,7 @@ import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
 import io.github.mangi.eta.agent.model.AgentFileToolCatalog
 import io.github.mangi.eta.agent.overlay.AgentHapticFeedback
+import io.github.mangi.eta.agent.overlay.AgentOverlayClearance
 import io.github.mangi.eta.agent.overlay.GestureIndicator
 import io.github.mangi.eta.agent.runtime.AgentAppContext
 import io.github.mangi.eta.agent.skill.SkillCompatibilityChecker
@@ -847,9 +849,11 @@ internal class AgentLocalTools(
         // 参数契约优先（上游 3.3.0）：缺失或非法的 coordinate_space 必须先回 INVALID_ARGUMENT，
         // 随后再做本 fork 的观察新鲜度检查（F1）。
         ensureCoordinateFreshness()
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        showTap(point.x, point.y)
-        return deviceController.tap(point.x, point.y)
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            showTap(point.x, point.y)
+            deviceController.tap(point.x, point.y)
+        }
     }
 
     private fun tapArea(args: JSONObject): String {
@@ -865,9 +869,11 @@ internal class AgentLocalTools(
             x = ((first.x.toLong() + second.x.toLong()) / 2L).toInt(),
             y = ((first.y.toLong() + second.y.toLong()) / 2L).toInt(),
         )
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        showTap(point.x, point.y)
-        return deviceController.tap(point.x, point.y)
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            showTap(point.x, point.y)
+            deviceController.tap(point.x, point.y)
+        }
     }
 
     private fun tapElement(args: JSONObject): String {
@@ -926,15 +932,17 @@ internal class AgentLocalTools(
             coordinateSpace = args.optString("coordinate_space")
         )
         val durationMs = args.optInt("duration_ms", 500)
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.SWIPE)
-        showSwipe(start.x, start.y, end.x, end.y, durationMs)
-        return deviceController.swipe(
-            start.x,
-            start.y,
-            end.x,
-            end.y,
-            durationMs
-        )
+        return clearOverlay(start, end) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.SWIPE)
+            showSwipe(start.x, start.y, end.x, end.y, durationMs)
+            deviceController.swipe(
+                start.x,
+                start.y,
+                end.x,
+                end.y,
+                durationMs
+            )
+        }
     }
 
     private fun scrollElement(args: JSONObject): String {
@@ -1846,6 +1854,17 @@ internal class AgentLocalTools(
         val prefix: String?,
         val candidatesByPath: Map<String, String>,
     )
+
+    /** 手势经过状态胶囊时让它暂时穿透并淡出；滑动按起止点包围盒判断。 */
+    private fun <T> clearOverlay(vararg points: ScreenPoint, gesture: () -> T): T {
+        val area = Rect(
+            points.minOf { it.x },
+            points.minOf { it.y },
+            points.maxOf { it.x } + 1,
+            points.maxOf { it.y } + 1,
+        )
+        return AgentOverlayClearance.around(area, gesture)
+    }
 
     private fun showTap(x: Int, y: Int) {
         GestureIndicator.showTap(context, x, y)

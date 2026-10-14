@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -44,6 +45,7 @@ import io.github.mangi.eta.agent.overlay.AgentHapticFeedback
 import io.github.mangi.eta.agent.overlay.AgentOverlayGlow
 import io.github.mangi.eta.agent.overlay.ScreenCornerRadii
 import io.github.mangi.eta.agent.overlay.AgentOverlayCapsule
+import io.github.mangi.eta.agent.overlay.AgentOverlayClearance
 import io.github.mangi.eta.agent.overlay.AgentResultCard
 import io.github.mangi.eta.agent.overlay.AgentOverlayPhase
 import io.github.mangi.eta.agent.overlay.AgentOverlayState
@@ -114,6 +116,31 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             }
     }
     private val capsuleExpanded = mutableStateOf(false)
+    /** Agent 手势穿过胶囊时为 true：窗口不可触摸，胶囊淡出让路。 */
+    private val capsuleYielded = mutableStateOf(false)
+    private val restoreCapsule = Runnable { setCapsuleYielded(false) }
+    private val clearanceHost = object : AgentOverlayClearance.Host {
+        override fun capsuleTouchBounds(): Rect? {
+            val view = capsuleView?.takeIf { it.isAttachedToWindow } ?: return null
+            val location = IntArray(2).also(view::getLocationOnScreen)
+            val slop = dpToPx(CAPSULE_CLEARANCE_SLOP_DP)
+            return Rect(
+                location[0] - slop,
+                location[1] - slop,
+                location[0] + view.width + slop,
+                location[1] + view.height + slop,
+            )
+        }
+
+        override fun yieldCapsule() = setCapsuleYielded(true)
+
+        override fun scheduleCapsuleRestore(delayMs: Long) {
+            mainHandler.removeCallbacks(restoreCapsule)
+            mainHandler.postDelayed(restoreCapsule, delayMs)
+        }
+
+        override fun cancelRestore() = mainHandler.removeCallbacks(restoreCapsule)
+    }
     private var hasExecutedForegroundTool = false
     /** 结果卡片"回到 Eta"打开的会话；只有 App 内发起的 run 才有，系统助手入口为 null。 */
     private var resultConversationId: String? = null
@@ -130,6 +157,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        AgentOverlayClearance.attach(clearanceHost)
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -208,6 +236,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         // 系统回收导致的中断：用可识别标记而非"失败"文案，恢复层据此区分并保留续跑路径。
         activeSession?.cancel(AgentRuntimeWire.SYSTEM_INTERRUPTED)
         activeSession = null
+        AgentOverlayClearance.detach(clearanceHost)
         resultIo.shutdownNow()
         mainHandler.removeCallbacksAndMessages(null)
         unregisterResultCardBack()
@@ -888,6 +917,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             AgentOverlayCapsule(
                 state = state.value,
                 expanded = capsuleExpanded.value,
+                yielded = capsuleYielded.value,
                 onToggleExpanded = ::toggleCapsule,
                 onCollapsedSettled = ::onCapsuleCollapsedSettled,
                 onPause = ::requestPause,
@@ -906,6 +936,26 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         }
         capsuleView = capsule
         capsuleParams = capsuleLp
+    }
+
+    private fun setCapsuleYielded(yielded: Boolean) {
+        if (!yielded) mainHandler.removeCallbacks(restoreCapsule)
+        capsuleYielded.value = yielded
+        val wm = windowManager ?: return
+        val capsule = capsuleView ?: return
+        val lp = capsuleParams ?: return
+        val nextFlags = if (yielded) {
+            lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        if (lp.flags == nextFlags) return
+        lp.flags = nextFlags
+        runCatching { wm.updateViewLayout(capsule, lp) }.onFailure { throwable ->
+            AndroidAgentLogger.warnThrottled("runtime_capsule_clearance_failed") {
+                "Agent runtime capsule clearance update failed: type=${throwable.safeLogType()}"
+            }
+        }
     }
 
     private fun toggleCapsule() {
@@ -1244,6 +1294,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         const val RESULT_CARD_HEIGHT_RATIO = 0.5f
         private const val RESULT_OPEN_REQUEST_CODE = 1108
         private const val CAPSULE_WINDOW_WIDTH_DP = 272
+        /** 让路包围盒的边缘余量（dp）：手势擦过胶囊边缘也要触发避让。 */
+        private const val CAPSULE_CLEARANCE_SLOP_DP = 8
         private const val CAPSULE_COLLAPSED_HEIGHT_DP = 68
         private const val CAPSULE_CONTROLS_HEIGHT_DP = 124
         private const val CAPSULE_SUPPLEMENT_HEIGHT_DP = 260
