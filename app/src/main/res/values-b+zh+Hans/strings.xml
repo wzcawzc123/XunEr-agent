@@ -1341,4 +1341,6 @@
 <string name="terminal_key_down">下</string>
 <string name="terminal_key_right">右</string>
 <string name="terminal_key_enter">回车</string>
+<string name="read_aloud_channel">朗读</string>
+<string name="read_aloud_notification_title">Eta 正在朗读</string>
 </resources>

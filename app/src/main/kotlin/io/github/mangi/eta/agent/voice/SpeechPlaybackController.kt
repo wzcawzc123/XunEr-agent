@@ -27,8 +27,11 @@ internal class SpeechPlaybackController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val beforePlayback: () -> Unit = {},
+    private val interruptOnScreenOff: Boolean = true,
     private val afterPlayback: () -> Unit = {},
     private val synthesize: suspend (SpeechSettings, SpeechCredentials, String, (ByteArray) -> Unit) -> Unit = ::synthesizeSpeech,
+    /** 整篇单会话流式合成；为 null 时只用逐段请求。 */
+    private val streamSynthesize: (suspend (SpeechSettings, SpeechCredentials, List<String>, (ByteArray) -> Unit) -> Unit)? = ::streamSpeech,
     private val createOutput: () -> SpeechAudioOutput = ::SpeechPcmOutput,
 ) {
     private val mutableState = MutableStateFlow(SpeechPlaybackState())
@@ -45,7 +48,7 @@ internal class SpeechPlaybackController(
         mutableState.value = SpeechPlaybackState(messageId, loading = true)
         job = scope.launch(Dispatchers.Main.immediate) {
             try {
-                lease = SpeechAudioLease(context) { stop() }.also { it.acquire(playback = false) }
+                lease = SpeechAudioLease(context, interruptOnScreenOff) { stop() }.also { it.acquire(playback = false) }
                 val config = settings ?: SpeechSettingsRepository.settings()
                 val secrets = credentials ?: SpeechSettingsRepository.credentials(context)
                 validateSpeechSettings(config, secrets, synthesis = true)
@@ -94,7 +97,25 @@ internal class SpeechPlaybackController(
         val ahead = Semaphore(PREFETCH_CHUNKS)
         launch {
             try {
-                for (chunk in chunks) {
+                var streamed = false
+                val stream = streamSynthesize
+                if (stream != null) {
+                    try {
+                        ahead.acquire()
+                        stream(config, secrets, chunks) { bytes ->
+                            streamed = true
+                            queue.trySend(SpeechQueueItem.Audio(bytes))
+                        }
+                        queue.send(SpeechQueueItem.ChunkEnd)
+                        streamed = true
+                    } catch (error: Exception) {
+                        if (error is CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                        if (streamed) throw error
+                        AndroidAgentLogger.warn("Eta speech stream unavailable, using segments: code=${error.speechFailure().code}")
+                        ahead.release()
+                    }
+                }
+                if (!streamed) for (chunk in chunks) {
                     ahead.acquire()
                     synthesize(config, secrets, chunk) { bytes -> queue.trySend(SpeechQueueItem.Audio(bytes)) }
                     queue.send(SpeechQueueItem.ChunkEnd)

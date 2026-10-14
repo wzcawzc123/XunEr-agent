@@ -279,7 +279,19 @@ internal val LocalSpeechPlaybackEnabled = compositionLocalOf { false }
 internal fun SpeechPlaybackHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val controller = remember { SpeechPlaybackController(context, scope) }
+    val controller = remember {
+        val appContext = context.applicationContext
+        lateinit var created: SpeechPlaybackController
+        created = SpeechPlaybackController(
+            context = context,
+            scope = scope,
+            // 出声期间由前台播放服务保活：退后台或锁屏时朗读继续，离开聊天页才停止。
+            beforePlayback = { io.github.mangi.eta.agent.voice.ReadAloudPlaybackService.start(appContext) { created.stop() } },
+            afterPlayback = { io.github.mangi.eta.agent.voice.ReadAloudPlaybackService.stop(appContext) },
+            interruptOnScreenOff = false,
+        )
+        created
+    }
     val settings by remember { SpeechSettingsRepository.settingsFlow() }.collectAsState(initial = null)
     SpeechLifecycle { controller.stop() }
     SpeechPlaybackErrors(controller)

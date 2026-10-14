@@ -1362,4 +1362,6 @@
 <string name="terminal_key_down">Down</string>
 <string name="terminal_key_right">Right</string>
 <string name="terminal_key_enter">Enter</string>
+<string name="read_aloud_channel">Read aloud</string>
+<string name="read_aloud_notification_title">Eta is reading aloud</string>
 </resources>
