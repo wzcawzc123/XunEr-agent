@@ -1327,4 +1327,8 @@
 <plurals name="provider_delete_models_action">
     <item quantity="other">刪除 %d 個模型</item>
   </plurals>
+<string name="memory_empty_title">還沒有記憶</string>
+<string name="memory_mode_preview">預覽</string>
+<string name="memory_mode_edit">編輯</string>
+<string name="memory_discard">放棄</string>
 </resources>

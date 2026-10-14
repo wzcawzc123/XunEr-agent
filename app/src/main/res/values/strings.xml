@@ -1385,4 +1385,8 @@
     <item quantity="one">Delete %d model</item>
     <item quantity="other">Delete %d models</item>
   </plurals>
+<string name="memory_empty_title">No memories yet</string>
+<string name="memory_mode_preview">Preview</string>
+<string name="memory_mode_edit">Edit</string>
+<string name="memory_discard">Discard</string>
 </resources>
