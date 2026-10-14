@@ -166,6 +166,7 @@ internal object AgentModelClient {
             )
         )
         var promptRootAvailable = initialCapabilities.rootAvailable
+        var publishedTools = tools
         val loop = AgentLoop(
             transcript = transcript,
             systemCount = systemCount,
@@ -194,8 +195,20 @@ internal object AgentModelClient {
                         messages.put(index, systemMessages.getJSONObject(index))
                     }
                     promptRootAvailable = capabilities.rootAvailable
+                    publishedTools = toolsFor(capabilities)
+                    publishedTools
+                } else {
+                    // 工具目录是请求前缀：只增不减，短暂不可用的工具仍保留（执行时自行报告错误码），
+                    // 避免一次瞬时能力抖动废掉整段 Provider 缓存。
+                    val published = toolNames(publishedTools)
+                    val added = toolsFor(capabilities).let { fresh ->
+                        (0 until fresh.length()).map(fresh::getJSONObject).filter { toolName(it) !in published }
+                    }
+                    if (added.isNotEmpty()) {
+                        publishedTools = JSONArray(publishedTools.toString()).also { merged -> added.forEach(merged::put) }
+                    }
+                    publishedTools
                 }
-                toolsFor(capabilities)
             },
         )
         val result = try {
@@ -236,6 +249,11 @@ internal object AgentModelClient {
             ),
         )
     }
+
+    private fun toolName(tool: JSONObject): String? = tool.optJSONObject("function")?.optString("name")
+
+    private fun toolNames(tools: JSONArray): Set<String> =
+        (0 until tools.length()).mapNotNullTo(mutableSetOf()) { toolName(tools.getJSONObject(it)) }
 
     private fun ModelConfig.validate() {
         require(baseUrl.isNotBlank()) { "请先配置 API 地址" }

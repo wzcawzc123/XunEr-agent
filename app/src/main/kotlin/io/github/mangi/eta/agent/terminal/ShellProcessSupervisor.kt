@@ -1,6 +1,8 @@
 package io.github.mangi.eta.agent.terminal
 
 import java.io.File
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -520,6 +522,9 @@ internal data class ShellProcessOwnership(val pid: Long, val token: String, val 
 /** 写入托管进程环境块的归属标记；巡检与停止前用它防止 PID 复用误杀。 */
 internal const val ETA_PROCESS_OWNER_ENV = "ETA_PROCESS_OWNER"
 
+/** 子进程提前退出导致 stdin 未完整传输时使用的退出码（-4 以下保留给既有信号语义）。 */
+internal const val SHELL_STDIN_FAILED_EXIT_CODE = -4
+
 internal fun shellQuote(value: String): String =
     "'" + value.replace("'", "'\\''") + "'"
 
@@ -585,9 +590,15 @@ internal fun runOneShotShell(
         val stderrThread = thread(name = "agent-terminal-stderr") {
             process.errorStream.use { input -> stderr.readFrom(input, minOf(maxOutputBytes, 64 * 1024)) }
         }
+        val stdinFailed = AtomicBoolean(false)
         val stdinThread = thread(name = "agent-terminal-stdin") {
-            process.outputStream.use { out ->
-                if (stdin != null) out.write(stdin)
+            try {
+                process.outputStream.use { out ->
+                    if (stdin != null) out.write(stdin)
+                }
+            } catch (_: IOException) {
+                // 校验失败或取消可能先关闭读端；由调用线程结合退出码处理，不能让写线程异常终止 Runtime。
+                stdinFailed.set(true)
             }
         }
 
@@ -604,8 +615,16 @@ internal fun runOneShotShell(
         outputThread.join(500)
         stderrThread.join(500)
         stdinThread.join(500)
+        val exitCode = process.exitValue()
+        // 子进程的失败保留原始语义；声称成功但输入传输失败时不能把不完整写入当作成功。
+        if (exitCode == 0 && stdin?.isNotEmpty() == true && stdinFailed.get()) {
+            return OneShotShellResult(
+                SHELL_STDIN_FAILED_EXIT_CODE, output.bytes(), "命令输入传输失败".toByteArray(),
+                output.isTruncated(), stderr.isTruncated(),
+            )
+        }
         return OneShotShellResult(
-            process.exitValue(), output.bytes(), stderr.bytes(), output.isTruncated(), stderr.isTruncated(),
+            exitCode, output.bytes(), stderr.bytes(), output.isTruncated(), stderr.isTruncated(),
         )
     } finally {
         if (processSupervisor.isClosing) {
