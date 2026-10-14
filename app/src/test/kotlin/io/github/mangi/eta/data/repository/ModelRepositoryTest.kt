@@ -134,6 +134,7 @@ class ModelRepositoryTest {
                     source = ModelSource.REMOTE,
                 ),
             ),
+            adoptedModelIds = setOf("REMOTE-NEW"),
         )
 
         assertTrue(result.applied)
@@ -152,7 +153,7 @@ class ModelRepositoryTest {
         assertEquals(ModelSource.CATALOG, restored.getValue("catalog-model").source)
         assertEquals(ModelSource.REMOTE, restored.getValue("remote-new").source)
 
-        val emptyResult = ModelRepository.syncRemoteModels(PROVIDER_ID, emptyList())
+        val emptyResult = ModelRepository.syncRemoteModels(PROVIDER_ID, emptyList(), emptySet())
         assertFalse(emptyResult.applied)
         assertEquals(restored.keys, ModelRepository.modelsByProvider(PROVIDER_ID).mapTo(mutableSetOf()) { it.modelId })
     }
