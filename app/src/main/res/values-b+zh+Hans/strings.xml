@@ -1343,4 +1343,6 @@
 <string name="terminal_key_enter">回车</string>
 <string name="read_aloud_channel">朗读</string>
 <string name="read_aloud_notification_title">Eta 正在朗读</string>
+<string name="model_picker_filter_all">全部</string>
+<string name="model_picker_title">选择模型</string>
 </resources>

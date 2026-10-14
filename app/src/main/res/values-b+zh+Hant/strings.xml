@@ -1308,4 +1308,6 @@
 <string name="terminal_key_enter">Enter 鍵</string>
 <string name="read_aloud_channel">朗讀</string>
 <string name="read_aloud_notification_title">Eta 正在朗讀</string>
+<string name="model_picker_filter_all">全部</string>
+<string name="model_picker_title">選擇模型</string>
 </resources>

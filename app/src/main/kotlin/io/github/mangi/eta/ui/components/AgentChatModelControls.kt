@@ -47,6 +47,8 @@ import io.github.mangi.eta.R
 import io.github.mangi.eta.ui.model.AgentContextUsageUi
 import io.github.mangi.eta.ui.model.AgentModelOptionUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
+import io.github.mangi.eta.ui.model.filterGroups
+import io.github.mangi.eta.ui.model.modelCount
 import io.github.mangi.eta.ui.model.defaultExpandedModelProviderIds
 import io.github.mangi.eta.ui.model.formatContextUsage
 import kotlinx.coroutines.launch
@@ -55,6 +57,23 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import kotlinx.coroutines.flow.drop
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.DpSize
+import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.InputField
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
@@ -81,11 +100,17 @@ internal fun AgentModelPickerButton(
     modifier: Modifier = Modifier,
 ) {
     var showPopup by remember { mutableStateOf(false) }
+    var showSheet by remember { mutableStateOf(false) }
+    // 每次打开面板换一个 key，搜索词、筛选与滚动位置都从头开始。
+    var sheetSession by remember { mutableStateOf(0) }
     var expandedProviderIds by remember { mutableStateOf(emptySet<String>()) }
     val selected = state.selectedModel
     val enabled = !isStreaming && !state.isChanging && state.providerGroups.isNotEmpty()
     LaunchedEffect(enabled) {
-        if (!enabled) showPopup = false
+        if (!enabled) {
+            showPopup = false
+            showSheet = false
+        }
     }
     val density = LocalDensity.current
     val popupWindowInsetPx = with(density) { 14.dp.roundToPx() }
@@ -100,8 +125,13 @@ internal fun AgentModelPickerButton(
     Box(modifier = modifier) {
         IconButton(
             onClick = {
-                expandedProviderIds = defaultExpandedModelProviderIds(state.selectedModel)
-                showPopup = true
+                if (state.modelCount <= ModelPopupLimit) {
+                    expandedProviderIds = defaultExpandedModelProviderIds(state.selectedModel)
+                    showPopup = true
+                } else {
+                    sheetSession += 1
+                    showSheet = true
+                }
             },
             enabled = enabled,
             minWidth = ChatInputActionSize,
@@ -141,6 +171,24 @@ internal fun AgentModelPickerButton(
                 },
                 onVisionToggled = onVisionToggled,
             )
+        }
+
+        OverlayBottomSheet(
+            show = showSheet,
+            title = stringResource(R.string.model_picker_title),
+            onDismissRequest = { showSheet = false },
+            insideMargin = DpSize(0.dp, 0.dp),
+        ) {
+            key(sheetSession) {
+                ModelSheetContent(
+                    state = state,
+                    onModelSelected = { modelId ->
+                        showSheet = false
+                        onModelSelected(modelId)
+                    },
+                    onVisionToggled = onVisionToggled,
+                )
+            }
         }
     }
 }
@@ -408,4 +456,171 @@ private fun ModelBrandMark(
             )
         }
     }
+}
+
+private const val ModelPopupLimit = 8
+
+private sealed interface ModelSheetEntry {
+    fun key(): String
+    data class Header(val providerId: String, val name: String) : ModelSheetEntry {
+        override fun key(): String = "header-$providerId"
+    }
+    data class Option(val model: AgentModelOptionUi) : ModelSheetEntry {
+        override fun key(): String = "option-${model.providerId}-${model.id}"
+    }
+}
+
+/** 大量模型时的底部面板：搜索 + 服务商筛选 + 分组列表；行沿用带视觉开关的模型行。 */
+@Composable
+private fun ModelSheetContent(
+    state: AgentModelPickerUiState,
+    onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var providerFilter by remember { mutableStateOf<String?>(null) }
+    val entries = remember(state.providerGroups, query, providerFilter) {
+        state.filterGroups(query)
+            .filter { providerFilter == null || it.providerId == providerFilter }
+            .flatMap { group ->
+                // 只看一个服务商时，筛选标签已经说明了归属，分组标题只会重复。
+                val header = if (providerFilter == null) {
+                    listOf(ModelSheetEntry.Header(group.providerId, group.providerName))
+                } else {
+                    emptyList()
+                }
+                header + group.models.map(ModelSheetEntry::Option)
+            }
+    }
+    val selectedIndex = entries.indexOfFirst {
+        it is ModelSheetEntry.Option && it.model.id == state.selectedModel?.id
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 2).coerceAtLeast(0))
+    LaunchedEffect(listState) {
+        snapshotFlow { query to providerFilter }.drop(1).collect { listState.scrollToItem(0) }
+    }
+    val select = rememberConfirmedSelection(onModelSelected)
+    val selectedId = select.pendingId ?: state.selectedModel?.id
+    val density = LocalDensity.current
+    // 面板高度固定，不随搜索结果伸缩；键盘弹出时由面板的约束自然压缩列表区域。
+    val sheetHeight = with(density) { LocalWindowInfo.current.containerSize.height.toDp() } * 0.68f
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(sheetHeight)
+            .navigationBarsPadding(),
+    ) {
+        InputField(
+            query = query,
+            onQueryChange = { query = it },
+            onSearch = {},
+            expanded = false,
+            onExpandedChange = {},
+            label = stringResource(R.string.ui_search_model_df5586),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(top = 4.dp, bottom = 8.dp),
+        )
+        if (state.providerGroups.size > 1) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
+            ) {
+                item(key = "all") {
+                    EtaChoiceChip(
+                        text = stringResource(R.string.model_picker_filter_all),
+                        selected = providerFilter == null,
+                        onClick = { providerFilter = null },
+                    )
+                }
+                items(state.providerGroups, key = { it.providerId }) { group ->
+                    EtaChoiceChip(
+                        text = group.providerName,
+                        selected = providerFilter == group.providerId,
+                        onClick = { providerFilter = group.providerId },
+                    )
+                }
+            }
+        }
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(top = 2.dp, bottom = 12.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            if (entries.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        text = stringResource(R.string.page_no_matching_model_found_ae7e96),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 48.dp),
+                    )
+                }
+            }
+            items(entries, key = ModelSheetEntry::key, contentType = { it::class }) { entry ->
+                when (entry) {
+                    is ModelSheetEntry.Header -> ModelProviderLabel(entry.name, horizontalPadding = 24.dp)
+                    is ModelSheetEntry.Option -> ModelPickerRow(
+                        model = entry.model,
+                        selected = entry.model.id == selectedId,
+                        onClick = { select(entry.model.id) },
+                        onVisionToggled = onVisionToggled,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 点选后先把对勾移到新模型上，停留片刻再收起弹层，让人看清选中了谁。
+ * 弹层收起会让作用域随组合一起离开，未完成的确认随之取消，不会回写已关闭的界面。
+ */
+private class ConfirmedSelection(
+    private val onConfirm: (String) -> Unit,
+    private val launch: (suspend () -> Unit) -> Unit,
+) {
+    var pendingId by mutableStateOf<String?>(null)
+        private set
+
+    operator fun invoke(modelId: String) {
+        if (pendingId != null) return
+        pendingId = modelId
+        launch {
+            delay(SelectionConfirmMs)
+            onConfirm(modelId)
+        }
+    }
+}
+
+private const val SelectionConfirmMs = 380L
+
+@Composable
+private fun rememberConfirmedSelection(onConfirm: (String) -> Unit): ConfirmedSelection {
+    val scope = rememberCoroutineScope()
+    val currentOnConfirm by rememberUpdatedState(onConfirm)
+    return remember { ConfirmedSelection({ currentOnConfirm(it) }) { block -> scope.launch { block() } } }
+}
+
+@Composable
+private fun ModelProviderLabel(name: String, horizontalPadding: Dp = 20.dp) {
+    Text(
+        text = name,
+        style = MiuixTheme.textStyles.footnote1,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = horizontalPadding)
+            .padding(top = 14.dp, bottom = 4.dp),
+    )
 }
