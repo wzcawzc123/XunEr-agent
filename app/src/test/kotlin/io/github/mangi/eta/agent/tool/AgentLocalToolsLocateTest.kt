@@ -197,6 +197,11 @@ class AgentLocalToolsLocateTest {
         // L14（v3.11.26）：同 tool+同参连续失败 ≥3 次 → DUPLICATE_CALL 机械护栏，
         // 阻止模型原样重发注定失败的调用（缺 coordinate_space 的 tap 等）。
         val tools = tools { observation("o-tap", nodes = listOf(node(0, "打开"))) }
+        // 先 observe 建立观察快照（tap_element 需要 observation 定位节点）。
+        val observe = tools.execute(
+            AgentModelClient.ToolCall(id = "call-observe", name = "observe_screen", argumentsJson = "{}"),
+        )
+        assertTrue("observe 应成功：$observe", JSONObject(observe.content).getBoolean("ok"))
         fun tap(): AgentModelClient.ToolResult = tools.execute(
             AgentModelClient.ToolCall(
                 id = "call-tap",
