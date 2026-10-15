@@ -137,20 +137,32 @@ internal class AgentLoop(
                 window
             }
             val expectedTokens = context.budgetEstimate(requestMessages, roundTools)
-            if (trimWindow != null && trimWindow > 0 && expectedTokens >= trimWindow) {
+            if (trimWindow != null && trimWindow > 0 && expectedTokens >= trimWindow &&
+                // H1 守卫（v3.11.24）：签名回合内禁止裁剪——与压缩路径
+                //（AgentContextSession.compact 与 AgentContextCompactor 的
+                // ANTHROPIC_THINKING_CONTEXT_LOCKED）对等：硬裁剪会把消息重建为无签名形态，
+                // 上游判定"改动了 thinking 块"，同一会话后续每轮 400。
+                // 工具结果提交后 pending 即解除，下一轮再按需裁剪，因此这里直接延后。
+                !AnthropicEphemeralState.hasPendingToolResponse(messages)
+            ) {
                 val systemEstimate = context.budgetEstimate(
                     JSONArray().apply { for (index in 0 until systemCount) put(messages.getJSONObject(index)) },
                 )
-                val history = (systemCount until messages.length()).map {
-                    AgentConversationCodec.fromJsonObject(messages.getJSONObject(it))
-                }
-                val trimOutcome = AgentHistoryTrimmer.trim(history, trimWindow, systemEstimate)
+                // H1（v3.11.24）：直接在原始 JSONObject 上裁剪，保留 _eta_* 瞬态键
+                //（思考签名块、观察标记、屏幕上下文）——ConversationMessage 往返会剥掉它们。
+                val history = (systemCount until messages.length()).map { messages.getJSONObject(it) }
+                val trimOutcome = AgentHistoryTrimmer.trimJson(
+                    history = history,
+                    window = trimWindow,
+                    systemEstimate = systemEstimate,
+                    calibration = context.calibrationValue(),
+                )
                 if (trimOutcome.trimmed) {
                     // M1.2：硬裁剪必须可观测 —— UI/日志能区分“摘要压缩”与“硬裁剪丢历史”。
                     onEvent(AgentEvent.HistoryTrimmed(operationId, trimOutcome.droppedMessages))
                 }
                 while (messages.length() > systemCount) messages.remove(messages.length() - 1)
-                trimOutcome.messages.forEach { messages.put(AgentConversationCodec.toJsonObject(it)) }
+                trimOutcome.messages.forEach { messages.put(it) }
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )

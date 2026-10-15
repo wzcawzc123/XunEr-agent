@@ -545,6 +545,51 @@ class AgentConversationStoreTest {
         assertEquals("改名后的 B", AgentConversationStore.load(context).titles.getValue("conv-b"))
     }
 
+    /**
+     * H3（v3.11.24）：懒加载失败若被误标记为"已载入空态"（messagesLoaded=true 但
+     * messages/history/journal 全空、旧基线非空），保存时**不得**以空列表清掉库内已有消息。
+     * 复现"会话切换空白页、重后台后复发"的写库污染链。
+     */
+    @Test
+    fun pollutedEmptyLoadedStateDoesNotWipeStoredMessages() = runBlocking {
+        val original = AgentChatHomeUiState(
+            messages = listOf(UserMessageUi("user-1", "原始消息一"), UserMessageUi("user-2", "原始消息二")),
+            history = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "原始消息一")),
+            journal = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "user", content = "原始消息一")),
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        AgentConversationStore.save(
+            context = context,
+            selectedConversationId = "conv-polluted",
+            conversationsById = mapOf("conv-polluted" to original),
+            titles = mapOf("conv-polluted" to "原始"),
+            updatedAt = mapOf("conv-polluted" to 1L),
+        )
+
+        // 模拟污染态：懒加载失败被标记为已载入，但 messages/history/journal 全空。
+        val polluted = AgentChatHomeUiState(
+            messages = emptyList(),
+            messagesLoaded = true,
+            input = "", isStreaming = false, thinkingEnabled = false,
+        )
+        AgentConversationStore.save(
+            context = context,
+            selectedConversationId = "conv-polluted",
+            conversationsById = mapOf("conv-polluted" to polluted),
+            titles = mapOf("conv-polluted" to "原始"),
+            updatedAt = mapOf("conv-polluted" to 1L),
+        )
+
+        // 库内原有消息必须保留，不得被空列表覆盖。
+        val restored = AgentConversationStore.loadConversation(context, "conv-polluted")!!
+        assertEquals(
+            listOf(UserMessageUi("user-1", "原始消息一"), UserMessageUi("user-2", "原始消息二")),
+            restored.messages,
+        )
+        assertEquals("原始消息一", restored.history.single().content)
+        assertEquals("原始消息一", restored.journal.single().content)
+    }
+
     @Test
     fun lazyLoadConversationRestoresFullMessagesAndCheckpoint() = runBlocking {
         val history = listOf(io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage(role = "assistant", content = "历史"))

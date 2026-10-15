@@ -13,6 +13,11 @@ internal data class AgentChatUiState(
     val messages: List<AgentChatMessageUi>,
     /** false 表示该会话消息未载入（启动懒加载），仅载 metadata；选中或恢复时再从库补载。 */
     val messagesLoaded: Boolean = true,
+    /**
+     * 懒加载失败标记：载入异常时保持 [messagesLoaded] = false（下次切换会重试），
+     * 同时置此标记让 UI 展示失败态与重试入口，而不是永久转圈或污染成空态。
+     */
+    val conversationLoadFailed: Boolean = false,
     val history: List<AgentModelClient.ConversationMessage> = emptyList(),
     // 完整脱敏历史独立于模型投影；摘要替换 history 时不覆盖 journal。
     val journal: List<AgentModelClient.ConversationMessage> = emptyList(),

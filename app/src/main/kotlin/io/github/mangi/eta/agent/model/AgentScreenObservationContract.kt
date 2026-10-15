@@ -21,8 +21,9 @@ internal object AgentScreenObservationContract {
         if (!treeIncluded || nodeCount >= SPARSE_TREE_THRESHOLD) return ""
         return "\n\n[无障碍树稀疏：本次只返回 $nodeCount 个节点，目标控件很可能不在树里。" +
             "不要用 tap_element，先调 locate_on_screen(query=目标文本) 拿精确 bbox 与 center" +
-            "——它先查树，树里没有会自动对截图像素做 OCR，返回 coordinate_space=screen，" +
-            "也可用其返回的 index+observation_id 调 tap_element。" +
+            "——它先查树，树里没有会自动对截图像素做 OCR，返回 coordinate_space=screen。" +
+            "只有 locate 返回 source=ui_tree 时才可用 index+observation_id 调 tap_element；" +
+            "source=ocr 时 index 恒为 -1，只能用 center_x/center_y + coordinate_space=screen 调 tap。" +
             "只有 locate 返回 LOCATE_MISS（树与 OCR 都没有）时才回到截图自行判断；" +
             "目测点击连续两次未命中必须停止重试并说明情况。" +
             "点击后必须重新 observe_screen 确认是否生效，连续两次没有变化就停止重试并说明情况。]"

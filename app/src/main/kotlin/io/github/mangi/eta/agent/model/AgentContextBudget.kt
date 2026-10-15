@@ -37,6 +37,9 @@ internal class AgentContextBudget(private val window: Int?) {
             .coerceIn(MIN_CALIBRATION, MAX_CALIBRATION)
     }
 
+    /** 当前校准系数（未获得实测时是 [DEFAULT_CALIBRATION] 保守初值）。 */
+    fun calibrationValue(): Double = calibration
+
     fun estimate(messages: JSONArray, tools: JSONArray): Int =
         ceil(rawEstimate(messages, tools) * calibration).toInt()
 

@@ -10,7 +10,7 @@ internal object AgentGestureToolCatalog {
             .put(
                 AgentToolSchema.function(
                     name = "locate_on_screen",
-                    description = "按文本在当前屏幕的 UI 节点里精确定位元素，返回 screen 坐标 bbox 与中心点。树里没有的目标（稀疏树、列表项未暴露）优先用本工具拿到坐标再点；也可直接用返回的 index 与 observation_id 调 tap_element。每次调用都会重新抓取节点快照，不依赖旧观察。找不到返回 LOCATE_MISS：改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标。",
+                    description = "按文本在当前屏幕的 UI 节点里精确定位元素，返回 screen 坐标 bbox 与中心点。树里没有的目标（稀疏树、列表项未暴露）优先用本工具拿到坐标再点。返回 source=ui_tree 时可用 index+observation_id 调 tap_element；source=ocr 时 index 恒为 -1，必须用 center_x/center_y + coordinate_space=screen 调 tap。每次调用都会重新抓取节点快照，不依赖旧观察。找不到返回 LOCATE_MISS：改写 query、提高 max_nodes 或 observe_screen 查看树，禁止凭空猜坐标。",
                     parameters = JSONObject()
                         .put("type", "object")
                         .put(

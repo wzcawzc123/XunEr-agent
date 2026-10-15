@@ -776,15 +776,18 @@ internal class AgentAppState(
             }
             withContext(Dispatchers.Main.immediate) {
                 if (loaded == null) {
-                    // 载入失败：把占位标记为已载入空态，避免聊天区永久停在"加载中"；再次切换会重新尝试。
+                    // 载入失败：不置 messagesLoaded=true（那会把空态误当"已载入"，
+                    // 后续 saveChanges 以空基线覆盖库内全部消息，清空整会话）。
+                    // 保持 messagesLoaded=false 让 selectConversation 下次切换重试，
+                    // 并标记失败态供 UI 展示重试入口。
                     AndroidAgentLogger.warnThrottled("conversation_lazy_load_failed") {
                         "Lazy load conversation failed: $conversationId"
                     }
                     if (selectedConversationId == conversationId) {
                         conversationsById[conversationId]?.takeIf { !it.messagesLoaded }?.let { state ->
-                            val emptyLoaded = state.copy(messagesLoaded = true)
-                            conversationsById = conversationsById + (conversationId to emptyLoaded)
-                            homeState = emptyLoaded
+                            val failed = state.copy(conversationLoadFailed = true)
+                            conversationsById = conversationsById + (conversationId to failed)
+                            homeState = failed
                             refreshConversationSummaries()
                         }
                     }
@@ -1007,8 +1010,14 @@ internal class AgentAppState(
         // 用未乘校准的 raw 口径 + 实测固定开销（system/memory/skills/工具 schema）做发送前容量检查。
         // 固定开销 = 上一轮成功请求 input_tokens − rawEstimate(该轮历史)，随工具/记忆开关自动跟随；
         // 常量 24K 作下限防异常，冷启动（无上一轮）时回退下限，不退化。
+        // H4（v3.11.24）：窗口改为与 run 同源——优先取**会话绑定模型**的窗口（providers 内存
+        // 快照与 runtimeConfigFor(runModelId) 同源、同步可读），回退 loadConfig()，再回退保守
+        // 默认。旧实现只读 loadConfig()（依赖 remote prefs，Xposed 未连接时 window=null →
+        // 守卫整段静默跳过；且取的是默认模型而非绑定模型窗口，与实际运行窗口可能错位）。
         if (editBoundary != null && editBoundary.historyPrefix.isNotEmpty()) {
-            val window = AgentModelClient.loadConfig().contextWindow
+            val guardWindow = providers.enabledModel(homeState.effectiveModelId)?.model?.effectiveContextWindow
+                ?: AgentModelClient.loadConfig().contextWindow
+                ?: GUARD_FALLBACK_WINDOW_TOKENS
             val lastInput = homeState.messages.asReversed()
                 .filterIsInstance<AgentMessageUi>()
                 .mapNotNull { it.usage?.inputTokens }
@@ -1020,13 +1029,16 @@ internal class AgentAppState(
                     },
                 )).coerceAtLeast(0)
             }
-            val guardOverhead = measuredOverhead ?: AgentHistoryTrimmer.TOOL_SCHEMA_RESERVE_TOKENS
+            // 固定开销保底：raw 已知高估时实测差值可能归零（system/memory/tools 不计入），
+            // 强制保留工具 schema 预留下限，避免守卫因 overhead 归零而失效。
+            val guardOverhead = maxOf(measuredOverhead ?: 0, AgentHistoryTrimmer.TOOL_SCHEMA_RESERVE_TOKENS)
             val estimate = AgentContextBudget.rawEstimate(
                 JSONArray().also { arr ->
                     editBoundary.historyPrefix.forEach { arr.put(AgentConversationCodec.toJsonObject(it)) }
                 },
             ) + guardOverhead
-            if (window != null && window > 0 && estimate >= window) {
+            // 阈值留 5% 余量（与硬裁剪 TARGET_RATIO 0.95 对齐），避免在窗口边界处发出必败请求。
+            if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
                 Toast.makeText(
                     appContext,
                     "编辑重发的前缀历史接近上下文上限，建议先手动压缩历史或新建会话；本次未发送",
@@ -2170,6 +2182,15 @@ internal class AgentAppState(
         const val MAX_PREVIEW_CHARS = 48
         const val LEGACY_STOPPED_ERROR = "已停止"
         const val SYNTHETIC_STATUS_STOPPED = "eta_status:stopped"
+
+        /**
+         * 编辑重发容量守卫的保守默认窗口（tokens）。
+         *
+         * 绑定模型与 loadConfig 都取不到窗口时（remote prefs 缺失且本地模型记录无窗口），
+         * 不再整段跳过守卫（旧行为会静默失效），而是按最小常见模型窗口保守拦截：
+         * 宁可在窗口边界附近提示手动压缩，也不把必败请求发出去。
+         */
+        const val GUARD_FALLBACK_WINDOW_TOKENS = 128_000
 
         /** 续跑被系统中断任务的引导（引导层，防重复副作用；GUI/写操作不得重复执行）。 */
         const val RESUME_INTERRUPTED_PROMPT =

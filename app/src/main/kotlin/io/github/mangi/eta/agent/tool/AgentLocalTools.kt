@@ -673,7 +673,9 @@ internal class AgentLocalTools(
             .put("coordinate_space", "screen")
         if (source == "ocr") {
             payload
-                .put("note", "OCR 源：bbox 来自截图像素并已按 image→screen 比例换算；node_index 为识别块序号而非无障碍节点")
+                .put("note", "OCR 源：bbox 来自截图像素并已按 image→screen 比例换算。" +
+                    "node_index 恒为 -1（OCR 识别块序号不是无障碍节点序号，调 tap_element 必错）；" +
+                    "本源的匹配只能用 center_x/center_y + coordinate_space=screen 调 tap")
                 .put("image_width", ocr!!.imageWidth)
                 .put("image_height", ocr.imageHeight)
                 .put("screen_width", ocr.screenWidth)
@@ -691,7 +693,9 @@ internal class AgentLocalTools(
                     .put("center_y", match.centerY)
                     .put("score", match.score)
                     .put("field", match.field)
-                    .put("node_index", match.index)
+                    // H5（v3.11.24）：OCR 源没有对应的树节点，index 一律置 -1，
+                    // 防止模型把"识别块序号"当树节点序号调 tap_element 而静默点错节点。
+                    .put("node_index", if (source == "ocr") -1 else match.index)
                     .put("clickable", match.clickable),
             )
         }
@@ -878,6 +882,11 @@ internal class AgentLocalTools(
 
     private fun tapElement(args: JSONObject): String {
         val index = args.optInt("index", -1)
+        // H5（v3.11.24）：index<0 即无对应树节点（OCR 源的 node_index 恒为 -1），直接拒绝，
+        // 防止把 OCR 识别块序号当树节点序号静默点错。
+        if (index < 0) {
+            return errorResult("INVALID_NODE_INDEX", "index=$index 无效：index 仅对 ui_tree 源匹配可用，OCR 源请用 center_x/center_y 调 tap")
+        }
         val observation = requireElementObservation(args) ?: return observationError(args)
         val node = observation.nodes.firstOrNull { it.index == index }
         if (node == null) {
@@ -893,6 +902,9 @@ internal class AgentLocalTools(
 
     private fun longPressElement(args: JSONObject): String {
         val index = args.optInt("index", -1)
+        if (index < 0) {
+            return errorResult("INVALID_NODE_INDEX", "index=$index 无效：index 仅对 ui_tree 源匹配可用，OCR 源请用 center_x/center_y 调 tap")
+        }
         val observation = requireElementObservation(args) ?: return observationError(args)
         val node = observation.nodes.firstOrNull { it.index == index }
         val durationMs = args.optInt("duration_ms", 800)

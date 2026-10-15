@@ -129,7 +129,8 @@ class AgentLocalToolsLocateTest {
         val match = payload.getJSONArray("matches").getJSONObject(0)
         assertEquals((220f * scale).toInt(), match.getInt("center_x"))
         assertEquals((2857f * scale).toInt(), match.getInt("center_y"))
-        assertEquals(0, match.getInt("node_index"))
+        // H5（v3.11.24）：OCR 源没有对应树节点，node_index 必须恒为 -1（不可用于 tap_element）。
+        assertEquals(-1, match.getInt("node_index"))
         tools.close()
     }
 
@@ -171,6 +172,23 @@ class AgentLocalToolsLocateTest {
         assertTrue("应列出可见文本作为改写线索：$message", message.contains("当前屏幕可见文本"))
         assertTrue("候选应含屏幕原文：$message", message.contains("设置") && message.contains("显示"))
         assertTrue("应明确否定目测：$message", message.contains("不是改用目测的信号"))
+        tools.close()
+    }
+
+    @Test
+    fun tapElementRejectsOcrSourceNodeIndex() {
+        // H5（v3.11.24）：OCR 源的 node_index 恒为 -1，模型若误用它调 tap_element
+        // 必须被明确拒绝（INVALID_NODE_INDEX），而不是静默点错树里另一个节点。
+        val tools = tools { observation("o-tap", nodes = listOf(node(0, "打开"))) }
+        val result = tools.execute(
+            AgentModelClient.ToolCall(
+                id = "call-tap",
+                name = "tap_element",
+                argumentsJson = """{"observation_id":"o-tap","index":-1}""",
+            ),
+        )
+        val payload = JSONObject(result.content)
+        assertEquals("payload=$payload", "INVALID_NODE_INDEX", payload.getString("code"))
         tools.close()
     }
 

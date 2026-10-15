@@ -58,6 +58,9 @@ internal class AgentContextSession(
     /** 用实测校准本地估算；AgentLoop 在收到 usage 后调用。 */
     fun observeBudget(inputTokens: Int?, requestEstimate: Int) = budget.observeTokens(inputTokens, requestEstimate)
 
+    /** 当前校准系数；硬裁剪目标换算需要与判据同一口径。 */
+    fun calibrationValue(): Double = budget.calibrationValue()
+
     /** 校准后的上下文估算；裁剪判据用它而不是未校准的 rawEstimate。 */
     fun budgetEstimate(messages: JSONArray, tools: JSONArray = JSONArray()): Int =
         budget.estimate(messages, tools)

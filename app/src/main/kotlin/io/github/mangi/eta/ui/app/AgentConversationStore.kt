@@ -97,6 +97,7 @@ internal object AgentConversationStore {
                         (stored.keys - current.keys).forEach { dao.deleteConversation(it) }
                         for ((id, state) in current) {
                             val old = previous[id].takeIf { id in stored }
+                            val oldMessages = old?.messages.orEmpty()
                             if (old == null || !state.sameMetadata(old)) {
                                 phase = "encode_metadata"
                                 val row = ConversationEntity(
@@ -113,38 +114,47 @@ internal object AgentConversationStore {
                                 phase = "write_metadata"
                                 dao.insertConversations(listOf(row))
                             }
-                            if (old == null || state.history != old.history || state.journal != old.journal) {
-                                val missing = dao.contextCheckpointRow(id) == null
-                                phase = "encode_history"
-                                val history = if (missing || old == null || state.history != old.history) {
-                                    AgentConversationCodec.encodeConversationCheckpoint(state.history)
-                                } else null
-                                phase = "encode_journal"
-                                val journal = if (missing || old == null || state.journal != old.journal) {
-                                    AgentConversationCodec.encodeTranscriptForStorage(state.journal)
-                                } else null
-                                phase = "write_checkpoint"
-                                dao.updateContextCheckpoint(id, history, journal)
-                            }
-                            // 未载入会话（启动懒加载）消息区不触碰：messages 为空占位，
-                            // diff 删除会误删库中全部消息；metadata/checkpoint 仍正常保存。
-                            if (state.messagesLoaded) {
-                                val oldMessages = old?.messages.orEmpty()
-                                var prefix = 0
-                                while (prefix < minOf(oldMessages.size, state.messages.size)) {
-                                    val before = oldMessages[prefix]
-                                    val after = state.messages[prefix]
-                                    if (before != after && before.toEntityOrNull(id, prefix) != after.toEntityOrNull(id, prefix)) break
-                                    prefix++
+                            // 已载入会话才允许 diff 写 checkpoint 与消息区；未载入（懒加载中/失败）时
+                            // history/journal/messages 都是空占位，以空基线覆盖会清空库内整会话（H3）。
+                            // 双保险：污染态（全空占位 + 旧基线非空，即懒加载失败被误标为已载入）下，
+                            // checkpoint 与消息区一律跳过——不得以空列表清掉库内已有数据；
+                            // 用户手动删光消息时 history/journal 仍非空，不会命中此防御。
+                            val emptyPollution = state.messages.isEmpty() &&
+                                state.history.isEmpty() && state.journal.isEmpty() &&
+                                oldMessages.isNotEmpty()
+                            if ((old == null || state.messagesLoaded) && !emptyPollution) {
+                                if (old == null || state.history != old.history || state.journal != old.journal) {
+                                    val missing = dao.contextCheckpointRow(id) == null
+                                    phase = "encode_history"
+                                    val history = if (missing || old == null || state.history != old.history) {
+                                        AgentConversationCodec.encodeConversationCheckpoint(state.history)
+                                    } else null
+                                    phase = "encode_journal"
+                                    val journal = if (missing || old == null || state.journal != old.journal) {
+                                        AgentConversationCodec.encodeTranscriptForStorage(state.journal)
+                                    } else null
+                                    phase = "write_checkpoint"
+                                    dao.updateContextCheckpoint(id, history, journal)
                                 }
-                                if (old == null || prefix != oldMessages.size || prefix != state.messages.size) {
-                                    phase = "delete_message_suffix"
-                                    dao.deleteMessagesFrom(id, prefix)
-                                    for (index in prefix until state.messages.size) {
-                                        phase = "encode_message"
-                                        val row = state.messages[index].toEntityOrNull(id, index) ?: continue
-                                        phase = "write_message"
-                                        dao.insertMessages(listOf(row))
+                                // 未载入会话（启动懒加载）消息区不触碰：messages 为空占位，
+                                // diff 删除会误删库中全部消息；metadata/checkpoint 仍正常保存。
+                                if (state.messagesLoaded) {
+                                    var prefix = 0
+                                    while (prefix < minOf(oldMessages.size, state.messages.size)) {
+                                        val before = oldMessages[prefix]
+                                        val after = state.messages[prefix]
+                                        if (before != after && before.toEntityOrNull(id, prefix) != after.toEntityOrNull(id, prefix)) break
+                                        prefix++
+                                    }
+                                    if (old == null || prefix != oldMessages.size || prefix != state.messages.size) {
+                                        phase = "delete_message_suffix"
+                                        dao.deleteMessagesFrom(id, prefix)
+                                        for (index in prefix until state.messages.size) {
+                                            phase = "encode_message"
+                                            val row = state.messages[index].toEntityOrNull(id, index) ?: continue
+                                            phase = "write_message"
+                                            dao.insertMessages(listOf(row))
+                                        }
                                     }
                                 }
                             }

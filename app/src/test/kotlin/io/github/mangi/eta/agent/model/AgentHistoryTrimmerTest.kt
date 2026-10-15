@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.model.AgentModelClient.ConversationMessage
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -118,6 +119,123 @@ class AgentHistoryTrimmerTest {
         // 尾部必须保留：最新消息仍在。
         assertEquals(oversized.last(), outcome.messages.last())
     }
+
+    // ---- H1（v3.11.24）：trimJson 保留 _eta_* 瞬态键，签名回合不被裁剪剥掉 ----
+
+    @Test
+    fun trimJsonPreservesEphemeralKeysInsteadOfDroppingThem() {
+        // 长历史触发裁剪；最近保留段内携带三类瞬态键，裁剪后必须原样保留
+        //（否则从 JSONObject 往返重建会剥掉它们，签名轮随后每轮 400）。
+        val thinkingAssistant = JSONObject()
+            .put("role", "assistant")
+            .put("content", "正在处理")
+            .put("tool_calls", JSONArray().put(JSONObject()
+                .put("id", "toolu_1").put("type", "function")
+                .put("function", JSONObject().put("name", "fixture").put("arguments", "{}"))))
+        AnthropicEphemeralState.attachContentBlocks(thinkingAssistant, JSONArray()
+            .put(JSONObject().put("type", "thinking").put("signature", "EPHEMERAL_SIG")))
+        val observation = JSONObject()
+            .put("role", "user")
+            .put("content", "[屏幕观察]")
+            .put("_eta_observation", true)
+        val screenContext = JSONObject()
+            .put("role", "assistant")
+            .put("content", "屏幕上下文")
+            .put("_eta_assistant_screen_context", true)
+        val history = longJsonHistory(2_000) + listOf(observation, thinkingAssistant, screenContext)
+
+        val outcome = AgentHistoryTrimmer.trimJson(history, WINDOW)
+        assertTrue("超大历史必须被裁剪", outcome.trimmed)
+        assertTrue("思考签名块键必须被保留", outcome.messages.toString().contains("EPHEMERAL_SIG"))
+        assertTrue("观察标记键必须被保留", outcome.messages.toString().contains("_eta_observation"))
+        assertTrue("屏幕上下文键必须被保留", outcome.messages.toString().contains("_eta_assistant_screen_context"))
+    }
+
+    @Test
+    fun trimJsonKeepsSignedAnthropicRoundIntactWhenOnlyRecentMessagesAreRetained() {
+        // 裁剪保留最近段时，若最近段内还有未回传结果的签名工具轮，
+        // 签名块必须原样保留（否则后续每轮 400）。
+        val pendingAssistant = JSONObject()
+            .put("role", "assistant")
+            .put("content", "")
+            .put("tool_calls", JSONArray().put(JSONObject()
+                .put("id", "toolu_pending").put("type", "function")
+                .put("function", JSONObject().put("name", "fixture").put("arguments", "{}"))))
+        AnthropicEphemeralState.attachContentBlocks(pendingAssistant, JSONArray()
+            .put(JSONObject().put("type", "thinking").put("signature", "PENDING_SIG")))
+        val history = longJsonHistory(2_000) + pendingAssistant
+
+        val outcome = AgentHistoryTrimmer.trimJson(history, WINDOW)
+        assertTrue(outcome.trimmed)
+        // 最近段保留的是尾部，pending 轮就在尾部。
+        assertTrue(outcome.messages.last() === pendingAssistant)
+        assertTrue(outcome.messages.toString().contains("PENDING_SIG"))
+    }
+
+    // ---- H2（v3.11.24）：校准口径统一 —— cal<1 不超裁、cal>1 不落入 CONTEXT_EXHAUSTED 死角 ----
+
+    @Test
+    fun trimWithLowCalibrationDoesNotOverTrimBelowTheWindowBudget() {
+        // cal=0.25 时同样的 raw 历史校准占用为 1/4，必须用更大的历史确保触发裁剪。
+        val history = longHistory(8_000)
+        val lowCal = 0.25
+
+        val outcome = AgentHistoryTrimmer.trim(history, WINDOW, calibration = lowCal)
+
+        assertTrue(outcome.trimmed)
+        val raw = rawEstimateOf(outcome.messages)
+        // 裁剪后校准口径必须仍落在窗口预算内（0.95W − 工具预留）。
+        val calibrated = raw * lowCal
+        assertTrue(
+            "cal=0.25 时裁剪后校准占用 $calibrated 不应低于预算下限（过度裁剪）",
+            calibrated >= budget(WINDOW) * 0.5,
+        )
+        assertTrue("裁剪后校准占用 $calibrated 不得超出预算", calibrated <= budget(WINDOW) + 512)
+    }
+
+    @Test
+    fun trimWithHighCalibrationStillLandsWithinTheWindowBudget() {
+        val history = longHistory(8_000)
+        val highCal = 2.0
+
+        val outcome = AgentHistoryTrimmer.trim(history, WINDOW, calibration = highCal)
+
+        assertTrue(outcome.trimmed)
+        val raw = rawEstimateOf(outcome.messages)
+        val calibrated = raw * highCal
+        assertTrue(
+            "cal=2.0 时裁剪后校准占用 $calibrated 必须落在窗口预算内，否则 CONTEXT_EXHAUSTED 必死",
+            calibrated <= budget(WINDOW) + 512,
+        )
+        assertTrue("高估模型裁剪后应保留有效历史（不是空）", outcome.messages.isNotEmpty())
+    }
+
+    @Test
+    fun trimWithLowCalibrationKeepsMoreHistoryThanUntrimmedComparison() {
+        // 低校准（raw 高估）时，同一条消息的校准占用更小，
+        // 裁剪线应换算后保留更多历史，而不是把窗口的 95% 都丢掉。
+        val history = longHistory(8_000)
+        val calLow = AgentHistoryTrimmer.trim(history, WINDOW, calibration = 0.25)
+        val calOne = AgentHistoryTrimmer.trim(history, WINDOW, calibration = 1.0)
+        assertTrue(calLow.trimmed && calOne.trimmed)
+        assertTrue(
+            "cal=0.25 应比 cal=1.0 保留更多历史（当前 calLow=${calLow.messages.size} calOne=${calOne.messages.size}）",
+            calLow.messages.size > calOne.messages.size,
+        )
+    }
+
+    private fun rawEstimateOf(messages: List<ConversationMessage>): Double {
+        val array = JSONArray()
+        messages.forEach { array.put(AgentConversationCodec.toJsonObject(it)) }
+        return AgentContextBudget.rawEstimate(array).toDouble()
+    }
+
+    private fun longJsonHistory(count: Int): List<JSONObject> =
+        List(count) { index ->
+            JSONObject()
+                .put("role", if (index % 2 == 0) "user" else "assistant")
+                .put("content", "这是第 $index 条消息，用来把历史撑到窗口以上。" + "内容".repeat(300))
+        }
 
     private fun longHistory(count: Int): List<ConversationMessage> =
         List(count) { index ->

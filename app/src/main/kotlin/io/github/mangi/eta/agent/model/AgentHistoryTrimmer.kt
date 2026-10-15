@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 装配 messages 之前的**窗口级兜底裁剪**。
@@ -19,6 +20,13 @@ import org.json.JSONArray
  * 因此用户侧记录不会丢失，只是模型看不到最旧的一段。
  * 本次 run 的 `messages` 数组会被就地替换为裁剪结果，后续轮次与终态快照基于裁剪后历史；
  * 恢复/续接时仍从完整持久历史 + transcript 重建，故裁剪是逐 run 生效的最后一道保险。
+ *
+ * 口径契约（体检 H2，v3.11.24）：
+ * - `limit` 用**窗口单位**（`window × TARGET_RATIO − systemEstimate − 工具预留`），
+ *   `systemEstimate` 由调用方传入**校准后**的值；
+ * - 内部 `costs`/`EMPTY_ESTIMATE` 是 **raw 估算**，比较前统一乘以 [calibration]
+ *   换算到窗口单位——避免 raw（本地估算）与窗口（实际 token）两种尺度混比，
+ *   否则 cal<1（raw 高估）时会过度裁剪、cal>1 时裁剪后仍超窗触发 CONTEXT_EXHAUSTED。
  */
 internal object AgentHistoryTrimmer {
 
@@ -42,37 +50,74 @@ internal object AgentHistoryTrimmer {
         val trimmed: Boolean get() = droppedMessages > 0
     }
 
+    data class JsonOutcome(
+        val messages: List<JSONObject>,
+        val droppedMessages: Int,
+    ) {
+        val trimmed: Boolean get() = droppedMessages > 0
+    }
+
     fun trim(
         history: List<AgentModelClient.ConversationMessage>,
         window: Int?,
         systemEstimate: Int = 0,
+        calibration: Double = 1.0,
     ): Outcome {
-        val safeWindow = window?.takeIf { it > 0 } ?: return Outcome(history, 0)
+        val jsonOutcome = trimJson(
+            history = history.map(AgentConversationCodec::toJsonObject),
+            window = window,
+            systemEstimate = systemEstimate,
+            calibration = calibration,
+        )
+        // 未裁剪时保持原引用（既有契约）；裁剪时才转换回 DTO。
+        if (!jsonOutcome.trimmed) return Outcome(history, 0)
+        return Outcome(
+            messages = jsonOutcome.messages.map(AgentConversationCodec::fromJsonObject),
+            droppedMessages = jsonOutcome.droppedMessages,
+        )
+    }
+
+    /**
+     * JSON 形态的裁剪：**保留原始 `_eta_*` 瞬态键**（思考签名、观察标记、屏幕上下文），
+     * 不做 `ConversationMessage` 往返重建——压缩路径已有签名守卫，裁剪路径必须对等，
+     * 否则签名回合内裁剪会剥掉 `_eta_anthropic_content_blocks` 导致后续每轮 400。
+     */
+    fun trimJson(
+        history: List<JSONObject>,
+        window: Int?,
+        systemEstimate: Int = 0,
+        calibration: Double = 1.0,
+    ): JsonOutcome {
+        val safeWindow = window?.takeIf { it > 0 } ?: return JsonOutcome(history, 0)
         val limit = (safeWindow * TARGET_RATIO).toInt() - systemEstimate - TOOL_SCHEMA_RESERVE_TOKENS
         // 窗口小到连系统提示都装不下：此时任何历史都只会让请求必然失败，只能不带历史。
-        if (limit <= 0) return Outcome(emptyList(), history.size)
+        if (limit <= 0) return JsonOutcome(emptyList(), history.size)
 
-        val costs = history.map(::costOf)
-        // 与 rawEstimate 同口径：固定开销 + 逐条成本，这样"裁剪后 ≤ limit"是精确不变量。
-        var total = EMPTY_ESTIMATE + costs.sum()
-        if (total <= limit) return Outcome(history, 0)
+        val costs = history.map(::costOfJson)
+        // 固定开销与逐条成本都是 raw 估算，统一乘 calibration 换算到窗口单位后与 limit 比较。
+        // Double 累计：逐条 toLong 会引入截断误差，导致裁剪停得过早（cal<1 时误差被放大）。
+        var total = EMPTY_ESTIMATE * calibration + costs.sumOf { it * calibration }
+        if (total <= limit) return JsonOutcome(history, 0)
 
         var start = 0
         while (start < history.size && total > limit) {
-            total -= costs[start]
+            total -= costs[start] * calibration
             start++
         }
         // 裁剪后首条不能是孤立的 tool 结果——它的 tool_calls 已被裁掉，
         // 多数服务商会直接以 400 拒绝这样的消息序列。
-        while (start < history.size && history[start].role == ROLE_TOOL) start++
-        if (start >= history.size) return Outcome(emptyList(), history.size)
-        return Outcome(history.subList(start, history.size), start)
+        while (start < history.size && history[start].optString("role") == ROLE_TOOL) start++
+        if (start >= history.size) return JsonOutcome(emptyList(), history.size)
+        return JsonOutcome(history.subList(start, history.size), start)
     }
 
     private fun costOf(message: AgentModelClient.ConversationMessage): Int {
         val json = runCatching { AgentConversationCodec.toJsonObject(message) }.getOrNull() ?: return 0
-        return (AgentContextBudget.rawEstimate(JSONArray().put(json)) - EMPTY_ESTIMATE).coerceAtLeast(0)
+        return costOfJson(json)
     }
+
+    private fun costOfJson(message: JSONObject): Int =
+        (AgentContextBudget.rawEstimate(JSONArray().put(message)) - EMPTY_ESTIMATE).coerceAtLeast(0)
 
     private const val ROLE_TOOL = "tool"
 }
