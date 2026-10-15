@@ -116,12 +116,13 @@ internal object AgentConversationStore {
                             }
                             // 已载入会话才允许 diff 写 checkpoint 与消息区；未载入（懒加载中/失败）时
                             // history/journal/messages 都是空占位，以空基线覆盖会清空库内整会话（H3）。
-                            // 双保险：污染态（全空占位 + 旧基线非空，即懒加载失败被误标为已载入）下，
-                            // checkpoint 与消息区一律跳过——不得以空列表清掉库内已有数据；
-                            // 用户手动删光消息时 history/journal 仍非空，不会命中此防御。
+                            // 双保险：污染态（全空占位）下 checkpoint 与消息区一律跳过——不得以空列表
+                            // 清掉库内已有数据。判据不依赖 old 基线（save 路径可能不累积基线），
+                            // 直接查库内是否已有消息兜底；用户手动删光消息时 history/journal 仍非空，
+                            // 不会命中此防御；新建会话（库内无消息）正常写入。
                             val emptyPollution = state.messages.isEmpty() &&
                                 state.history.isEmpty() && state.journal.isEmpty() &&
-                                oldMessages.isNotEmpty()
+                                (oldMessages.isNotEmpty() || dao.messageCount(id) > 0)
                             if ((old == null || state.messagesLoaded) && !emptyPollution) {
                                 if (old == null || state.history != old.history || state.journal != old.journal) {
                                     val missing = dao.contextCheckpointRow(id) == null
