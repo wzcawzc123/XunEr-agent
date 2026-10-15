@@ -10,6 +10,8 @@ internal class AgentContextCompactor(
     private val provider: AgentProviderClient,
     private val controller: AgentRunController,
     private val roleplay: Boolean = false,
+    /** 校准系数（H2 同口径）：raw 估算 × calibration ≈ 窗口/实际单位，缺省 1.0（未校准/测试）。 */
+    private val calibration: Double = 1.0,
 ) {
     private var overflowShrinks = 0
 
@@ -112,6 +114,16 @@ internal class AgentContextCompactor(
                 "摘要只把上下文从约 $beforeEstimate 降到 $afterEstimate tokens，不足以抵偿压缩自身的开销；原始上下文已保留。",
             )
         }
+        // C1（v3.11.24）：压完必须落在触发线以下（校准口径），否则下一轮 usage 一到立即
+        // 再次触发压缩——成功路径上的压缩风暴。相对降幅挡不住"cal>1 时压完仍超线"。
+        val trigger = AgentContextBudget.triggerTokens(config.contextWindow)
+        if (trigger != null && afterEstimate.toDouble() * calibration >= trigger) {
+            throw failure(
+                "CONTEXT_NO_REDUCTION",
+                "压缩后上下文（约 ${(afterEstimate * calibration).toInt()}）仍高于触发线 $trigger，" +
+                    "压完会立刻再次触发压缩；原始上下文已保留。",
+            )
+        }
         return result
     }
 
@@ -146,10 +158,12 @@ internal class AgentContextCompactor(
     private fun compactEnd(history: List<JSONObject>): Int? {
         val retain = AgentContextBudget.retainTokens(config.contextWindow)
         if (retain == null) return (history.size downTo 1).firstOrNull { canSplit(history, it) }
-        var used = 0
+        var used = 0.0
         var from = history.size
         while (from > 1) {
-            val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1]))
+            // C1（v3.11.24）：retain 是窗口单位预算，成本须乘 calibration 换算同口径，
+            // 否则 cal<1 时实际保留仅 cal×0.16W（缩水 2~4 倍）、cal>1 时可超 trigger。
+            val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1])) * calibration
             if (used + cost > retain) break
             used += cost
             from--

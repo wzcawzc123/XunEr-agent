@@ -133,10 +133,13 @@ class AgentContextCompactionTest {
 
     @Test
     fun summaryInputIsBoundedAndDropsOldestBeyondBudget() {
-        // 窗口 50k → 摘要输入预算 = 50_000/2 = 25_000 → 下限 32_000 字符
-        val turns = (1..6).flatMap { turn -> listOf(
+        // 窗口 50k → 摘要输入预算 = 50_000/2 = 25_000 → 下限 32_000 字符。
+        // C1（v3.11.24）：compactEnd 按校准口径保留近期历史后，进入摘要的部分变小，
+        // 故放大轮次/消息长度，确保校准口径（默认 0.25）下摘要输入仍超过 32k 字符预算、
+        // boundSummaryInput 截断仍会被触发（本测试验证的正是该截断逻辑）。
+        val turns = (1..12).flatMap { turn -> listOf(
             AgentModelClient.ConversationMessage("user", "任务 $turn"),
-            AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(3000) + "turn$turn"),
+            AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(6000) + "turn$turn"),
         ) }
         var compactionInputChars = -1
         var summaries = 0

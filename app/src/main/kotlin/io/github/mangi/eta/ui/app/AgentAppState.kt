@@ -424,6 +424,11 @@ internal class AgentAppState(
                 }
             }
             orphanRewrites.forEach { (conversationId, runId) ->
+                // C8（v3.11.24）：孤儿判定在上一个 Main 块完成，两个 Main 块之间有协程让出窗口；
+                // 用户恰好在窗口内发起的 rewrite 此时 currentRunId 已指向它——绝不是孤儿，
+                // 跳过，让正常 applyRunResult 处理真结果。否则会被写入失败通知并占 appliedRuntimeRunIds，
+                // 真结果到达时被幂等守卫丢弃（改写内容丢失 + 假"重新生成已中断"提示）。
+                if (runId == currentRunId) return@forEach
                 ensureConversationLoaded(conversationId)?.let { state ->
                     updateConversation(conversationId, RoleplayConversationReducer.applyRewrite(state, runId,
                         AgentRuntimeWire.RunResult(runId, false, "", "重新生成已中断，原回复已保留。",
@@ -1014,39 +1019,11 @@ internal class AgentAppState(
         // 快照与 runtimeConfigFor(runModelId) 同源、同步可读），回退 loadConfig()，再回退保守
         // 默认。旧实现只读 loadConfig()（依赖 remote prefs，Xposed 未连接时 window=null →
         // 守卫整段静默跳过；且取的是默认模型而非绑定模型窗口，与实际运行窗口可能错位）。
-        if (editBoundary != null && editBoundary.historyPrefix.isNotEmpty()) {
-            val guardWindow = providers.enabledModel(homeState.effectiveModelId)?.model?.effectiveContextWindow
-                ?: AgentModelClient.loadConfig().contextWindow
-                ?: GUARD_FALLBACK_WINDOW_TOKENS
-            val lastInput = homeState.messages.asReversed()
-                .filterIsInstance<AgentMessageUi>()
-                .mapNotNull { it.usage?.inputTokens }
-                .firstOrNull()
-            val measuredOverhead = lastInput?.let { real ->
-                (real - AgentContextBudget.rawEstimate(
-                    JSONArray().also { h ->
-                        homeState.history.forEach { h.put(AgentConversationCodec.toJsonObject(it)) }
-                    },
-                )).coerceAtLeast(0)
-            }
-            // 固定开销保底：raw 已知高估时实测差值可能归零（system/memory/tools 不计入），
-            // 强制保留工具 schema 预留下限，避免守卫因 overhead 归零而失效。
-            val guardOverhead = maxOf(measuredOverhead ?: 0, AgentHistoryTrimmer.TOOL_SCHEMA_RESERVE_TOKENS)
-            val estimate = AgentContextBudget.rawEstimate(
-                JSONArray().also { arr ->
-                    editBoundary.historyPrefix.forEach { arr.put(AgentConversationCodec.toJsonObject(it)) }
-                },
-            ) + guardOverhead
-            // 阈值留 5% 余量（与硬裁剪 TARGET_RATIO 0.95 对齐），避免在窗口边界处发出必败请求。
-            if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
-                Toast.makeText(
-                    appContext,
-                    "编辑重发的前缀历史接近上下文上限，建议先手动压缩历史或新建会话；本次未发送",
-                    Toast.LENGTH_LONG,
-                ).show()
-                cancelMessageEdit()
-                return
-            }
+        if (editBoundary != null && editBoundary.historyPrefix.isNotEmpty() &&
+            guardHistoryPrefix(editBoundary.historyPrefix, homeState.history, "编辑重发")
+        ) {
+            cancelMessageEdit()
+            return
         }
 
         val conversationId = selectedConversationId ?: newConversationId().also {
@@ -1097,7 +1074,10 @@ internal class AgentAppState(
             userHistoryMessage = userHistoryMessage,
             messages = messages,
             state = homeState.copy(
-                journal = editBoundary?.journalPrefix?.takeIf { it.isNotEmpty() } ?: homeState.journal,
+                // C6（v3.11.24）：编辑首条消息时 journalPrefix 为空列表，不得回退全量 journal
+                //（含被编辑抛弃的旧正文与旧后缀——否则二次编辑按 journal 定位会把幽灵分支
+                // 重新带进历史，逐次编辑逐次膨胀）。与 history 的"空即空"语义保持一致。
+                journal = editBoundary?.journalPrefix ?: homeState.journal,
                 input = "",
                 pendingImages = emptyList(),
                 pendingFileReferences = emptyList(),
@@ -1154,6 +1134,55 @@ internal class AgentAppState(
             )
         )
         if (boundary.contextWasCompacted) showCompactedRevisionNotice()
+    }
+
+    /**
+     * 前缀历史发送前容量守卫（R2/H4/C5 共享）。
+     *
+     * 携带全量前缀历史的高风险入口（编辑重发/regenerate/续跑）都在发出前检查：
+     * raw 估算 + 固定开销 ≥ 绑定模型窗口×0.95 时拦截，提示手动压缩或新建会话。
+     * 窗口与 run 同源（会话绑定模型 → loadConfig → 保守默认），固定开销保底 24K。
+     *
+     * @return true 表示应拦截（调用方负责自己的收尾，如编辑分支 cancelMessageEdit）
+     */
+    private fun guardHistoryPrefix(
+        prefix: List<AgentModelClient.ConversationMessage>,
+        overheadHistory: List<AgentModelClient.ConversationMessage>,
+        entryLabel: String,
+    ): Boolean {
+        if (prefix.isEmpty()) return false
+        val guardWindow = providers.enabledModel(homeState.effectiveModelId)?.model?.effectiveContextWindow
+            ?: AgentModelClient.loadConfig().contextWindow
+            ?: GUARD_FALLBACK_WINDOW_TOKENS
+        val lastInput = homeState.messages.asReversed()
+            .filterIsInstance<AgentMessageUi>()
+            .mapNotNull { it.usage?.inputTokens }
+            .firstOrNull()
+        val measuredOverhead = lastInput?.let { real ->
+            (real - AgentContextBudget.rawEstimate(
+                JSONArray().also { h ->
+                    overheadHistory.forEach { h.put(AgentConversationCodec.toJsonObject(it)) }
+                },
+            )).coerceAtLeast(0)
+        }
+        // 固定开销保底：raw 已知高估时实测差值可能归零（system/memory/tools 不计入），
+        // 强制保留工具 schema 预留下限，避免守卫因 overhead 归零而失效。
+        val guardOverhead = maxOf(measuredOverhead ?: 0, AgentHistoryTrimmer.TOOL_SCHEMA_RESERVE_TOKENS)
+        val estimate = AgentContextBudget.rawEstimate(
+            JSONArray().also { arr ->
+                prefix.forEach { arr.put(AgentConversationCodec.toJsonObject(it)) }
+            },
+        ) + guardOverhead
+        // 阈值留 5% 余量（与硬裁剪 TARGET_RATIO 0.95 对齐），避免在窗口边界处发出必败请求。
+        if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
+            Toast.makeText(
+                appContext,
+                "${entryLabel}的前缀历史接近上下文上限，建议先手动压缩历史或新建会话；本次未发送",
+                Toast.LENGTH_LONG,
+            ).show()
+            return true
+        }
+        return false
     }
 
     fun cancelMessageEdit() {
@@ -1223,6 +1252,8 @@ internal class AgentAppState(
         if (homeState.roleplay != null) {
             val target = homeState.messages.filterIsInstance<AgentMessageUi>().firstOrNull { it.id == messageId } ?: return
             val prefix = RoleplayConversationReducer.rewriteHistory(homeState, messageId) ?: return
+            // C5（v3.11.24）：regenerate 与编辑重发同等规模前缀，同样过容量守卫。
+            if (guardHistoryPrefix(prefix, homeState.history, "重新生成")) return
             val runId = "run-${UUID.randomUUID()}"
             launchConversationRun(
                 conversationId, runId, target.content, emptyList(), prefix, null, homeState.messages,
@@ -1234,6 +1265,8 @@ internal class AgentAppState(
             return
         }
         val boundary = AgentConversationRevisionReducer.boundary(homeState, messageId) ?: return
+        // C5（v3.11.24）：普通重发同样携带边界前缀，过容量守卫。
+        if (guardHistoryPrefix(boundary.historyPrefix, homeState.history, "重新生成")) return
         val images = boundary.userMessage.images.mapIndexed { index, dataUrl ->
             PendingImageUi(
                 id = "regenerate-${boundary.userMessage.id}-$index",
@@ -1311,6 +1344,9 @@ internal class AgentAppState(
     }
 
     private fun resumeInterruptedRunNow(pending: ResumableInterruptedRun, state: AgentChatHomeUiState) {
+        // C5（v3.11.24）：续跑以完整 history 为基，规模与编辑重发同级，同样过容量守卫——
+        // 超窗续跑会重演"Runtime 运行失败"；拦截时保留 resumableInterruptedRun 供压缩后重试。
+        if (guardHistoryPrefix(state.history, state.history, "续跑")) return
         launchConversationRun(
             conversationId = pending.conversationId,
             runId = java.util.UUID.randomUUID().toString(),
@@ -1887,13 +1923,19 @@ internal class AgentAppState(
         if (rewriting) {
             val conversationId = conversationIdForRun(runId)
             val existing = conversationsById[conversationId]
-            if (conversationId != null && existing != null && result.contextSnapshotRef.isBlank()) {
+            // C7（v3.11.24）：错误结果（ok=false）即使带 contextSnapshotRef（客户端绑定失败/
+            // 中断/发送失败返回 ref=runId）也必须 applyRewrite 收尾——否则 pendingRewrites 残留、
+            // 失败提示缺失。仅"成功但需回读 snapshot"（ok=true 且 ref 非空）才保留等待回读。
+            val needsReadback = result.ok && result.contextSnapshotRef.isNotBlank()
+            if (conversationId != null && existing != null &&
+                (result.contextSnapshotRef.isBlank() || !result.ok)
+            ) {
                 updateConversation(conversationId, RoleplayConversationReducer.applyRewrite(existing, runId, result))
             } else setConversationStreaming(runId, false)
             runMessageProjector.clearRun(runId)
             runConversationIds.remove(runId)
             refreshConversationSummaries()
-            persistConversations(onSaved = if (acknowledgeRuntimeResult && result.contextSnapshotRef.isBlank()) {
+            persistConversations(onSaved = if (acknowledgeRuntimeResult && !needsReadback) {
                 { AgentRuntimeClient(appContext, AndroidAgentLogger).ackResult(runId) }
             } else null)
             return

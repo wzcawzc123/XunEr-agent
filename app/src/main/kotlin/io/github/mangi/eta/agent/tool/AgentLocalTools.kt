@@ -181,6 +181,17 @@ internal class AgentLocalTools(
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
+            // C9（v3.11.24）：run 被取消（新 run 接管旧 run）会触发 close() 置 closed；
+            // 正在执行的工具副作用无法中断，但**下一个**工具调用必须被拒绝——
+            // 否则旧 run 继续执行工具，与新 run 的 observe/tap 交错（动作重叠/点错）。
+            if (closed.get()) {
+                return@runCatching textResult(
+                    errorResult(
+                        code = "TOOL_INTERRUPTED",
+                        message = "运行已取消，工具未执行；不要自动重放该调用。",
+                    ),
+                )
+            }
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
             if (AgentToolRequirements.find(toolCall.name) != null &&
                 AgentToolRequirements.rootDenied(toolCall.name, args, rootAvailable())

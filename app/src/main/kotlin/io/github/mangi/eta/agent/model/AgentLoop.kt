@@ -145,9 +145,19 @@ internal class AgentLoop(
                 // 工具结果提交后 pending 即解除，下一轮再按需裁剪，因此这里直接延后。
                 !AnthropicEphemeralState.hasPendingToolResponse(messages)
             ) {
-                val systemEstimate = context.budgetEstimate(
-                    JSONArray().apply { for (index in 0 until systemCount) put(messages.getJSONObject(index)) },
-                )
+                // C4（v3.11.24）：roleplay 固定开销（persona/worldbook/depth/postHistory 注入
+                // 可达数万 token）必须计入 systemEstimate，否则 limit 偏大 → 保留过多 →
+                // afterTrimTokens（投影后）仍超线 → CONTEXT_EXHAUSTED 死角。
+                // 用"投影后请求 − 投影后历史"的净固定开销；非 roleplay 时投影返回原引用，
+                // 差值与旧"裸 system 估算"等价。
+                val systemEstimate = run {
+                    val projected = AssistantScreenContextProjection.project(
+                        roleplayContext?.projectMessages(messages) ?: messages,
+                    )
+                    val historyOnly = JSONArray()
+                    for (index in systemCount until projected.length()) historyOnly.put(projected.getJSONObject(index))
+                    (context.budgetEstimate(projected) - context.budgetEstimate(historyOnly)).coerceAtLeast(0)
+                }
                 // H1（v3.11.24）：直接在原始 JSONObject 上裁剪，保留 _eta_* 瞬态键
                 //（思考签名块、观察标记、屏幕上下文）——ConversationMessage 往返会剥掉它们。
                 val history = (systemCount until messages.length()).map { messages.getJSONObject(it) }
@@ -166,6 +176,13 @@ internal class AgentLoop(
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )
+                // C2（v3.11.24）：裁剪后必须重放 prune 与 strip——它们只改出站副本且幂等，
+                // 否则纯文本模型（supportsVision=false）在裁剪轮会把图片块发出去（必然 400），
+                // 超大工具结果也以未修剪原文发出。重放后预算估算口径与真实请求一致。
+                requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
+                if (!config.supportsVision) {
+                    requestMessages = AgentConversationCodec.stripImagesForTextOnlyModel(requestMessages)
+                }
                 val afterTrimTokens = context.budgetEstimate(requestMessages, roundTools)
                 if (afterTrimTokens >= trimWindow) {
                     // 摘要+硬裁都救不回来(如 system 本身接近/超过窗口)：返回可恢复的结构化错误，

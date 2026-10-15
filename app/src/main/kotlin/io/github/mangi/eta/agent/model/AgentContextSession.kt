@@ -114,7 +114,10 @@ internal class AgentContextSession(
         val operation = java.util.UUID.randomUUID().toString()
         onEvent(AgentEvent.ContextCompaction(operation, AgentEvent.ContextCompaction.PHASE_STARTED, before))
         try {
-            val candidate = AgentContextCompactor(config, provider, runController, roleplay = roleplay).compact(
+            val candidate = AgentContextCompactor(
+                config, provider, runController, roleplay = roleplay,
+                calibration = budget.calibrationValue(),
+            ).compact(
                 messages, systemCount, sensitiveIds(),
             )
             runController.throwIfCancelled()
