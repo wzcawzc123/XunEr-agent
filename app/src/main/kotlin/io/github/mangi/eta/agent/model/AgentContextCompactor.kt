@@ -13,8 +13,6 @@ internal class AgentContextCompactor(
     /** 校准系数（H2 同口径）：raw 估算 × calibration ≈ 窗口/实际单位，缺省 1.0（未校准/测试）。 */
     private val calibration: Double = 1.0,
 ) {
-    private var overflowShrinks = 0
-
     fun compact(
         messages: JSONArray,
         systemCount: Int,

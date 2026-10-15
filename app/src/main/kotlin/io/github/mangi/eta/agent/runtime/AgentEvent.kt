@@ -42,6 +42,18 @@ internal sealed interface AgentEvent {
         override fun toLogLine(): String = "history_trimmed dropped=$droppedMessages"
     }
 
+    /**
+     * 遥测：模型服务商连续未返回 usage（如 OpenRouter 显式不带 include_usage）时发出，
+     * 用于暴露"自动压缩停摆"（inputTokens 恒 null，压缩触发线不可达，只剩硬裁剪兜底）。
+     * 纯诊断事件，UI 可忽略；仅当 [missingRounds] 达到阈值后触发一次，不再重复刷屏。
+     */
+    data class CompactionUnavailable(
+        val operationId: String,
+        val missingRounds: Int,
+    ) : AgentEvent {
+        override fun toLogLine(): String = "compaction_unavailable missing_usage_rounds=$missingRounds"
+    }
+
     data class RunStarted(
         val initialImages: Int,
         val initialImageBytes: Int,

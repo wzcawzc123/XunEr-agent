@@ -29,6 +29,8 @@ internal class AgentRunMessageProjector(
     ): List<AgentChatMessageUi> = when (event) {
         // 本 fork 新增事件：硬裁剪只改浮层提示，不产生聊天消息
         is AgentEvent.HistoryTrimmed -> messages
+        // 遥测事件：不产生聊天消息，仅日志可观测
+        is AgentEvent.CompactionUnavailable -> messages
         is AgentEvent.AssistantBlockStart -> startAssistantBlock(runId, event, messages)
         is AgentEvent.AssistantBlockDelta -> when (event.kind) {
             AgentEvent.AssistantBlockKind.TEXT ->

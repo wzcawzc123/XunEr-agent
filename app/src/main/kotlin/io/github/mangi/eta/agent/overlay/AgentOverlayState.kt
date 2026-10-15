@@ -53,6 +53,9 @@ private fun AgentOverlayState.projectEvent(event: AgentEvent): AgentOverlayState
         detailText = "上下文已硬裁剪：丢弃 ${event.droppedMessages} 条较旧消息",
     )
 
+    // 遥测事件：不改变阶段与提示，仅日志可观测
+    is AgentEvent.CompactionUnavailable -> this
+
     is AgentEvent.AssistantBlockDelta -> when (event.kind) {
         AgentEvent.AssistantBlockKind.TEXT -> appendStreamingText(event)
         AgentEvent.AssistantBlockKind.THINKING -> copy(thought = appendThought(thought, event.delta))

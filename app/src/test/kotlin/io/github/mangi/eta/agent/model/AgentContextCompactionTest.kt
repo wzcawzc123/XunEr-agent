@@ -411,6 +411,30 @@ class AgentContextCompactionTest {
         assertEquals(finalText, result.transcript.last().content)
     }
 
+    @Test
+    fun missingUsageRoundsEmitCompactionUnavailableOnce() {
+        // C3b（v3.11.26）：服务商连续不回 usage（input_tokens 为 null）时自动压缩停摆；
+        // 达到阈值后发一次 CompactionUnavailable 诊断事件（不每轮刷屏）。
+        val events = mutableListOf<AgentEvent>()
+        val messages = jsonHistory()
+        val session = AgentContextSession(
+            config, messages, 1, "operation",
+            provider { _, _ -> response("完成") },
+            AgentRunController(), { emptySet() },
+            onEvent = events::add,
+            onContextSnapshot = {},
+        )
+        repeat(4) { session.observeInputTokens(null) }
+        val diagnostics = events.filterIsInstance<AgentEvent.CompactionUnavailable>()
+        assertEquals("连续缺失达阈值后应恰好发一次诊断事件", 1, diagnostics.size)
+        assertEquals("触发当轮计数即阈值 3", 3, diagnostics.single().missingRounds)
+
+        // 收到 usage 后计数复位：再连续缺失一轮不补发（还差两轮才到阈值）。
+        session.observeInputTokens(1_000)
+        session.observeInputTokens(null)
+        assertEquals(1, events.filterIsInstance<AgentEvent.CompactionUnavailable>().size)
+    }
+
     private fun history() = (1..6).flatMap { turn -> listOf(
         AgentModelClient.ConversationMessage("user", "问题 $turn"),
         AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(1000)),

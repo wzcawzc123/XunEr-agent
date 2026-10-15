@@ -21,6 +21,8 @@ internal class AgentContextSession(
     private val contextWindow = config.knownContextWindow
     private var inputTokens: Int? = null
     private var compacted = false
+    /** C3b：连续未收到 usage 的轮数（服务商不回 input_tokens 时自动压缩停摆的遥测）。 */
+    private var missingUsageRounds = 0
 
     /**
      * 压缩失败熔断（只在本次 run 内生效）。
@@ -53,6 +55,17 @@ internal class AgentContextSession(
 
     fun observeInputTokens(tokens: Int?) {
         inputTokens = tokens?.takeIf { it >= 0 }
+        // C3b（v3.11.26）：连续多轮未收到 usage（服务商不回 input_tokens）→ 发诊断事件，
+        // 暴露"自动压缩停摆"（inputTokens 恒 null，触发线不可达，只剩硬裁剪兜底）。
+        // 只在达到阈值后触发一次，避免每轮刷屏。
+        if (inputTokens == null) {
+            missingUsageRounds++
+            if (missingUsageRounds == MISSING_USAGE_EVENT_THRESHOLD) {
+                onEvent(AgentEvent.CompactionUnavailable(operationId, missingUsageRounds))
+            }
+        } else {
+            missingUsageRounds = 0
+        }
     }
 
     /** 用实测校准本地估算；AgentLoop 在收到 usage 后调用。 */
@@ -160,5 +173,8 @@ internal class AgentContextSession(
          * 真源在 [AgentContextBudget]，实际阈值取窗口比例与「窗口 − 输出预留 − 余量」的较小者，见 `triggerTokens`。
          */
         const val TRIGGER_RATIO = AgentContextBudget.TRIGGER_RATIO
+
+        /** C3b：连续未收到 usage 达到此轮数才发 CompactionUnavailable 诊断事件。 */
+        private const val MISSING_USAGE_EVENT_THRESHOLD = 3
     }
 }

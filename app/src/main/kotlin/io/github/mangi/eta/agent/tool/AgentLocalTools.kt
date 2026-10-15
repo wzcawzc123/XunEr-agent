@@ -155,9 +155,16 @@ internal class AgentLocalTools(
     private val publishedObservation = AtomicReference(PublishedObservation())
 
     /** 屏幕内容版本：observe 记录基线；滚动/滑动递增，用于坐标过期判定。 */
+    @Volatile
     private var contentVersion = 0L
+
+    @Volatile
     private var observedContentVersion = -1L
+
+    @Volatile
     private var observedPackage: String? = null
+
+    @Volatile
     private var observedScreen: Pair<Int, Int>? = null
     private val runAvailableSkillIds = runAvailableSkillIds
         .mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup)
@@ -166,6 +173,10 @@ internal class AgentLocalTools(
     private val pendingSkillConflict = AtomicReference(pendingSkillConflict)
     private val inspectedGitHubSnapshots =
         ConcurrentHashMap<String, GitHubInspectionSnapshot>()
+
+    /** L14：重复同参失败的熔断状态（同 tool+同参指纹连续失败计数）。 */
+    private var lastFailedCallFingerprint: String? = null
+    private var failedCallStreak = 0
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -229,9 +240,9 @@ internal class AgentLocalTools(
                 "tap_element" -> afterAction(tapElement(args))
                 "long_press" -> afterAction(longPress(args))
                 "long_press_element" -> afterAction(longPressElement(args))
-                "swipe" -> afterAction(swipe(args).also { contentVersion++ })
-                "scroll" -> afterAction(deviceController.scroll(args.optString("direction"), args.optString("amount")).also { contentVersion++ })
-                "scroll_element" -> afterAction(scrollElement(args).also { contentVersion++ })
+                "swipe" -> afterAction(swipe(args)).also { if (it.content.isOkJson()) contentVersion++ }
+                "scroll" -> afterAction(deviceController.scroll(args.optString("direction"), args.optString("amount"))).also { if (it.content.isOkJson()) contentVersion++ }
+                "scroll_element" -> afterAction(scrollElement(args)).also { if (it.content.isOkJson()) contentVersion++ }
                 "type_text" -> afterAction(typeText(args))
                 // 旧会话或旧入口仍可能请求这些工具名；保留执行路径，但不再出现在模型目录里。
                 "input_text" -> afterAction(inputText(args))
@@ -286,6 +297,36 @@ internal class AgentLocalTools(
             } else {
                 result.copy(sensitive = true)
             }
+        }.let { result ->
+            // L14（v3.11.26）：GUI/工具域重复同参失败熔断——模型原样重发同一组注定失败的参数
+            //（缺 coordinate_space 的 tap、同 query 的 LOCATE_MISS、脱敏占位重放等）时，
+            // 唯一防线是错误文案"不要原样重发"（引导可被忽略）。这里加机械护栏：
+            // 同 tool + 同参指纹连续失败 ≥3 次 → 返回 DUPLICATE_CALL 强制换参/结束。
+            if (!result.content.isOkJson()) {
+                val fingerprint = toolCall.name + "\u0000" + toolCall.argumentsJson
+                if (fingerprint == lastFailedCallFingerprint) {
+                    failedCallStreak++
+                } else {
+                    lastFailedCallFingerprint = fingerprint
+                    failedCallStreak = 1
+                }
+                if (failedCallStreak >= DUPLICATE_CALL_THRESHOLD) {
+                    val code = runCatching { JSONObject(result.content).optString("code") }
+                        .getOrNull()?.takeIf { it.isNotBlank() } ?: "TOOL_ERROR"
+                    return@let textResult(
+                        errorResult(
+                            code = "DUPLICATE_CALL",
+                            message = "同一工具以相同参数连续失败 $failedCallStreak 次（上次错误：$code）。" +
+                                "请停止原样重发：修正参数或换一种方式（先 observe_screen 重新观察/改写 query/换坐标源）。" +
+                                "若确需重试同一调用，先执行一次不同的操作再回来。",
+                        ),
+                    )
+                }
+            } else {
+                failedCallStreak = 0
+                lastFailedCallFingerprint = null
+            }
+            result
         }
 
     private fun deviceToolPermissionError(
@@ -1908,6 +1949,9 @@ internal class AgentLocalTools(
     )
 
     private companion object {
+        /** L14：同 tool+同参连续失败达到此阈值即熔断为 DUPLICATE_CALL（机械护栏，照抄 memory_get 的 DUPLICATE_PAGE 模式）。 */
+        const val DUPLICATE_CALL_THRESHOLD = 3
+
         val DEVICE_DIRECT_TOOL_NAMES = io.github.mangi.eta.agent.model.AgentPhoneToolCatalog.direct + setOf(
             "set_alarm",
             "set_timer",

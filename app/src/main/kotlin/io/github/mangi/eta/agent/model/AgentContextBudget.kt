@@ -48,8 +48,16 @@ internal class AgentContextBudget(private val window: Int?) {
     fun exceedsWindow(tokens: Int): Boolean = window?.takeIf { it > 0 }?.let { tokens >= it } == true
 
     companion object {
-        /** 未获得实测前的保守初值（真机实测估算高估约 4.82 倍，按 1/4 折算）。 */
-        private const val DEFAULT_CALIBRATION = 0.25
+        /**
+         * 未获得实测前的保守初值。
+         *
+         * 从 0.25 提到 0.4（C3a，v3.11.26）：0.25 源自单一真机样本（估算高估 4.82 倍），
+         * 但中文密集会话实际校准系数约 0.6-0.7——初值 0.25 使恢复型 run 首轮 gate 需
+         * actual≈2.4×窗口 才裁剪，留下 [窗口, 2.4×窗口) 盲区（超窗裸发 → CONTEXT_OVERFLOW）。
+         * 0.4 仍低于中文密集实际值，盲区缩到 [窗口, 1.6×窗口)，同时不会在窗口内误裁
+         * （高估模型下 0.4 折算点远在窗口内，一旦收到 usage 立即被实测校准覆盖）。
+         */
+        private const val DEFAULT_CALIBRATION = 0.4
 
         /** 校准系数下限：允许向下修正到 1/10（估算高估时靠它拉回实测附近）。 */
         private const val MIN_CALIBRATION = 0.1
@@ -87,8 +95,6 @@ internal class AgentContextBudget(private val window: Int?) {
 
         /** 触发线的绝对上限；0 表示不设上限（按 harness 行为纯比例）。 */
         const val ABSOLUTE_TRIGGER_CAP = 0
-
-        const val RECENT_MESSAGES = 4
 
         /** 触发压缩的占用阈值：窗口比例与「窗口 − 输出预留 − 余量」取小；窗口无效时返回 null。 */
         fun triggerTokens(window: Int?): Int? {

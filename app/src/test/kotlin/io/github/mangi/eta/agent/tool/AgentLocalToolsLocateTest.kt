@@ -192,6 +192,38 @@ class AgentLocalToolsLocateTest {
         tools.close()
     }
 
+    @Test
+    fun repeatedIdenticalFailedCallIsFusedToDuplicateCall() {
+        // L14（v3.11.26）：同 tool+同参连续失败 ≥3 次 → DUPLICATE_CALL 机械护栏，
+        // 阻止模型原样重发注定失败的调用（缺 coordinate_space 的 tap 等）。
+        val tools = tools { observation("o-tap", nodes = listOf(node(0, "打开"))) }
+        fun tap(): AgentModelClient.ToolResult = tools.execute(
+            AgentModelClient.ToolCall(
+                id = "call-tap",
+                name = "tap_element",
+                argumentsJson = """{"observation_id":"o-tap","index":7}""", // 树里没有 index=7
+            ),
+        )
+        val first = JSONObject(tap().content)
+        assertEquals("payload=$first", "INVALID_NODE_INDEX", first.getString("code"))
+        val second = JSONObject(tap().content)
+        assertEquals("payload=$second", "INVALID_NODE_INDEX", second.getString("code"))
+        // 第三次同参失败：熔断为 DUPLICATE_CALL，引导换参而非继续重试。
+        val third = JSONObject(tap().content)
+        assertEquals("payload=$third", "DUPLICATE_CALL", third.getString("code"))
+        // 换不同参数后 streak 复位：同一工具不同参数不会被误熔断。
+        val different = tools.execute(
+            AgentModelClient.ToolCall(
+                id = "call-tap",
+                name = "tap_element",
+                argumentsJson = """{"observation_id":"o-tap","index":-1}""",
+            ),
+        )
+        val differentPayload = JSONObject(different.content)
+        assertEquals("payload=$differentPayload", "INVALID_NODE_INDEX", differentPayload.getString("code"))
+        tools.close()
+    }
+
     private fun call(args: String) = AgentModelClient.ToolCall(
         id = "call-locate",
         name = "locate_on_screen",
