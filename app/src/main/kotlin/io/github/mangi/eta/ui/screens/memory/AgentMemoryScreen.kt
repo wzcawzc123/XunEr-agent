@@ -91,6 +91,8 @@ internal fun AgentMemoryScreen(
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
+    var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -137,7 +139,18 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                MemoryTargetSwitcher(state = state, onAction = onAction)
+                MemoryTargetSwitcher(
+                    state = state,
+                    onRequestSwitch = { target ->
+                        // P2：有未保存草稿时先确认，避免误触切换丢编辑。
+                        if (state.hasUnsavedChanges && target != state.target) {
+                            pendingTargetSwitch = target
+                        } else {
+                            onAction(AgentMemoryAction.SwitchTarget(target))
+                        }
+                    },
+                    onRollup = { onAction(AgentMemoryAction.Rollup) },
+                )
                 MemorySettingsGroup(state = state, onAction = onAction)
             }
             MemoryHeatmapSection()
@@ -180,6 +193,27 @@ internal fun AgentMemoryScreen(
         }
     }
 
+    // P2（v3.11.28）：切换 long/short 目标前有未保存草稿 → 确认后丢弃并切换。
+    pendingTargetSwitch?.let { pending ->
+        EtaWindowDialog(
+            show = true,
+            title = "切换记忆目标",
+            summary = "当前有未保存的修改，切换会丢弃这些修改并载入${if (pending == MemoryTargetUi.Short) "短期" else "长期"}记忆。",
+            onDismissRequest = { pendingTargetSwitch = null },
+        ) {
+            MiuixDialogActions(
+                confirmText = "丢弃并切换",
+                destructive = true,
+                confirmEnabled = !state.isSaving,
+                onCancel = { pendingTargetSwitch = null },
+                onConfirm = {
+                    pendingTargetSwitch = null
+                    onAction(AgentMemoryAction.SwitchTarget(pending))
+                },
+            )
+        }
+    }
+
     state.notice?.let { notice ->
         EtaWindowDialog(
             show = true,
@@ -199,7 +233,8 @@ internal fun AgentMemoryScreen(
 @Composable
 private fun MemoryTargetSwitcher(
     state: AgentMemoryUiState,
-    onAction: (AgentMemoryAction) -> Unit,
+    onRequestSwitch: (MemoryTargetUi) -> Unit,
+    onRollup: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
     Row(
@@ -213,21 +248,21 @@ private fun MemoryTargetSwitcher(
             text = "长期记忆",
             selected = state.target == MemoryTargetUi.Long,
             enabled = !state.isLoading,
-            onClick = { onAction(AgentMemoryAction.SwitchTarget(MemoryTargetUi.Long)) },
+            onClick = { onRequestSwitch(MemoryTargetUi.Long) },
         )
         Spacer(modifier = Modifier.width(8.dp))
         TargetChip(
             text = "短期记忆",
             selected = state.target == MemoryTargetUi.Short,
             enabled = !state.isLoading,
-            onClick = { onAction(AgentMemoryAction.SwitchTarget(MemoryTargetUi.Short)) },
+            onClick = { onRequestSwitch(MemoryTargetUi.Short) },
         )
         Spacer(modifier = Modifier.weight(1f))
         if (state.target == MemoryTargetUi.Short) {
             EtaTextButton(
                 text = if (state.isSaving) "整理中…" else "整理到长期",
                 enabled = !state.isLoading && !state.isSaving,
-                onClick = { onAction(AgentMemoryAction.Rollup) },
+                onClick = onRollup,
             )
         } else {
             Text(
@@ -377,7 +412,8 @@ private fun MemoryDocumentCard(
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "MEMORY.md",
+                    // P1（v3.11.28）：按 target 区分标题，避免用户分不清编辑的是长期还是短期文件。
+                    text = if (state.target == MemoryTargetUi.Short) "MEMORY.md（短期）" else "MEMORY.md",
                     style = MiuixTheme.textStyles.body2,
                     fontWeight = FontWeight.Medium,
                     color = colors.onSurface,
