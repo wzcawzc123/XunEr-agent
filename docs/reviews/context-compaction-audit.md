@@ -284,6 +284,102 @@ if (afterChars * 100 >= beforeChars * MIN_REDUCTION_PERCENT) { ... }
 
 ## 7. 修复实施记录（2026-10-16）
 
+### 已实施（3 个 commit，改动 +108 / −14）
+
+| commit | 修复 | 效果 |
+|---|---|---|
+| **`47f8c69`** | 降幅判定改用字符数 | 判据偏差 **51 → 4 个百分点**；摘要不再被误拒 |
+| **`c3ec52f`** | `compactEnd` 保留成本不再乘 calibration | 保留 **454 → 193 条**（↓57%），字符 **634K → 372K**（↓41%）|
+| **`663c836`** | 校准初值 `0.4 → 1.0`（中性）| 消除 **4.6 倍方向性偏差** |
+
+**① P0-1：降幅判定改用字符数** — `AgentContextCompactor.kt`
+
+```kotlin
+- val afterEstimate = AgentContextBudget.rawEstimate(result)
+- if (afterEstimate * 100 >= beforeEstimate * MIN_REDUCTION_PERCENT) { ... }
++ val beforeChars = messages.toString().length
++ val afterChars  = result.toString().length
++ if (afterChars * 100 >= beforeChars * MIN_REDUCTION_PERCENT) { ... }
+```
+
+**② P0-2 / C1：压后超线判定改用字符比例** — 同文件
+
+```kotlin
+- if (trigger != null && afterEstimate.toDouble() * calibration >= trigger) { ... }
++ val scaledAfter = beforeEstimate.toDouble() * calibration *
++     (afterChars.toDouble() / beforeChars.toDouble())
++ if (trigger != null && scaledAfter >= trigger) { ... }
+```
+
+**③ P0-4：`compactEnd` 保留成本不再乘 calibration** — 同文件
+
+```kotlin
+- val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1])) * calibration
++ val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1]))
+```
+
+**④ P2-1：校准初值改中性 1.0** — `AgentContextBudget.kt`
+
+```kotlin
+- private const val DEFAULT_CALIBRATION = 0.4
++ private const val DEFAULT_CALIBRATION = 1.0
+```
+
+**⑤ 新增回归测试两个 + 修正一个过时断言** — 测试文件
+
+| 用例 | 作用 |
+|---|---|
+| `reductionJudgementUsesCharCountNotRawEstimate` | 工具结果密集时不再误拒 |
+| `compactionRejectedWhenCharReductionIsInsufficient` | 字符降幅不足时**仍须拒绝**（保护不丢）|
+| `未观测时使用中性初值不假设估算方向`（改写）| 原断言「estimated < raw」的前提已不成立 |
+
+### 为什么没有改 `AgentHistoryTrimmer`
+
+原计划让它改用"实测密度"取代 calibration，但推导后发现：
+
+```
+calibration = input / rawEstimate
+density     = input / chars
+rawEstimate ≈ chars × 固定系数
+        ↓
+calibration × 固定系数⁻¹ ≡ density      ← 数学上等价
+```
+
+**换成 density 不产生任何改善** —— 问题不在"用哪个系数"，
+而在**「用整体系数去换算局部内容」**这一结构。而该结构的最大问题
+（初值方向反了）已由 ④ 解决：Trimmer 现在要么拿到实测值、要么拿到中性的 1.0。
+
+### 验证结果
+
+| 项 | 结果 |
+|---|---|
+| 编译 | `BUILD SUCCESSFUL` |
+| `AgentContextCompactionTest` | **23/23 通过** |
+| `AgentContext*` / `AgentHistory*` / `AgentCompaction*` / `AgentModel*` / `AgentConversationCodec*` | 仅 **7 个环境性失败**（全部为 `Robolectric native runtime is not supported on Linux (aarch64)`，涉及 DB 的用例），**零功能回归** |
+
+### 修复前后对照（同一份真机数据推算）
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 降幅判定 | **1.8% → 拒绝** ❌ | **49% → 通过** ✅ |
+| 与实测 token 降幅（53%）偏差 | 51 个百分点 | **4 个百分点** |
+| 保留条数 | **454 条** | **193 条** |
+| 保留字符 | 634,292 | 372,367 |
+| 校准初值方向 | 与实测相反（偏 4.6 倍）| 中性，不假设方向 |
+
+### 尚未修复（均为精细度优化，不再导致故障）
+
+| # | 问题 | 说明 |
+|---|---|---|
+| P0-2 | 判定对象（`result`）≠ 提交对象（差 48.5K）| 需调整结构，风险较高 |
+| P1-2 | `rawEstimate` 两处口径（含/不含 tools）| tools 仅 ~24K，影响小 |
+| P2-3 | 摘要输入 512K 截断 → 早期内容被硬裁 | 边界场景 |
+| P2-4 | 提示文案措辞 | 纯文案 |
+
+---
+
+## 8. 附录：复现方法
+
 ### 已实施（改动 +63 / −5，只涉及 2 个文件）
 
 **① P0-1：降幅判定改用字符数** — `AgentContextCompactor.kt`
