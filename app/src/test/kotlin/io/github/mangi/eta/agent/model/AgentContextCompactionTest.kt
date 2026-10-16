@@ -435,6 +435,49 @@ class AgentContextCompactionTest {
         assertEquals(1, events.filterIsInstance<AgentEvent.CompactionUnavailable>().size)
     }
 
+    @Test
+    fun reductionJudgementUsesCharCountNotRawEstimate() {
+        // P0 回归（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+        // 降幅判定必须基于【字符数】。构造"工具结果密集（ASCII，rawEstimate 低估约 3 倍）"的历史，
+        // 若判据用 rawEstimate 比值会得出偏高的「降幅不足」结论而误拒；字符数判据应放行。
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "固定规则"))
+        repeat(20) { turn ->
+            messages.put(JSONObject().put("role", "user").put("content", "问题 $turn"))
+            messages.put(JSONObject().put("role", "tool").put("content", "x".repeat(20_000)))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", "最新问题"))
+
+        val beforeChars = messages.toString().length
+        val compacted = AgentContextCompactor(
+            config,
+            provider { _, _ -> response("摘".repeat(8_000)) },
+            AgentRunController(),
+        ).compact(messages, 1, emptySet())
+
+        val afterChars = compacted.toString().length
+        assertTrue(
+            "压缩后字符数应显著小于压缩前（实际 $beforeChars → $afterChars）",
+            afterChars * 100 < beforeChars * 80,
+        )
+    }
+
+    @Test
+    fun compactionRejectedWhenCharReductionIsInsufficient() {
+        // 守住原有保护：字符数降幅不足时仍须拒绝，不得因为换了判据就放行。
+        val messages = jsonHistory()
+        var thrown: AgentModelFailure? = null
+        try {
+            AgentContextCompactor(
+                config,
+                provider { _, _ -> response("摘".repeat(15_000)) },   // 摘要比待压内容还大
+                AgentRunController(),
+            ).compact(messages, 1, emptySet())
+        } catch (failure: AgentModelFailure) {
+            thrown = failure
+        }
+        assertEquals("CONTEXT_NO_REDUCTION", thrown?.code)
+    }
+
     private fun history() = (1..6).flatMap { turn -> listOf(
         AgentModelClient.ConversationMessage("user", "问题 $turn"),
         AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(1000)),

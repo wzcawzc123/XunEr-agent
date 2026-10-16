@@ -105,20 +105,35 @@ internal class AgentContextCompactor(
         // （真机实测命中率可从 99.9% 掉到 9.4%，等于全价重算）。若降幅不足，压完仍会
         // 立刻再次触发压缩，形成抖动式重复计费——此时宁可保留原文，由熔断与硬裁剪兜底。
         val beforeEstimate = AgentContextBudget.rawEstimate(messages)
-        val afterEstimate = AgentContextBudget.rawEstimate(result)
-        if (afterEstimate.toLong() * 100 >= beforeEstimate.toLong() * MIN_REDUCTION_PERCENT) {
+        // 注：不再计算 afterEstimate —— 压缩后内容以摘要文本为主，rawEstimate 对它本身是准的，
+        // 但乘上为「工具密集」场景标定的 calibration 后会高估，故判定一律改用字符数/比例。
+        // P0 修复（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+        // 降幅判定改用【字符数】，不再用 rawEstimate 比值。
+        // 根因：rawEstimate 按「ASCII 3 字符 = 1 token」估算，对工具结果（JSON）系统性低估
+        // 约 1.85 倍；而压缩后历史以摘要文本为主时估算反而准确。两者相比得到的「降幅」完全失真
+        // （真机实测：真实降幅 53% 被判为 1.8% → 摘要被拒 → 退化到硬裁剪丢弃内容）。
+        // 字符数与 token 数在同一次比较中方向必然一致，不受内容成分影响。
+        val beforeChars = messages.toString().length
+        val afterChars = result.toString().length
+        if (afterChars.toLong() * 100 >= beforeChars.toLong() * MIN_REDUCTION_PERCENT) {
             throw failure(
                 "CONTEXT_NO_REDUCTION",
-                "摘要只把上下文从约 $beforeEstimate 降到 $afterEstimate tokens，不足以抵偿压缩自身的开销；原始上下文已保留。",
+                "摘要只把上下文从约 ${beforeChars / 1000}K 降到 ${afterChars / 1000}K 字符" +
+                    "（不足 ${100 - MIN_REDUCTION_PERCENT}%），不足以抵偿压缩自身的开销；原始上下文已保留。",
             )
         }
         // C1（v3.11.24）：压完必须落在触发线以下（校准口径），否则下一轮 usage 一到立即
         // 再次触发压缩——成功路径上的压缩风暴。相对降幅挡不住"cal>1 时压完仍超线"。
         val trigger = AgentContextBudget.triggerTokens(config.contextWindow)
-        if (trigger != null && afterEstimate.toDouble() * calibration >= trigger) {
+        // P0 修复（2026-10-16）：原式用「压缩后的 rawEstimate × 为工具密集场景标定的 calibration」，
+        // 对以摘要文本为主的压缩后内容会高估。改为按字符比例从「压缩前的校准估算」缩放 ——
+        // 比例（afterChars/beforeChars）是可靠的客观量，不受内容成分影响。
+        val scaledAfter = beforeEstimate.toDouble() * calibration *
+            (afterChars.toDouble() / beforeChars.toDouble())
+        if (trigger != null && scaledAfter >= trigger) {
             throw failure(
                 "CONTEXT_NO_REDUCTION",
-                "压缩后上下文（约 ${(afterEstimate * calibration).toInt()}）仍高于触发线 $trigger，" +
+                "压缩后上下文（约 ${scaledAfter.toInt()}）仍高于触发线 $trigger，" +
                     "压完会立刻再次触发压缩；原始上下文已保留。",
             )
         }
