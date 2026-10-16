@@ -56,8 +56,17 @@ internal class AgentContextBudget(private val window: Int?) {
          * actual≈2.4×窗口 才裁剪，留下 [窗口, 2.4×窗口) 盲区（超窗裸发 → CONTEXT_OVERFLOW）。
          * 0.4 仍低于中文密集实际值，盲区缩到 [窗口, 1.6×窗口)，同时不会在窗口内误裁
          * （高估模型下 0.4 折算点远在窗口内，一旦收到 usage 立即被实测校准覆盖）。
+         *
+         * P2-1 修正（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+         * 真机复核发现 0.4 在「工具结果密集」的会话中严重偏离——实测 calibration ≈ 1.85
+         * （估算 420,083 vs 实测 777,273），偏离达 4.6 倍。原因是该样本以工具结果（JSON）
+         * 为主，而 JSON 的 token 密度远高于「3 字符 = 1 token」的假设。
+         * 本值只在「尚未收到 usage」的少数轮次生效，故改为中性 1.0：
+         *   - 不再隐含方向（0.4 假定「估算高估」，而实际低估时应当放大）
+         *   - 中文密集场景（0.6~0.7）下偏向少裁，收到 usage 后立即被实测覆盖
+         *   - 工具密集场景（1.5~1.9）下偏差从 4.6 倍降到约 1.7 倍
          */
-        private const val DEFAULT_CALIBRATION = 0.4
+        private const val DEFAULT_CALIBRATION = 1.0
 
         /** 校准系数下限：允许向下修正到 1/10（估算高估时靠它拉回实测附近）。 */
         private const val MIN_CALIBRATION = 0.1
