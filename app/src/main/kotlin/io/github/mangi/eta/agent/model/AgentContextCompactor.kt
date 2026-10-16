@@ -174,9 +174,13 @@ internal class AgentContextCompactor(
         var used = 0.0
         var from = history.size
         while (from > 1) {
-            // C1（v3.11.24）：retain 是窗口单位预算，成本须乘 calibration 换算同口径，
-            // 否则 cal<1 时实际保留仅 cal×0.16W（缩水 2~4 倍）、cal>1 时可超 trigger。
-            val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1])) * calibration
+            // P0-4 修复（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+            // 不再乘 calibration。原实现借用「整体校准值」换算成本，但该值反映的是全文平均
+            // token 密度；而压缩发生时 calibration 往往仍是初值 0.4（来自「估算高估 4.82 倍」
+            // 的时代），与当前「低估」的实际方向相反 → cost 被缩小 2.5 倍 → 保留量超预算约 1.8 倍
+            // （真机实测：预算允许 256 条，实际保留 454 条 / 634K 字符 / 真实 ~350K tokens）。
+            // 保留区内容同质（工具结果为主），用未校准的 raw 估算做相对比较即可。
+            val cost = AgentContextBudget.rawEstimate(JSONArray().put(history[from - 1]))
             if (used + cost > retain) break
             used += cost
             from--
