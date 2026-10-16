@@ -22,7 +22,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: android-build-${{ github.ref }}
+  # 按「ref + 事件名」分组：让「push 代码验证」与「workflow_dispatch 发版」互不取消。
+  # 原实现只按 ref 分组，导致「push 后立刻手动发版」这一常规流程中，push 的运行被
+  # cancel-in-progress 取消，在 commit 上留下 cancelled 的假红叉（代码本身是绿的，
+  # 发版那次两个 job 均 success）。同事件内的连续运行仍然互斥，保留原有的防重复构建语义。
+  group: android-build-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
