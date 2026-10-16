@@ -93,6 +93,20 @@ internal class AgentContextCompactor(
                     append("\n\n[原始任务（逐字保留，勿改写）]\n")
                     append(anchor)
                 }
+                // 方案②（2026-10-16）：把压缩时的真实占用告知模型一次。
+                // 模型无法感知 context 占用（系统提示不注入该数据），真机曾出现
+                // 「界面显示 36.9%、模型却称已用到 99%」的误导。
+                // 此处只在压缩完成时写入一次（不逐轮变化 → 不影响 prompt 缓存命中），
+                // 而这恰是模型最需要知道余量的时刻——它刚经历摘要、需要据此规划后续步骤。
+                val window = config.contextWindow
+                if (observedInputTokens != null && window != null && window > 0) {
+                    val percent = (observedInputTokens.toLong() * 100 / window).toInt()
+                    append(
+                        "\n\n[压缩时的上下文占用：约 ${percent}%（实测 ${observedInputTokens} / ${window} tokens）。" +
+                            "该值是压缩【前】的实测，压缩后的实际占用显著更低；" +
+                            "后续请以此为准，不要凭对话长度推测用量。]",
+                    )
+                }
             },
             contextSummary = true,
             compactedUserTurns = covered,
