@@ -17,6 +17,14 @@ internal class AgentContextCompactor(
         messages: JSONArray,
         systemCount: Int,
         sensitiveIds: Set<String>,
+        /**
+         * 压缩前那一轮的实测 input tokens（服务商回执）。P1-2（2026-10-16）：
+         * 传给「压后超线判定」作基准，取代 `rawEstimate(messages) × calibration`。
+         * 原因：calibration 由 `rawEstimate(msgs, tools)` 标定（含 tools），而此处旧式分母
+         * 不含 tools，两者约掉后会少算 tools 部分（约 5.7%），方向为低估 → 可能漏拦。
+         * 直接采用实测值则口径天然一致，且不依赖估算精度。缺省 null 时回退旧式。
+         */
+        observedInputTokens: Int? = null,
     ): JSONArray {
         controller.throwIfCancelled()
         if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
@@ -128,7 +136,11 @@ internal class AgentContextCompactor(
         // P0 修复（2026-10-16）：原式用「压缩后的 rawEstimate × 为工具密集场景标定的 calibration」，
         // 对以摘要文本为主的压缩后内容会高估。改为按字符比例从「压缩前的校准估算」缩放 ——
         // 比例（afterChars/beforeChars）是可靠的客观量，不受内容成分影响。
-        val scaledAfter = beforeEstimate.toDouble() * calibration *
+        // P1-2（2026-10-16）：优先用实测 input tokens 作基准——它与真实请求同口径，
+        //   不受「估算是否含 tools」影响；无实测时才回退「估算 × 校准」（旧式）。
+        val beforeTokens = observedInputTokens
+            ?: (beforeEstimate.toDouble() * calibration).toInt()
+        val scaledAfter = beforeTokens.toDouble() *
             (afterChars.toDouble() / beforeChars.toDouble())
         if (trigger != null && scaledAfter >= trigger) {
             throw failure(

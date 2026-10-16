@@ -132,6 +132,9 @@ internal class AgentContextSession(
                 calibration = budget.calibrationValue(),
             ).compact(
                 messages, systemCount, sensitiveIds(),
+                // P1-2（2026-10-16）：传入本轮实测 input tokens 作为「压后超线判定」的基准，
+                // 与真实请求同口径（同时消除「估算分母含/不含 tools」的口径不一致）。
+                observedInputTokens = before,
             )
             runController.throwIfCancelled()
             val wasCompacted = compacted
