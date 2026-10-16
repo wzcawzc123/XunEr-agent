@@ -59,6 +59,8 @@ import io.github.mangi.eta.data.repository.AgentMemoryMutation
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
 import io.github.mangi.eta.data.repository.AgentMemoryStore
 import io.github.mangi.eta.data.repository.AgentMemoryWriteResult
+import io.github.mangi.eta.data.repository.MemoryRepository
+import io.github.mangi.eta.data.repository.ShortMemoryRepository
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -430,9 +432,10 @@ internal class AgentLocalTools(
      * M1.3 重复页拦截：同参、同 revision 的分页读取重试不会产出新内容
      * —— 实测病灶是"连续 30 次相同参数只拿到第 1 页"。只比对**最后一次**读取，
      * 因此读过任意其他页即自动解锁（上下文压缩后重读旧页的活口）；
-     * revision 进 key，写入记忆后也自动解锁。
+     * revision 进 key，写入记忆后也自动解锁。target 也进 key（long/short 各自独立）。
      */
     private data class MemoryPageKey(
+        val target: String,
         val section: String?,
         val query: String?,
         val startLine: Int,
@@ -442,13 +445,22 @@ internal class AgentLocalTools(
 
     private var lastMemoryPageKey: MemoryPageKey? = null
 
+    /** target=short → 短期记忆仓库，默认 long（向后兼容）；两仓库接口一致可互换。 */
+    private fun memoryRepositoryFor(args: JSONObject): MemoryRepository = if (args.optString("target") == "short") {
+        ShortMemoryRepository
+    } else {
+        AgentMemoryRepository
+    }
+
     private fun memoryGet(args: JSONObject): String = try {
         val section = args.optString("section").takeIf(String::isNotBlank)
         val query = args.optString("query").takeIf(String::isNotBlank)
+        // spec memory-upgrade §3.1：target=short 读短期记忆文件，默认 long（向后兼容）。
+        val repo = memoryRepositoryFor(args)
         val result = if (section != null) {
-            AgentMemoryRepository.readSection(section, args.optInt("max_chars", 12_000))
+            repo.readSection(section, args.optInt("max_chars", 12_000))
         } else {
-            AgentMemoryRepository.read(
+            repo.read(
                 query = query,
                 startLine = args.optInt("start_line", 1),
                 maxChars = args.optInt("max_chars", 12_000),
@@ -478,6 +490,7 @@ internal class AgentLocalTools(
                 )
         }
         val key = MemoryPageKey(
+            target = args.optString("target", "long"),
             section = section,
             query = query,
             startLine = args.optInt("start_line", 1),
@@ -533,7 +546,7 @@ internal class AgentLocalTools(
                 message = "不支持的记忆写入模式 $mode；可用：replace_section / replace_range / append / clear。",
             )
         }
-        when (val result = AgentMemoryRepository.mutate(mutation)) {
+        when (val result = memoryRepositoryFor(args).mutate(mutation)) {
             is AgentMemoryWriteResult.Success -> JSONObject()
                 .put("ok", true)
                 .put("changed", result.changed)

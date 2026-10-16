@@ -3,8 +3,10 @@ package io.github.mangi.eta.ui.model
 import androidx.compose.runtime.Immutable
 import io.github.mangi.eta.data.repository.AgentMemoryStore
 
+/** 记忆页当前编辑的目标仓库：long=长期（默认）/ short=短期。 */
+enum class MemoryTargetUi { Long, Short }
 @Immutable
-data class AgentMemoryUiState(
+internal data class AgentMemoryUiState(
     val enabled: Boolean = true,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
@@ -13,6 +15,10 @@ data class AgentMemoryUiState(
     val draftBytes: Int = 0,
     val maxBytes: Int = AgentMemoryStore.MAX_FILE_BYTES,
     val coreBudgetChars: Int = 8_000,
+    /** 当前编辑目标（long/short）；切换时重新加载对应仓库。 */
+    val target: MemoryTargetUi = MemoryTargetUi.Long,
+    /** 搜索关键词（仅过滤当前 draft 的展示，不落盘）。 */
+    val searchQuery: String = "",
     val notice: String? = null,
 ) {
     val hasUnsavedChanges: Boolean get() = draft != savedContent

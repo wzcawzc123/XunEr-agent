@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.ConversationActivityDay
+import io.github.mangi.eta.ui.components.ConversationHeatmap
 import io.github.mangi.eta.ui.components.EtaPreference
 import io.github.mangi.eta.ui.components.EtaPreferenceDefaults
 import io.github.mangi.eta.ui.components.EtaPreferenceDivider
@@ -66,6 +68,7 @@ import io.github.mangi.eta.ui.markdown.MarkdownTone
 import io.github.mangi.eta.ui.markdown.StaticMarkdown
 import io.github.mangi.eta.ui.model.AgentMemoryAction
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
+import io.github.mangi.eta.ui.model.MemoryTargetUi
 import java.text.NumberFormat
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -134,8 +137,11 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
+                MemoryTargetSwitcher(state = state, onAction = onAction)
                 MemorySettingsGroup(state = state, onAction = onAction)
             }
+            MemoryHeatmapSection()
+            MemorySearchField(state = state, onAction = onAction)
             MemoryDocumentCard(
                 state = state,
                 mode = currentMode,
@@ -191,6 +197,74 @@ internal fun AgentMemoryScreen(
 }
 
 @Composable
+private fun MemoryTargetSwitcher(
+    state: AgentMemoryUiState,
+    onAction: (AgentMemoryAction) -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
+            .padding(top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TargetChip(
+            text = "长期记忆",
+            selected = state.target == MemoryTargetUi.Long,
+            enabled = !state.isLoading,
+            onClick = { onAction(AgentMemoryAction.SwitchTarget(MemoryTargetUi.Long)) },
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        TargetChip(
+            text = "短期记忆",
+            selected = state.target == MemoryTargetUi.Short,
+            enabled = !state.isLoading,
+            onClick = { onAction(AgentMemoryAction.SwitchTarget(MemoryTargetUi.Short)) },
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        if (state.target == MemoryTargetUi.Short) {
+            EtaTextButton(
+                text = if (state.isSaving) "整理中…" else "整理到长期",
+                enabled = !state.isLoading && !state.isSaving,
+                onClick = { onAction(AgentMemoryAction.Rollup) },
+            )
+        } else {
+            Text(
+                text = "跨会话持久事实",
+                style = MiuixTheme.textStyles.footnote2,
+                color = colors.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TargetChip(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .background(
+                color = if (selected) colors.primary.copy(alpha = 0.15f) else colors.surfaceContainerHigh,
+                shape = CircleShape,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MiuixTheme.textStyles.body2,
+            color = if (selected) colors.primary else colors.onSurface,
+        )
+    }
+}
+
+@Composable
 private fun MemorySettingsGroup(
     state: AgentMemoryUiState,
     onAction: (AgentMemoryAction) -> Unit,
@@ -212,6 +286,67 @@ private fun MemorySettingsGroup(
             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
         )
+    }
+}
+
+/** 会话活跃度热力图（spec memory-upgrade §3.4）：只读展示，数据从会话表按天聚合。 */
+@Composable
+private fun MemoryHeatmapSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var days by remember { mutableStateOf<List<ConversationActivityDay>?>(null) }
+    LaunchedEffect(Unit) {
+        days = runCatching {
+            val snapshot = io.github.mangi.eta.ui.app.AgentConversationStore.load(context)
+            snapshot.updatedAt
+                .mapNotNull { (_, millis) -> millis.takeIf { it > 0 }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() } }
+                .groupingBy { it }
+                .eachCount()
+                .map { (date, count) -> ConversationActivityDay(date, count) }
+        }.getOrNull()
+    }
+    val loaded = days ?: return
+    ConversationHeatmap(
+        days = loaded,
+        modifier = Modifier
+            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
+            .padding(top = EtaPreferenceDefaults.GroupSpacing),
+    )
+}
+
+/** 记忆搜索框：仅过滤当前 draft 的展示，不落盘（spec memory-upgrade §3.3）。 */
+@Composable
+private fun MemorySearchField(
+    state: AgentMemoryUiState,
+    onAction: (AgentMemoryAction) -> Unit,
+) {
+    top.yukonga.miuix.kmp.basic.TextField(
+        value = state.searchQuery,
+        onValueChange = { onAction(AgentMemoryAction.SearchChanged(it)) },
+        label = "搜索记忆",
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
+            .padding(top = EtaPreferenceDefaults.GroupSpacing),
+    )
+}
+
+/** 搜索过滤后的文档内容：命中行保留，其余行折叠为省略号，便于快速定位。 */
+private fun filteredDraft(state: AgentMemoryUiState): String {
+    val query = state.searchQuery.trim()
+    if (query.isEmpty()) return state.draft
+    val lines = state.draft.split('\n')
+    val matched = lines.indices.filter { lines[it].contains(query, ignoreCase = true) }
+    if (matched.isEmpty()) return ""
+    return buildString {
+        var last = -1
+        matched.forEach { index ->
+            if (last >= 0 && index > last + 1) append("\n…（中间 ${index - last - 1} 行已过滤）…\n")
+            append(lines[index])
+            if (index != matched.last()) append('\n')
+            last = index
+        }
     }
 }
 
@@ -269,7 +404,7 @@ private fun MemoryDocumentCard(
                 else -> Crossfade(targetState = mode, label = "memory_mode") { current ->
                     when (current) {
                         MemoryViewMode.Preview -> MemoryPreview(
-                            content = state.draft,
+                            content = if (state.searchQuery.isBlank()) state.draft else filteredDraft(state),
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(

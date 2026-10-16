@@ -228,8 +228,36 @@ class AgentMemoryStoreTest {
         assertTrue(deleted.changed)
     }
 
-    private fun hasLoneSurrogate(text: String): Boolean {
-        var index = 0
+    @Test
+    fun shortMemoryRepositoryIsSeparateFromLongAndKeepsOwnRevision() {
+        // spec memory-upgrade §3.1：短期记忆与长期完全隔离（独立文件 + 独立 revision）。
+        val longRoot = temporaryFolder.newFolder("long")
+        val shortRoot = temporaryFolder.newFolder("short")
+        val longStore = AgentMemoryStore(longRoot)
+        val shortStore = AgentMemoryStore(shortRoot)
+
+        val longInitial = longStore.replaceAll("# 核心记忆\n长期事实")
+        val shortInitial = shortStore.replaceAll("# 当前任务\n临时笔记")
+
+        // 两文件各自独立：长期写入不影响短期，短期写入不影响长期。
+        val longAppended = longStore.mutate(
+            AgentMemoryMutation.Append(longInitial.revision, "追加到长期"),
+        ) as AgentMemoryWriteResult.Success
+        assertEquals("# 当前任务\n临时笔记", shortStore.snapshot().content)
+
+        // revision 独立：长短期即使内容相同也有不同 revision（各自文件 SHA-256）。
+        val shortAppended = shortStore.mutate(
+            AgentMemoryMutation.Append(shortInitial.revision, "追加到短期"),
+        ) as AgentMemoryWriteResult.Success
+        assertTrue(longAppended.snapshot.revision != shortAppended.snapshot.revision)
+
+        // 清空短期不影响长期。
+        shortStore.mutate(AgentMemoryMutation.Clear(shortAppended.snapshot.revision))
+        assertEquals("", shortStore.snapshot().content)
+        assertTrue(longStore.snapshot().content.contains("长期事实"))
+    }
+
+    private fun hasLoneSurrogate(text: String): Boolean {        var index = 0
         while (index < text.length) {
             val char = text[index]
             when {

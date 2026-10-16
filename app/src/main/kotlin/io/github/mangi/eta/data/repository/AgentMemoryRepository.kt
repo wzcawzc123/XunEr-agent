@@ -66,6 +66,26 @@ internal sealed interface AgentMemoryWriteResult {
     data class Conflict(val snapshot: AgentMemorySnapshot) : AgentMemoryWriteResult
 }
 
+/** 长期/短期记忆仓库的统一读写接口（memory_get/write 的 target 路由用）。 */
+internal interface MemoryRepository {
+    fun snapshot(): AgentMemorySnapshot
+
+    fun read(
+        query: String? = null,
+        startLine: Int = 1,
+        maxChars: Int = AgentMemoryStore.DEFAULT_READ_CHARS,
+    ): AgentMemoryReadResult
+
+    fun readSection(
+        section: String,
+        maxChars: Int = AgentMemoryStore.DEFAULT_READ_CHARS,
+    ): AgentMemoryReadResult
+
+    fun mutate(mutation: AgentMemoryMutation): AgentMemoryWriteResult
+
+    fun replaceAll(content: String): AgentMemorySnapshot
+}
+
 internal class AgentMemoryException(
     val code: String,
     message: String,
@@ -496,7 +516,7 @@ internal class AgentMemoryStore(
     }
 }
 
-internal object AgentMemoryRepository {
+internal object AgentMemoryRepository : MemoryRepository {
     @Volatile
     private lateinit var store: AgentMemoryStore
 
@@ -506,34 +526,34 @@ internal object AgentMemoryRepository {
         }
     }
 
-    fun snapshot(): AgentMemorySnapshot {
+    override fun snapshot(): AgentMemorySnapshot {
         ensureInitialized()
         return store.snapshot()
     }
 
-    fun read(
-        query: String? = null,
-        startLine: Int = 1,
-        maxChars: Int = AgentMemoryStore.DEFAULT_READ_CHARS,
+    override fun read(
+        query: String?,
+        startLine: Int,
+        maxChars: Int,
     ): AgentMemoryReadResult {
         ensureInitialized()
         return store.read(query, startLine, maxChars)
     }
 
-    fun readSection(
+    override fun readSection(
         section: String,
-        maxChars: Int = AgentMemoryStore.DEFAULT_READ_CHARS,
+        maxChars: Int,
     ): AgentMemoryReadResult {
         ensureInitialized()
         return store.readSection(section, maxChars)
     }
 
-    fun mutate(mutation: AgentMemoryMutation): AgentMemoryWriteResult {
+    override fun mutate(mutation: AgentMemoryMutation): AgentMemoryWriteResult {
         ensureInitialized()
         return store.mutate(mutation)
     }
 
-    fun replaceAll(content: String): AgentMemorySnapshot {
+    override fun replaceAll(content: String): AgentMemorySnapshot {
         ensureInitialized()
         return store.replaceAll(content)
     }

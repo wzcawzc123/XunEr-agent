@@ -717,6 +717,10 @@ fun AgentAppRoot(
                             AgentMemoryAction.Save -> memory.saveMemory()
                             AgentMemoryAction.Clear -> memory.clearMemory()
                             AgentMemoryAction.DismissNotice -> memory.dismissMemoryNotice()
+                            is AgentMemoryAction.SwitchTarget -> memory.switchTarget(action.target)
+                            is AgentMemoryAction.SearchChanged -> memory.updateSearchQuery(action.query)
+                            AgentMemoryAction.Rollup -> memory.rollupMemory()
+                            AgentMemoryAction.Refresh -> memory.refreshMemory()
                         }
                     },
                 )

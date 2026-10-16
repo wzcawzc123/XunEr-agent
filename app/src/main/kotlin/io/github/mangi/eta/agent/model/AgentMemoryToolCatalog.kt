@@ -45,6 +45,14 @@ internal object AgentMemoryToolCatalog {
                                         .put("minimum", AgentMemoryStore.MIN_READ_CHARS)
                                         .put("maximum", AgentMemoryStore.MAX_READ_CHARS)
                                         .put("description", "Maximum returned characters; default 12000, maximum 32000."),
+                                )
+                                .put(
+                                    "target",
+                                    JSONObject()
+                                        .put("type", "string")
+                                        .put("enum", JSONArray().put("long").put("short"))
+                                        .put("default", "long")
+                                        .put("description", "Which memory file to read: long = durable cross-conversation MEMORY.md (default), short = current-task temporary memory. Use short for recent task context that may be cleared when the task ends."),
                                 ),
                         ),
                 ),
@@ -119,6 +127,14 @@ internal object AgentMemoryToolCatalog {
                                                 "(an empty content deletes the section); for replace_range an empty content deletes those lines; " +
                                                 "for clear pass \"${AgentMemoryStore.CLEAR_CONFIRMATION}\".",
                                         ),
+                                )
+                                .put(
+                                    "target",
+                                    JSONObject()
+                                        .put("type", "string")
+                                        .put("enum", JSONArray().put("long").put("short"))
+                                        .put("default", "long")
+                                        .put("description", "Which memory file to write: long = durable cross-conversation MEMORY.md (default), short = current-task temporary memory. Use short for transient task facts; clear it when the task ends."),
                                 ),
                         )
                         .put("required", JSONArray().put("mode").put("revision")),

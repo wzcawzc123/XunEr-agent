@@ -6,11 +6,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
+import io.github.mangi.eta.agent.model.MemoryRollup
+import io.github.mangi.eta.agent.model.ProviderClientFactory
+import io.github.mangi.eta.agent.model.RollupOutcome
+import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
+import io.github.mangi.eta.data.repository.MemoryRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.data.repository.ShortMemoryRepository
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
+import io.github.mangi.eta.ui.model.MemoryTargetUi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,18 +33,24 @@ internal class AgentMemoryStore(
     var memoryState by mutableStateOf(AgentMemoryUiState())
         private set
 
+    /** target → 对应仓库（long 默认，short 独立文件）；两仓库接口一致。 */
+    private fun repositoryFor(target: MemoryTargetUi): MemoryRepository =
+        if (target == MemoryTargetUi.Short) ShortMemoryRepository else AgentMemoryRepository
+
     fun refreshMemory() {
-        memoryState = memoryState.copy(isLoading = true, notice = null)
+        memoryState = memoryState.copy(isLoading = true)
+        val target = memoryState.target
+        val repo = repositoryFor(target)
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val snapshot = AgentMemoryRepository.snapshot()
+                val snapshot = repo.snapshot()
                 val enabled = AgentMemoryRepository.isEnabled()
                 val contextWindow = RuntimeConfigRepository.currentRuntimeConfig()?.contextWindow
                 Triple(snapshot, enabled, AgentMemoryContextBuilder.coreBudgetChars(contextWindow))
             }.fold(
                 onSuccess = { (snapshot, enabled, coreBudget) ->
                     withContext(Dispatchers.Main) {
-                        memoryState = AgentMemoryUiState(
+                        memoryState = memoryState.copy(
                             enabled = enabled,
                             isLoading = false,
                             draft = snapshot.content,
@@ -62,12 +75,58 @@ internal class AgentMemoryStore(
         }
     }
 
+    /** 切换 long/short 目标：丢弃未保存草稿并重新加载对应仓库（草稿不跨仓库保留，防误存）。 */
+    fun switchTarget(target: MemoryTargetUi) {
+        if (target == memoryState.target || memoryState.isLoading) return
+        memoryState = memoryState.copy(target = target, searchQuery = "", notice = null)
+        refreshMemory()
+    }
+
     fun updateMemoryDraft(content: String) {
         memoryState = memoryState.copy(
             draft = content,
             draftBytes = content.toByteArray(Charsets.UTF_8).size,
             notice = null,
         )
+    }
+
+    /** 更新搜索关键词（仅过滤 draft 展示，不落盘）。 */
+    fun updateSearchQuery(query: String) {
+        memoryState = memoryState.copy(searchQuery = query.trim())
+    }
+
+    /**
+     * 手动触发短期→长期 rollup（spec memory-upgrade §3.2）。
+     * 用默认模型的运行时配置构建 provider；LLM 失败/追加冲突都不改短期记忆，
+     * 结果以 notice 呈现，完成后刷新两个仓库。
+     */
+    fun rollupMemory() {
+        if (memoryState.isSaving) return
+        memoryState = memoryState.copy(isSaving = true, notice = null)
+        scope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                val config = RuntimeConfigRepository.runtimeConfigFor(null)
+                if (config == null) {
+                    RollupOutcome(false, "未配置可用的模型，无法整理记忆。")
+                } else {
+                    val provider = io.github.mangi.eta.agent.model.ProviderClientFactory.getClient(config)
+                    MemoryRollup(
+                        config = config,
+                        provider = provider,
+                        controller = AgentRunController(),
+                    ).run()
+                }
+            }.getOrElse { throwable ->
+                io.github.mangi.eta.core.AndroidAgentLogger.warnThrottled("agent_memory_rollup_failed") {
+                    "Agent memory rollup failed: type=${throwable.safeLogType()}"
+                }
+                RollupOutcome(false, "记忆整理失败：${throwable.message ?: throwable.javaClass.simpleName}")
+            }
+            withContext(Dispatchers.Main) {
+                memoryState = memoryState.copy(isSaving = false, notice = outcome.message)
+            }
+            refreshMemory()
+        }
     }
 
     fun setMemoryEnabled(enabled: Boolean) {
@@ -94,9 +153,10 @@ internal class AgentMemoryStore(
     fun saveMemory() {
         if (!memoryState.canSave) return
         val target = memoryState.draft
+        val repo = repositoryFor(memoryState.target)
         memoryState = memoryState.copy(isSaving = true, notice = null)
         scope.launch(Dispatchers.IO) {
-            runCatching { AgentMemoryRepository.replaceAll(target) }
+            runCatching { repo.replaceAll(target) }
                 .fold(
                     onSuccess = { snapshot ->
                         withContext(Dispatchers.Main) {
@@ -130,9 +190,10 @@ internal class AgentMemoryStore(
 
     fun clearMemory() {
         if (memoryState.isSaving) return
+        val repo = repositoryFor(memoryState.target)
         memoryState = memoryState.copy(isSaving = true, notice = null)
         scope.launch(Dispatchers.IO) {
-            runCatching { AgentMemoryRepository.replaceAll("") }
+            runCatching { repo.replaceAll("") }
                 .fold(
                     onSuccess = {
                         withContext(Dispatchers.Main) {
