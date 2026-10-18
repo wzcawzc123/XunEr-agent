@@ -75,27 +75,46 @@ internal class SimpleAutoTaskRuntime(
      * 才不会再问问题、也不会做需要确认的操作。
      */
     private fun runAgentRound(context: Context, task: AgentTask): String {
-        // runtimeConfigFor 是 suspend；这里已在后台线程（广播回调 / IO），
-        // 用 runBlocking 等待一次数据库读取，不会阻塞主线程。
         val config = kotlinx.coroutines.runBlocking { RuntimeConfigRepository.runtimeConfigFor(null) }
             ?: return "未配置可用的模型"
         val provider: AgentProviderClient = ProviderClientFactory.getClient(config)
 
-        val reply = StringBuilder()
-        AgentModelClient.complete(
+        // 为这次执行建一个独立会话：结果有地方落，通知也能跳回来回看全过程。
+        // 用 auto-task-<id>-<时间戳> 作 id：同一条任务重复执行也不会串会话。
+        val sessionId = "auto-task-${task.id}-${System.currentTimeMillis()}"
+        val dao = database.conversationDao()
+        kotlinx.coroutines.runBlocking {
+            dao.insertConversationRow(
+                io.github.mangi.eta.data.db.ConversationEntity(
+                    id = sessionId,
+                    title = "[自动] ${task.title}",
+                    thinkingEnabled = false,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+
+        // 真实工具链：AgentLocalTools 本身就是 ToolExecutor，直接交给 Agent 循环。
+        // 只读靠「不给写类工具」+ prompt 约束双保险；这里仍启用 terminal，
+        // 否则连 `gh run list` 都跑不了。
+        val tools = io.github.mangi.eta.agent.tool.AgentLocalTools(
+            context = context,
+            logger = AndroidAgentLogger,
+            conversationId = sessionId,
+        )
+
+        val reply = AgentModelClient.complete(
             config = config,
             prompt = buildPrompt(task),
-            toolExecutor = io.github.mangi.eta.agent.model.AgentModelClient.ToolExecutor { call ->
-                io.github.mangi.eta.agent.model.AgentModelClient.ToolResult(
-                    "失败：自动任务第一版未接入工具执行链（${call.name}）",
-                )
-            },
+            toolExecutor = tools,
             provider = provider,
             runController = AgentRunController(),
-            // 关键：把轮数上限传下去，避免无人看管下无限循环
             history = emptyList(),
         )
-        return reply.toString().ifBlank { "（无输出）" }
+
+        val text = reply.content
+        return text.ifBlank { "（模型未返回内容）" }
     }
 
     private fun buildPrompt(task: AgentTask): String = buildString {
