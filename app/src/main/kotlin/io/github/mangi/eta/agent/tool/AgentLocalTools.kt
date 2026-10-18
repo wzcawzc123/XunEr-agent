@@ -520,6 +520,9 @@ internal class AgentLocalTools(
             .put("start_line", result.startLine ?: JSONObject.NULL)
             .put("end_line", result.endLine ?: JSONObject.NULL)
             .put("matched_lines", result.matchedLines)
+            // 归档区标识：文末 `# 归档` 之后是已结项的项目档案。
+            // 不给这个标记的话，模型会把「一加11独显已收官」这类历史结论当成现状继续引用。
+            .put("archived", isArchivedRead(result.snapshot.content, result.startLine))
             .put("has_more", result.hasMore)
         // ★ 分页续读指引：不带 section/query 时这是"从 start_line 读一页"的分页语义。
         //   只给 has_more 而不给出"下一段从哪读"，模型就只能用同样的参数反复重试
@@ -2041,3 +2044,19 @@ private const val TYPE_TEXT_INCREMENTAL_CHARS = 200
 
 /** 归一化坐标上界：0–999，与主流 GUI 模型的输出习惯一致。 */
 private const val NORMALIZED_MAX = 999
+
+/**
+ * 判断这次 reading 是否落在「# 归档」区。
+ *
+ * 判定用行号比较而不是字符串匹配：归档区里也会出现 "# 归档" 字样（比如某个章节正文提到它），
+ * 用「最后一次出现的 `# 归档` 行号」作为分界线更稳。
+ * [startLine] 为 null（整文件读取）时不算归档读。
+ */
+internal fun isArchivedRead(content: String, startLine: Int?): Boolean {
+    if (startLine == null) return false
+    var boundary = -1
+    content.lineSequence().forEachIndexed { index, line ->
+        if (line.trim() == "# 归档") boundary = index + 1
+    }
+    return boundary > 0 && startLine >= boundary
+}
