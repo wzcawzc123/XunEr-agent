@@ -45,6 +45,7 @@
   <string name="route_system_enhancements">系統增強</string>
   <string name="route_settings">設定</string>
   <string name="route_memory">記憶</string>
+  <string name="route_usage_stats">用量統計</string>
   <string name="route_linux_environment">Linux 工具環境</string>
   <string name="route_terminal">終端機</string>
   <string name="terminal_input_hint">輸入指令</string>
