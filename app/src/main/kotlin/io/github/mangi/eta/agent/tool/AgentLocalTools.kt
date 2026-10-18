@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.tool
 
+import io.github.mangi.eta.agent.memory.AgentMemoryHeadingCheck
 import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
 import android.content.Context
@@ -613,6 +614,15 @@ internal class AgentLocalTools(
                             .put("suggested", suggestion.placement.wire)
                             .put("label", suggestion.placement.label)
                             .put("reason", suggestion.reason))
+
+                        // 同名标题检测：append 一个已存在的 `## X` 几乎总是意外
+                        // （想更新那一节应该用 replace_section）。只报事实，不拦截。
+                        val dup = AgentMemoryHeadingCheck.check(result.snapshot.content, written)
+                        if (dup.hasDuplicates) {
+                            put("duplicate_headings", dup.duplicates.joinToString("、"))
+                            put("duplicate_hint",
+                                "上面这些标题文档里已存在；若本意是更新，请改用 replace_section。")
+                        }
                     }
                 }
                 .put("bytes", result.snapshot.byteSize)
