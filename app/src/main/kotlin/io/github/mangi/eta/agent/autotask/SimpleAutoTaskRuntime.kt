@@ -87,11 +87,17 @@ internal class SimpleAutoTaskRuntime(
         val prompt = buildPrompt(task)
         if (AutoTaskDispatcher.tryDeliver(task.conversationId, prompt)) {
             diag(context, "delivered via session (normal flow) ${task.id}")
-            val stillActiveDelivered = task.schedule?.repeating == true
+            val nextRunCount = task.runCount + 1
+            val stillActiveDelivered = task.schedule?.repeating == true && nextRunCount < task.maxRuns
             store.saveBlocking(
                 task.copy(
                     lastRunAt = now,
-                    lastResult = "已投递到会话，结果见当前对话",
+                    lastResult = if (nextRunCount >= task.maxRuns) {
+                        "已投递 $nextRunCount 次（达上限，自动停止）"
+                    } else {
+                        "已投递到会话，结果见当前对话（第 $nextRunCount/${task.maxRuns} 次）"
+                    },
+                    runCount = nextRunCount,
                     active = stillActiveDelivered,
                 ),
             )
@@ -105,11 +111,13 @@ internal class SimpleAutoTaskRuntime(
         if (AutoTaskDispatcher.hasHandler() && !target.isNullOrBlank()) {
             AutoTaskDispatcher.enqueue(task.id, target, prompt)
             diag(context, "queued until current run ends ${task.id}")
+            val nextRunCountQueued = task.runCount + 1
             store.saveBlocking(
                 task.copy(
                     lastRunAt = now,
-                    lastResult = "已排队，等当前对话结束后投递",
-                    active = task.schedule?.repeating == true,
+                    lastResult = "已排队，等当前对话结束后投递（第 $nextRunCountQueued/${task.maxRuns} 次）",
+                    runCount = nextRunCountQueued,
+                    active = task.schedule?.repeating == true && nextRunCountQueued < task.maxRuns,
                 ),
             )
             store.exportTo(context)
@@ -148,13 +156,21 @@ internal class SimpleAutoTaskRuntime(
         // **这里曾经写反成 `!= false`**：schedule=null 时 `null != false` 为 true，
         // 于是一次性任务永远保持活跃；再叠加「无时间限制 → isDue 恒 true」，
         // 结果每 60 秒被重复触发一次。真机实测 25 秒内触发两次才暴露。
-        val stillActive = task.schedule?.repeating == true
+        val offlineRunCount = task.runCount + 1
+        val stillActive = task.schedule?.repeating == true && offlineRunCount < task.maxRuns
         val stored = if (result.length > MAX_RESULT_CHARS) {
             result.take(MAX_RESULT_CHARS) + "\n…（已截断）"
         } else {
             result
         }
-        store.saveBlocking(task.copy(lastRunAt = now, lastResult = stored, active = stillActive))
+        store.saveBlocking(
+            task.copy(
+                lastRunAt = now,
+                lastResult = stored,
+                runCount = offlineRunCount,
+                active = stillActive,
+            ),
+        )
 
         // **必须重新导出 pending.txt**：脚本读的是「下次触发的绝对时间戳」，
         // 而它是按 lastRunAt 算的。执行完不重导出，脚本仍拿着旧的（已过去的）时间戳，

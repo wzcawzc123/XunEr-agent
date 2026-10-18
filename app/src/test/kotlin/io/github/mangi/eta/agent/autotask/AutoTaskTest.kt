@@ -231,4 +231,33 @@ class AutoTaskTest {
         )
     }
 
+
+    // ---------- 投递上限（安全网：防止模型忘了删任务时无限烧 token） ----------
+
+    @Test
+    fun `未达上限不算耗尽`() {
+        val t = task().copy(maxRuns = 6, runCount = 5)
+        assertFalse(t.isExhausted)
+    }
+
+    @Test
+    fun `达到上限即耗尽`() {
+        val t = task().copy(maxRuns = 6, runCount = 6)
+        assertTrue(t.isExhausted)
+    }
+
+    @Test
+    fun `耗尽后即使条件满足也不再执行`() {
+        val t = task().copy(maxRuns = 2, runCount = 2)
+        assertFalse(
+            "达上限后 canRun 必须为 false",
+            t.canRun(chargingIdle, 1_000_000L),
+        )
+    }
+
+    @Test
+    fun `默认上限是 6 次`() {
+        assertEquals(6, AgentTask.DEFAULT_MAX_RUNS)
+        assertEquals(6, task().maxRuns)
+    }
 }

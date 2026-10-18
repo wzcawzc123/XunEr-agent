@@ -46,6 +46,10 @@ internal data class AgentTaskEntity(
      * v27 新增：此前 Entity 缺这一列，写入时被静默丢弃 → 所有时间语义在真机上失效。
      */
     @ColumnInfo(name = "schedule_spec", defaultValue = "''") val scheduleSpec: String = "",
+    /** 最多投递次数（安全网）；v28 新增。 */
+    @ColumnInfo(name = "max_runs", defaultValue = "6") val maxRuns: Int = 6,
+    /** 已投递次数；v28 新增。 */
+    @ColumnInfo(name = "run_count", defaultValue = "0") val runCount: Int = 0,
 )
 
 @Dao

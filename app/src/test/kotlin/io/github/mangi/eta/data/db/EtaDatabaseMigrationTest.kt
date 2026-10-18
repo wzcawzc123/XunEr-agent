@@ -60,6 +60,7 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_24_25,
                 EtaDatabase.MIGRATION_25_26,
                 EtaDatabase.MIGRATION_26_27,
+                EtaDatabase.MIGRATION_27_28,
             )
             .build()
         try {
@@ -140,7 +141,8 @@ class EtaDatabaseMigrationTest {
             // 这里逐个列出所有列做全字段 SELECT：少一列或拼错列名都会直接抛异常。
             val agentTasksCursor = database.openHelper.readableDatabase.query(
                 "SELECT id, title, prompt, condition_mask, max_rounds, enabled, read_only, " +
-                    "conversation_id, last_run_at, last_result, created_at, active FROM agent_tasks",
+                    "conversation_id, last_run_at, last_result, created_at, active, " +
+                    "schedule_spec, max_runs, run_count FROM agent_tasks",
             )
             agentTasksCursor.use { assertEquals(0, it.count) }
 
@@ -153,6 +155,18 @@ class EtaDatabaseMigrationTest {
                 cursor.getString(0)
             }
             assertEquals("1", activeDefault)
+
+            // v28 的两列也必须带默认值，否则旧行升级后为 NULL → Entity 非空字段读取抛异常
+            val v28Defaults = database.openHelper.readableDatabase.query(
+                "SELECT name, dflt_value FROM pragma_table_info('agent_tasks') " +
+                    "WHERE name IN ('max_runs','run_count')",
+            ).use { cursor ->
+                buildMap {
+                    while (cursor.moveToNext()) put(cursor.getString(0), cursor.getString(1))
+                }
+            }
+            assertEquals("6", v28Defaults["max_runs"])
+            assertEquals("0", v28Defaults["run_count"])
 
             // v24 建的索引也要在（否则 pick() 的查询会全表扫）
             val indexCount = database.openHelper.readableDatabase.query(

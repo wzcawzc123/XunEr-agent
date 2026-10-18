@@ -41,13 +41,23 @@ internal data class AgentTask(
      * 用户能回看"这条提醒什么时候跑过"）。
      */
     val active: Boolean = true,
+    /**
+     * 最多投递几次就自动停止（安全网）。
+     *
+     * 为什么需要：重复任务每投递一次就跑一轮 Agent（真实模型调用 = 真金白银）。
+     * 如果模型忘了在完成时自己删除（这是常态，不是异常），
+     * 一个「每 5 分钟」的任务会整夜不停地烧。dsh 没有这层保护，我们加一层。
+     */
+    val maxRuns: Int = DEFAULT_MAX_RUNS,
+    /** 已投递次数。 */
+    val runCount: Int = 0,
     val lastRunAt: Long? = null,
     val lastResult: String? = null,
     val createdAt: Long,
 ) {
     /** 是否允许此刻执行：启用 + 活跃 + 条件满足 + 到点。 */
     fun canRun(state: DeviceState, nowMillis: Long): Boolean =
-        enabled && active && condition.satisfiedBy(state) && isDue(nowMillis)
+        enabled && active && !isExhausted && condition.satisfiedBy(state) && isDue(nowMillis)
 
     /**
      * 是否已经彻底做完（一次性任务执行过即为真）。
@@ -59,6 +69,10 @@ internal data class AgentTask(
      */
     val isFinished: Boolean
         get() = schedule?.repeating != true && lastRunAt != null
+
+    /** 投递次数是否已用完（安全网触发，此后不再投递）。 */
+    val isExhausted: Boolean
+        get() = runCount >= maxRuns
 
     /**
      * 是否已到点。
@@ -81,6 +95,9 @@ internal data class AgentTask(
     companion object {
         /** 单次任务最多 5 轮：足够"查一次 + 抓日志 + 总结"，再多就该人来判断了。 */
         const val DEFAULT_MAX_ROUNDS = 5
+
+        /** 默认最多投递 6 次（配合 every 5 分钟 ≈ 半小时，之后自动停）。 */
+        const val DEFAULT_MAX_RUNS = 6
         const val MAX_ALLOWED_ROUNDS = 20
         const val MAX_TITLE_CHARS = 60
         const val MAX_PROMPT_CHARS = 2_000

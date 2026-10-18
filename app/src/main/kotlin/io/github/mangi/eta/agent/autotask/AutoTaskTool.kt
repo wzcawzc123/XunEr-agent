@@ -28,7 +28,11 @@ internal object AutoTaskTool {
                 "把结果追加到当前会话。 " +
                 "当用户说「帮我盯 X」「有结果告诉我」「红了提醒我」「过一会儿再看」时**必须调用本工具**，" +
                 "不要只口头答应 —— 口头承诺在这一轮结束后就失效了。 " +
-                "创建后任务默认未启用，需要用户确认（可用 enable 参数直接启用）。",
+                "创建后任务默认未启用，需要用户确认（可用 enable 参数直接启用）。 " +
+                "**重要**：如果任务的目标是「等到某个结果」（例如等 CI 构建完成、等下载结束），" +
+                "请在拿到结果的那一轮里调用 delete_auto_task 把任务删掉 —— " +
+                "否则它会按周期一直重复投递（每次都是一次真实的模型调用，会持续产生费用）。" +
+                "max_runs 是兜底：模型忘了删时，达到次数后自动停止。",
         )
         .put(
             "parameters",
@@ -57,6 +61,12 @@ internal object AutoTaskTool {
                                 .put("description", "触发条件（Android 后台限制用）；默认 charging_wifi_idle"),
                         )
                         .put("max_rounds", JSONObject().put("type", "integer").put("description", "单次执行轮数上限，默认 3，最多 20"))
+                        .put(
+                            "max_runs",
+                            JSONObject()
+                                .put("type", "integer")
+                                .put("description", "最多投递几次后自动停止（安全网），默认 6，最多 50"),
+                        )
                         .put("enable", JSONObject().put("type", "boolean").put("description", "是否立即启用；默认 false，需要用户确认")),
                 )
                 .put("required", JSONArray().put("title").put("prompt")),
@@ -98,6 +108,7 @@ internal object AutoTaskTool {
         }
 
         val maxRounds = args.optInt("max_rounds", 3).coerceIn(1, AgentTask.MAX_ALLOWED_ROUNDS)
+        val maxRuns = args.optInt("max_runs", AgentTask.DEFAULT_MAX_RUNS).coerceIn(1, 50)
         val enable = args.optBoolean("enable", false)
 
         val task = AgentTask.create(
@@ -112,7 +123,7 @@ internal object AutoTaskTool {
         ).getOrElse { return "失败：${it.message}" }
 
         // schedule 不在 create() 里（它是后加字段），这里补
-        val withSchedule = task.copy(schedule = schedule)
+        val withSchedule = task.copy(schedule = schedule, maxRuns = maxRuns)
         store.saveBlocking(withSchedule)
 
         val scheduleText = schedule?.describe() ?: "条件满足时"
@@ -120,7 +131,8 @@ internal object AutoTaskTool {
             append("已创建自动任务「${withSchedule.title}」。\n")
             append("· 时间：$scheduleText\n")
             append("· 条件：${condition.describe()}\n")
-            append("· 上限：$maxRounds 轮\n")
+            append("· 单轮上限：$maxRounds 轮\n")
+            append("· 最多投递：$maxRuns 次（之后自动停止）\n")
             append("· 状态：${if (enable) "已启用" else "未启用（需用户确认）"}\n")
             append("· 结果会追加到当前会话")
             if (!enable) append("；请提醒用户开启后才会真正执行")
