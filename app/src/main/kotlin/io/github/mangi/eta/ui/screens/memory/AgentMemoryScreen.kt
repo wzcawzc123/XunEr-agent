@@ -1,7 +1,5 @@
 package io.github.mangi.eta.ui.screens.memory
 
-import androidx.compose.ui.draw.rotate
-import androidx.compose.animation.core.animateFloatAsState
 import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -55,8 +53,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.ui.components.EtaCard
-import io.github.mangi.eta.ui.components.ConversationActivityDay
-import io.github.mangi.eta.ui.components.ConversationHeatmap
 import io.github.mangi.eta.ui.components.EtaPreference
 import io.github.mangi.eta.ui.components.EtaPreferenceDefaults
 import io.github.mangi.eta.ui.components.EtaPreferenceDivider
@@ -96,9 +92,6 @@ internal fun AgentMemoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
     var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
-    // 概览（启用开关 / 注入预算 / 热力图）默认收起：
-    // 这些是低频信息，常驻会把正文区挤成一小条，滚动像"卡在文件栏"。
-    var overviewExpanded by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -161,21 +154,9 @@ internal fun AgentMemoryScreen(
                     },
                     onRollup = { onAction(AgentMemoryAction.Rollup) },
                 )
-                // 概览：折叠时只占一行，展开才显示设置与热力图。
-                OverviewHeader(
-                    expanded = overviewExpanded,
-                    onToggle = { overviewExpanded = !overviewExpanded },
-                )
-                AnimatedVisibility(
-                    visible = overviewExpanded,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
-                ) {
-                    Column {
-                        MemorySettingsGroup(state = state, onAction = onAction)
-                        MemoryHeatmapSection()
-                    }
-                }
+                // v3.13.3：不再折叠（去掉 OverviewHeader 展开/收起交互），
+                // 设置区直接平铺；热力图已移除（无人使用）。
+                MemorySettingsGroup(state = state, onAction = onAction)
                 }
             }
             MemorySearchField(state = state, onAction = onAction)
@@ -334,60 +315,6 @@ private fun MemoryTargetSwitcher(
 }
 
 @Composable
-private fun OverviewHeader(expanded: Boolean, onToggle: () -> Unit) {
-    val colors = MiuixTheme.colorScheme
-    val arrowAngle by animateFloatAsState(if (expanded) 180f else 0f, label = "overviewArrow")
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(
-                horizontal = EtaPreferenceDefaults.SidePadding,
-                vertical = 10.dp,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "记忆概览",
-            style = MiuixTheme.textStyles.body2,
-            color = colors.onSurfaceVariantSummary,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "▾",
-            style = MiuixTheme.textStyles.footnote1,
-            color = colors.onSurfaceVariantSummary,
-            modifier = Modifier.rotate(arrowAngle),
-        )
-    }
-}
-
-@Composable
-private fun TargetChip(
-    text: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = MiuixTheme.colorScheme
-    Box(
-        modifier = Modifier
-            .background(
-                color = if (selected) colors.primary.copy(alpha = 0.15f) else colors.surfaceContainerHigh,
-                shape = CircleShape,
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Text(
-            text = text,
-            style = MiuixTheme.textStyles.body2,
-            color = if (selected) colors.primary else colors.onSurface,
-        )
-    }
-}
-
-@Composable
 private fun MemorySettingsGroup(
     state: AgentMemoryUiState,
     onAction: (AgentMemoryAction) -> Unit,
@@ -410,30 +337,6 @@ private fun MemorySettingsGroup(
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
         )
     }
-}
-
-/** 会话活跃度热力图（spec memory-upgrade §3.4）：只读展示，数据从会话表按天聚合。 */
-@Composable
-private fun MemoryHeatmapSection() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var days by remember { mutableStateOf<List<ConversationActivityDay>?>(null) }
-    LaunchedEffect(Unit) {
-        days = runCatching {
-            val snapshot = io.github.mangi.eta.ui.app.AgentConversationStore.load(context)
-            snapshot.updatedAt
-                .mapNotNull { (_, millis) -> millis.takeIf { it > 0 }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() } }
-                .groupingBy { it }
-                .eachCount()
-                .map { (date, count) -> ConversationActivityDay(date, count) }
-        }.getOrNull()
-    }
-    val loaded = days ?: return
-    ConversationHeatmap(
-        days = loaded,
-        modifier = Modifier
-            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
-            .padding(top = EtaPreferenceDefaults.GroupSpacing),
-    )
 }
 
 /** 记忆搜索框：仅过滤当前 draft 的展示，不落盘（spec memory-upgrade §3.3）。 */
@@ -507,6 +410,16 @@ private fun MemoryDocumentCard(
                 tint = colors.primary,
             )
             Spacer(Modifier.width(8.dp))
+            // v3.13.3：色点一眼区分长期/短期（长期=主色，短期=主色容器淡色），辅助标题文字。
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        if (state.target == MemoryTargetUi.Short) colors.primaryContainer else colors.primary,
+                        CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     // P1（v3.11.28）：按 target 区分标题，避免用户分不清编辑的是长期还是短期文件。

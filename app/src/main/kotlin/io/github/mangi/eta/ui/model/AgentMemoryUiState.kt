@@ -12,6 +12,8 @@ internal data class AgentMemoryUiState(
     val isSaving: Boolean = false,
     val draft: String = "",
     val savedContent: String = "",
+    /** A2（v3.13.3）：显式脏标记，替代每次重组做 draft != savedContent 全量比较。 */
+    val dirty: Boolean = false,
     val draftBytes: Int = 0,
     val maxBytes: Int = AgentMemoryStore.MAX_FILE_BYTES,
     val coreBudgetChars: Int = 8_000,
@@ -21,8 +23,8 @@ internal data class AgentMemoryUiState(
     val searchQuery: String = "",
     val notice: String? = null,
 ) {
-    val hasUnsavedChanges: Boolean get() = draft != savedContent
+    val hasUnsavedChanges: Boolean get() = dirty
     val canSave: Boolean
-        get() = !isLoading && !isSaving && hasUnsavedChanges &&
+        get() = !isLoading && !isSaving && dirty &&
             draftBytes <= maxBytes
 }

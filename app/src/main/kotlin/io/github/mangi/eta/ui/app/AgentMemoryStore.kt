@@ -55,6 +55,7 @@ internal class AgentMemoryStore(
                             isLoading = false,
                             draft = snapshot.content,
                             savedContent = snapshot.content,
+                            dirty = false,
                             draftBytes = snapshot.byteSize,
                             coreBudgetChars = coreBudget,
                         )
@@ -83,9 +84,11 @@ internal class AgentMemoryStore(
     }
 
     fun updateMemoryDraft(content: String) {
+        // A1（v3.13.3）：击键路径不再全量 toByteArray（242KB 每键编码是卡顿根源）。
+        // draftBytes 保持上次精确值，只在保存/丢弃时按需重算（见 saveMemory / resetDraft）。
         memoryState = memoryState.copy(
             draft = content,
-            draftBytes = content.toByteArray(Charsets.UTF_8).size,
+            dirty = true,
             notice = null,
         )
     }
@@ -168,7 +171,9 @@ internal class AgentMemoryStore(
                                 } else {
                                     memoryState.draft
                                 },
-                                draftBytes = memoryState.draft.toByteArray(Charsets.UTF_8).size,
+                                // A1：保存是低频操作，这里算一次精确字节数（编辑击键不再算）。
+                                dirty = false,
+                                draftBytes = snapshot.byteSize,
                                 notice = appContext.getString(R.string.state_ui_memory_saved_a2c61c),
                             )
                         }
@@ -201,6 +206,7 @@ internal class AgentMemoryStore(
                                 isSaving = false,
                                 draft = "",
                                 savedContent = "",
+                                dirty = false,
                                 draftBytes = 0,
                                 notice = appContext.getString(R.string.state_ui_memory_cleared_b415bb),
                             )
