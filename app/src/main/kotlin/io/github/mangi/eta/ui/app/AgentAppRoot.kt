@@ -718,6 +718,7 @@ fun AgentAppRoot(
                             AgentMemoryAction.NavigateBack -> popRoute()
                             is AgentMemoryAction.ToggleEnabled -> memory.setMemoryEnabled(action.enabled)
                             is AgentMemoryAction.DraftChanged -> memory.updateMemoryDraft(action.content)
+                            AgentMemoryAction.DiscardDraft -> memory.resetDraft()
                             AgentMemoryAction.Save -> memory.saveMemory()
                             AgentMemoryAction.Clear -> memory.clearMemory()
                             AgentMemoryAction.DismissNotice -> memory.dismissMemoryNotice()

@@ -87,6 +87,8 @@ sealed interface AgentMemoryAction {
     data object NavigateBack : AgentMemoryAction
     data class ToggleEnabled(val enabled: Boolean) : AgentMemoryAction
     data class DraftChanged(val content: String) : AgentMemoryAction
+    /** 丢弃未保存草稿，恢复为已保存内容（不能复用 DraftChanged：它永远置脏）。 */
+    data object DiscardDraft : AgentMemoryAction
     data object Save : AgentMemoryAction
     data object Clear : AgentMemoryAction
     data object DismissNotice : AgentMemoryAction

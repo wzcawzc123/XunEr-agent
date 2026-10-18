@@ -171,7 +171,7 @@ internal fun AgentMemoryScreen(
             )
             MemorySaveBar(
                 state = state,
-                onDiscard = { onAction(AgentMemoryAction.DraftChanged(state.savedContent)) },
+                onDiscard = { onAction(AgentMemoryAction.DiscardDraft) },
                 onSave = { onAction(AgentMemoryAction.Save) },
             )
             Spacer(Modifier.height(12.dp))

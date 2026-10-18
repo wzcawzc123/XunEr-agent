@@ -93,6 +93,23 @@ internal class AgentMemoryStore(
         )
     }
 
+    /**
+     * 丢弃未保存草稿：恢复为已保存内容并清脏。
+     *
+     * 不能复用 [updateMemoryDraft]（传 savedContent）—— 那条路径永远置 dirty=true，
+     * 保存栏的可见性靠 dirty 驱动，会导致「点放弃后保存栏还在」（真机反馈）。
+     * 与 saveMemory 同构：低频操作，顺带重算一次精确 draftBytes。
+     */
+    fun resetDraft() {
+        val saved = memoryState.savedContent
+        memoryState = memoryState.copy(
+            draft = saved,
+            dirty = false,
+            draftBytes = saved.toByteArray().size,
+            notice = null,
+        )
+    }
+
     /** 更新搜索关键词（仅过滤 draft 展示，不落盘）。 */
     fun updateSearchQuery(query: String) {
         memoryState = memoryState.copy(searchQuery = query.trim())
