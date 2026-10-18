@@ -24,9 +24,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 设计原则：
  * - **只在有未完成步骤时出现**。没有 todo 的会话（绝大多数）完全不受影响、不占高度 ——
  *   「不打扰」优先于「可发现性」。
- * - 一行文字 + 一条细进度线，不抢注意力：扫一眼就知道「在第几步、在做什么」；
- *   完整清单在聊天记录里（todo_write 回执）。
  * - 全部完成后自动消失，不留下已完成列表的视觉噪音。
+ * - **必须有不透明底色**：早期版本只画一行透明文字，滚动时会和下面的消息文字叠在一起，
+ *   读起来像花屏（真机反馈）。
+ * - **左右边距与输入框一致**（16dp），视觉上属于输入区而不是消息流。
  *
  * 进度线用 Box + background 手绘，不依赖 Material3 的 LinearProgressIndicator ——
  * 本项目的 UI 栈是 Miuix，混入 Material 组件会在主题/圆角上与周围不一致。
@@ -41,40 +42,50 @@ internal fun AgentPlanProgressBar(
     val fraction = (plan.done.toFloat() / plan.total.toFloat()).coerceIn(0f, 1f)
     val headline = plan.running ?: "下一步待开始"
 
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // 外边距与输入框对齐，让它看起来属于输入区
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            // 不透明底色：避免与滚动中的消息文字叠字
+            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Text(
-            text = "${plan.done}/${plan.total}",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.primary,
-        )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MiuixTheme.colorScheme.surfaceVariant),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text(
+                text = "${plan.done}/${plan.total}",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
+                maxLines = 1,
+            )
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(fraction)
-                    .height(3.dp)
+                    .weight(1f)
+                    .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(MiuixTheme.colorScheme.primary),
+                    .background(MiuixTheme.colorScheme.surface),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MiuixTheme.colorScheme.primary),
+                )
+            }
+            Text(
+                text = headline,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1.4f, fill = false),
             )
         }
-        Text(
-            text = headline,
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1.4f, fill = false),
-        )
     }
 }
