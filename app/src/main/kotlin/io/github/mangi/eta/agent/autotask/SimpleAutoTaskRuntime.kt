@@ -266,35 +266,25 @@ internal class SimpleAutoTaskRuntime(
     }
 
     /**
-     * 读会话历史（historyJson → ConversationMessage 列表），**带字符预算**。
+     * 读会话历史（historyJson → ConversationMessage 列表）。
      *
-     * 没有预算会出大问题：一个上千条的会话（真实数据里有过 1287 条 / 100 万字符）
-     * 会被整段塞进每次自动任务的请求里 —— 单次就可能几块钱，而且可能超模型上下文。
-     * 自动任务只需要「最近的上下文」，从尾部取到预算为止。
+     * **必须优先读 checkpoint**：它才是「发给模型的历史」，与正常对话同源。
+     * 之前读 `conversations.history_json`（真实数据里是 `[]`）→ 模型零上下文、
+     * 前缀与主路径不一致 → 缓存 100% 击穿。真机排查时才发现。
+     *
+     * **不再做字符截断**：截断会让前缀与正常对话不一致，同样击穿缓存。
+     * checkpoint 本身已经是压缩后的合理大小，与正常一轮请求同量级。
      */
     private suspend fun loadHistory(
         dao: io.github.mangi.eta.data.db.ConversationDao,
         conversationId: String,
     ): List<AgentModelClient.ConversationMessage> = runCatching {
-        val raw = dao.historyJsonFor(conversationId) ?: return@runCatching emptyList()
-        val all = io.github.mangi.eta.agent.model.AgentConversationCodec.decodeTranscript(raw)
-        trimToBudget(all)
+        val checkpointJson = runCatching { dao.contextCheckpoint(conversationId)?.historyJson }.getOrNull()
+        val conversationJson = runCatching { dao.historyJsonFor(conversationId) }.getOrNull()
+        val raw = AutoTaskHistorySource.pick(checkpointJson, conversationJson)
+            ?: return@runCatching emptyList()
+        io.github.mangi.eta.agent.model.AgentConversationCodec.decodeTranscript(raw)
     }.getOrElse { emptyList() }
-
-    /** 从尾部往前累加，直到超出字符预算；保证最后一条（最新上下文）一定被保留。 */
-    private fun trimToBudget(
-        messages: List<AgentModelClient.ConversationMessage>,
-    ): List<AgentModelClient.ConversationMessage> {
-        var budget = HISTORY_CHAR_BUDGET
-        val kept = ArrayDeque<AgentModelClient.ConversationMessage>()
-        for (msg in messages.asReversed()) {
-            val len = runCatching { msg.content.length }.getOrDefault(0)
-            if (kept.isNotEmpty() && budget - len < 0) break
-            budget -= len
-            kept.addFirst(msg)
-        }
-        return kept.toList()
-    }
 
     private companion object {
         /** 进程级互斥：跨 SimpleAutoTaskRuntime 实例共享。 */
@@ -303,12 +293,7 @@ internal class SimpleAutoTaskRuntime(
         /** 写入数据库与通知的结果上限，避免模型长输出把库撑大。 */
         const val MAX_RESULT_CHARS = 8_000
 
-        /**
-         * 自动任务的历史预算（字符）。
-         * 60k 字符 ≈ 中文 30k tokens 量级，留足工具与响应的余量，
-         * 又不至于让一次自动唤醒烧掉太多钱。
-         */
-        const val HISTORY_CHAR_BUDGET = 60_000
+
     }
 
     private fun buildPrompt(task: AgentTask): String = buildString {
