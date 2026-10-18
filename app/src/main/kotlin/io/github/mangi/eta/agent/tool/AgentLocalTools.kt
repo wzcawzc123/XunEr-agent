@@ -283,6 +283,7 @@ internal class AgentLocalTools(
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
                 AgentPlanTool.NAME -> textResult(todoWrite(args))
+                io.github.mangi.eta.agent.autotask.AutoTaskTool.NAME -> textResult(createAutoTask(args))
                 "skills_list" -> textResult(skillsList(args))
                 "skills_read" -> textResult(skillsRead(args))
                 "skills_read_resource" -> textResult(skillsReadResource(args))
@@ -459,6 +460,24 @@ internal class AgentLocalTools(
     )
 
     private var lastMemoryPageKey: MemoryPageKey? = null
+
+    /**
+     * 创建自动任务。绑定当前会话 —— 执行时会在它里面追加一轮，
+     * 而不是新建会话（否则会话列表会被自动任务刷屏）。
+     */
+    private fun createAutoTask(args: JSONObject): String = try {
+        io.github.mangi.eta.agent.autotask.AutoTaskTool.execute(
+            args = args,
+            store = io.github.mangi.eta.agent.autotask.AutoTaskStore(
+                EtaDatabase.get(context).agentTaskDao(),
+            ),
+            conversationId = conversationId.ifBlank { null },
+            nowMillis = System.currentTimeMillis(),
+        )
+    } catch (e: Exception) {
+        errorResult("CREATE_AUTO_TASK_FAILED", "创建自动任务失败：${e.message ?: e::class.java.simpleName}")
+    }
+
 
     /**
      * 任务清单：全量覆盖写入。

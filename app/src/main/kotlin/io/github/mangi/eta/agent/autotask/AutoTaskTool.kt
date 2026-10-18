@@ -1,0 +1,151 @@
+package io.github.mangi.eta.agent.autotask
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * `create_auto_task` 工具：让模型在对话中直接创建自动任务。
+ *
+ * 为什么必须有这个工具，而不是只靠设置页：
+ * 用户的真实表达是「帮我盯 CI」「红了告诉我」——
+ * **如果模型只能口头答应，那一轮结束它就忘了**，而用户以为有人在盯。
+ * 这个工具把「口头承诺」变成「数据库里的一条记录 + 守护进程会去跑」。
+ *
+ * 与 dsh 的 `schedule_create` 对齐的参数语义：
+ * - `title`：**必填且不从指令派生**（用户要能在列表里认出它）
+ * - `after` / `every` / `daily`：时间语义；缺省表示"条件满足就跑"
+ * - `condition`：Android 特有的"条件"（dsh 没有，因为桌面不做 Doze 妥协）
+ */
+internal object AutoTaskTool {
+
+    const val NAME = "create_auto_task"
+
+    fun schema(): JSONObject = JSONObject()
+        .put("name", NAME)
+        .put(
+            "description",
+            "创建一个**自动任务**：在条件满足时由后台守护进程唤醒，自动跑一轮并" +
+                "把结果追加到当前会话。 " +
+                "当用户说「帮我盯 X」「有结果告诉我」「红了提醒我」「过一会儿再看」时**必须调用本工具**，" +
+                "不要只口头答应 —— 口头承诺在这一轮结束后就失效了。 " +
+                "创建后任务默认未启用，需要用户确认（可用 enable 参数直接启用）。",
+        )
+        .put(
+            "parameters",
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("title", JSONObject().put("type", "string").put("description", "任务短名，如「CI 巡检」；≤60 字"))
+                        .put("prompt", JSONObject().put("type", "string").put("description", "交给 Agent 的指令正文，≤2000 字"))
+                        .put(
+                            "schedule",
+                            JSONObject()
+                                .put("type", "string")
+                                .put("enum", JSONArray().put("after").put("every").put("daily").put("none"))
+                                .put("description", "时间语义：after=延迟一次，every=固定间隔，daily=每天某点，none=只看条件"),
+                        )
+                        .put("after_minutes", JSONObject().put("type", "integer").put("description", "schedule=after 时：延迟多少分钟"))
+                        .put("every_minutes", JSONObject().put("type", "integer").put("description", "schedule=every 时：间隔多少分钟"))
+                        .put("at_time", JSONObject().put("type", "string").put("description", "schedule=daily 时：HH:mm，如 09:00"))
+                        .put(
+                            "condition",
+                            JSONObject()
+                                .put("type", "string")
+                                .put("enum", JSONArray().put("charging_wifi_idle").put("wifi").put("any"))
+                                .put("description", "触发条件（Android 后台限制用）；默认 charging_wifi_idle"),
+                        )
+                        .put("max_rounds", JSONObject().put("type", "integer").put("description", "单次执行轮数上限，默认 3，最多 20"))
+                        .put("enable", JSONObject().put("type", "boolean").put("description", "是否立即启用；默认 false，需要用户确认")),
+                )
+                .put("required", JSONArray().put("title").put("prompt")),
+        )
+
+    /**
+     * 执行创建。
+     *
+     * @param conversationId 任务绑定的会话（执行时在它里面追加一轮）
+     * @return 面向模型的文本结果
+     */
+    fun execute(
+        args: JSONObject,
+        store: AutoTaskStore,
+        conversationId: String?,
+        nowMillis: Long,
+        newId: () -> String = { "task-" + java.util.UUID.randomUUID().toString().take(8) },
+    ): String {
+        val title = args.optString("title").trim()
+        val prompt = args.optString("prompt").trim()
+        if (title.isEmpty() || prompt.isEmpty()) {
+            return "失败：title 与 prompt 都是必填。"
+        }
+
+        val schedule = parseSchedule(args, nowMillis)
+            ?: return "失败：时间参数不合法（after 需 after_minutes>0；every 需 every_minutes>0；daily 需 at_time=HH:mm）。"
+
+        val condition = when (args.optString("condition").ifBlank { "charging_wifi_idle" }) {
+            "charging_wifi_idle" -> TaskCondition.CONSERVATIVE
+            "wifi" -> TaskCondition.WIFI_ONLY
+            "any" -> TaskCondition.ANYTIME
+            else -> return "失败：condition 只能是 charging_wifi_idle / wifi / any。"
+        }
+
+        val maxRounds = args.optInt("max_rounds", 3).coerceIn(1, AgentTask.MAX_ALLOWED_ROUNDS)
+        val enable = args.optBoolean("enable", false)
+
+        val task = AgentTask.create(
+            id = newId(),
+            title = title,
+            prompt = prompt,
+            condition = condition,
+            maxRounds = maxRounds,
+            enabled = enable,
+            conversationId = conversationId,
+            nowMillis = nowMillis,
+        ).getOrElse { return "失败：${it.message}" }
+
+        // schedule 不在 create() 里（它是后加字段），这里补
+        val withSchedule = task.copy(schedule = schedule)
+        store.saveBlocking(withSchedule)
+
+        val scheduleText = schedule?.describe() ?: "条件满足时"
+        return buildString {
+            append("已创建自动任务「${withSchedule.title}」。\n")
+            append("· 时间：$scheduleText\n")
+            append("· 条件：${condition.describe()}\n")
+            append("· 上限：$maxRounds 轮\n")
+            append("· 状态：${if (enable) "已启用" else "未启用（需用户确认）"}\n")
+            append("· 结果会追加到当前会话")
+            if (!enable) append("；请提醒用户开启后才会真正执行")
+        }
+    }
+
+    /** 解析时间参数；`none`/缺省返回 null（表示无时间限制）。参数不合法返回 null 但调用方需区分，故用 Result。 */
+    private fun parseSchedule(args: JSONObject, nowMillis: Long): ScheduleSpec? {
+        val kind = args.optString("schedule").ifBlank { "none" }
+        return when (kind) {
+            "none" -> null
+            "after" -> {
+                val minutes = args.optInt("after_minutes", 0)
+                if (minutes <= 0) return null
+                ScheduleSpec.After(minutes * 60_000L, anchor = nowMillis)
+            }
+            "every" -> {
+                val minutes = args.optInt("every_minutes", 0)
+                if (minutes <= 0) return null
+                ScheduleSpec.Every(minutes * 60_000L)
+            }
+            "daily" -> {
+                val raw = args.optString("at_time")
+                val parts = raw.split(":")
+                if (parts.size != 2) return null
+                val h = parts[0].toIntOrNull() ?: return null
+                val m = parts[1].toIntOrNull() ?: return null
+                if (h !in 0..23 || m !in 0..59) return null
+                ScheduleSpec.Daily(h, m)
+            }
+            else -> null
+        }
+    }
+}

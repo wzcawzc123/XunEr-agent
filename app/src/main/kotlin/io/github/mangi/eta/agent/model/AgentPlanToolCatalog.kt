@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.agent.autotask.AutoTaskTool
 import io.github.mangi.eta.agent.plan.AgentPlanTool
 import org.json.JSONArray
 
@@ -24,6 +25,14 @@ internal object AgentPlanToolCatalog {
                 name = schema.getString("name"),
                 description = schema.getString("description"),
                 parameters = schema.getJSONObject("parameters"),
+            ),
+        )
+        val autoTask = AutoTaskTool.schema()
+        tools.put(
+            AgentToolSchema.function(
+                name = autoTask.getString("name"),
+                description = autoTask.getString("description"),
+                parameters = autoTask.getJSONObject("parameters"),
             ),
         )
     }
