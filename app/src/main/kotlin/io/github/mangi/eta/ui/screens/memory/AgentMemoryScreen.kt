@@ -268,46 +268,52 @@ private fun MemoryTargetSwitcher(
             .padding(top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TargetChip(
-            text = "长期记忆",
-            selected = state.target == MemoryTargetUi.Long,
-            enabled = !state.isLoading,
-            onClick = { onRequestSwitch(MemoryTargetUi.Long) },
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        TargetChip(
-            text = "短期记忆",
-            selected = state.target == MemoryTargetUi.Short,
-            enabled = !state.isLoading,
-            onClick = { onRequestSwitch(MemoryTargetUi.Short) },
-        )
+        // 与「预览 / 编辑」同一套视觉：外层容器 + 内层选中态。
+        // 之前是两个独立的胶囊 chip，与页面其他控件不是一套语言（真机反馈"布局不行"）。
+        Row(
+            modifier = Modifier
+                .squircleSurface(color = colors.surfaceContainerHigh, cornerRadius = 12.dp)
+                .padding(3.dp),
+        ) {
+            listOf(MemoryTargetUi.Long, MemoryTargetUi.Short).forEach { target ->
+                val selected = state.target == target
+                val background by animateColorAsState(
+                    if (selected) colors.surface else colors.surfaceContainerHigh,
+                    label = "memory_target_tab",
+                )
+                Box(
+                    modifier = Modifier
+                        .squircleSurface(color = background, cornerRadius = 9.dp)
+                        .clickable(enabled = !state.isLoading && !selected) {
+                            onRequestSwitch(target)
+                        }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (target == MemoryTargetUi.Long) "长期" else "短期",
+                        style = MiuixTheme.textStyles.footnote1,
+                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                        color = if (selected) colors.onSurface else colors.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        }
         Spacer(modifier = Modifier.weight(1f))
         if (state.target == MemoryTargetUi.Short) {
-            // 用与 TargetChip 同一套尺寸/字号的胶囊按钮：
-            // EtaTextButton 默认字号偏大，和左侧两个 chip 放一起很突兀（真机反馈）。
-            Row(
+            // 纯文字动作，不加图形符号 —— 箭头在这里只是噪音。
+            Text(
+                text = if (state.isSaving) "整理中…" else "整理到长期",
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (state.isLoading || state.isSaving) {
+                    colors.onSurfaceVariantSummary
+                } else {
+                    colors.primary
+                },
                 modifier = Modifier
-                    .background(colors.primary.copy(alpha = 0.15f), CircleShape)
-                    .clickable(
-                        enabled = !state.isLoading && !state.isSaving,
-                        onClick = onRollup,
-                    )
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 用文字箭头而不是图标库：本项目图标集里没有上移/归档类图标，自绘更稳。
-                Text(
-                    text = "↗",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = colors.primary,
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (state.isSaving) "整理中…" else "整理到长期",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = colors.primary,
-                )
-            }
+                    .clickable(enabled = !state.isLoading && !state.isSaving, onClick = onRollup)
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+            )
         } else {
             Text(
                 text = "跨会话持久事实",
@@ -318,7 +324,6 @@ private fun MemoryTargetSwitcher(
     }
 }
 
-/** 概览区的折叠头：一行标题 + 箭头，点整行切换。 */
 @Composable
 private fun OverviewHeader(expanded: Boolean, onToggle: () -> Unit) {
     val colors = MiuixTheme.colorScheme
