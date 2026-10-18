@@ -115,10 +115,13 @@ internal object AgentPlanTool {
                 ?: return "失败：items[$index] 不是对象。"
             val item = AgentPlanItem.create(
                 index = index,
-                id = raw.optString("id", null),
-                subject = raw.optString("subject", null),
-                activeForm = raw.optString("activeForm", null),
-                status = AgentPlanStatus.fromWire(raw.optString("status", null)),
+                // 用单参 optString（缺省返回 ""）+ takeIf 判空，而不是 optString(key, null)：
+                // Android 版 org.json 的 fallback 参数不接受 null，会抛 JSONException。
+                // 这个差异在桌面 JVM 上不会复现，只有 CI 的 Robolectric 能暴露它。
+                id = raw.optString("id").takeIf { it.isNotBlank() },
+                subject = raw.optString("subject").takeIf { it.isNotBlank() },
+                activeForm = raw.optString("activeForm").takeIf { it.isNotBlank() },
+                status = AgentPlanStatus.fromWire(raw.optString("status")),
             ).getOrElse { return "失败：${it.message}" }
             parsed += item
         }
