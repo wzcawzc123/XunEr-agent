@@ -159,7 +159,7 @@ internal fun AgentMemoryScreen(
                 MemorySettingsGroup(state = state, onAction = onAction)
                 }
             }
-            MemorySearchField(state = state, onAction = onAction)
+            MemorySearchField(state = state, mode = currentMode, onModeChange = { mode = it }, onAction = onAction)
             MemoryDocumentCard(
                 state = state,
                 mode = currentMode,
@@ -343,11 +343,20 @@ private fun MemorySettingsGroup(
 @Composable
 private fun MemorySearchField(
     state: AgentMemoryUiState,
+    mode: MemoryViewMode,
+    onModeChange: (MemoryViewMode) -> Unit,
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     top.yukonga.miuix.kmp.basic.TextField(
         value = state.searchQuery,
-        onValueChange = { onAction(AgentMemoryAction.SearchChanged(it)) },
+        onValueChange = { text ->
+            onAction(AgentMemoryAction.SearchChanged(text))
+            // 编辑区是输入框、不能过滤正文：输入搜索词时自动切到预览展示命中结果
+            //（草稿保留、dirty 不变，可切回继续编辑）——否则搜索在编辑模式下是死区。
+            if (text.isNotBlank() && mode == MemoryViewMode.Edit) {
+                onModeChange(MemoryViewMode.Preview)
+            }
+        },
         label = "搜索记忆",
         useLabelAsPlaceholder = true,
         singleLine = true,
@@ -362,14 +371,7 @@ private fun MemorySearchField(
     )
 }
 
-/** 搜索过滤后的文档内容：命中行保留，其余行折叠为省略号，便于快速定位。 */
-private fun filteredDraft(state: AgentMemoryUiState): String {
-    val query = state.searchQuery.trim()
-    if (query.isEmpty()) return state.draft
-    return filterLines(state.draft, query)
-}
-
-/** 在任意文本上做「保留命中行 + 折叠其余」的过滤。抽出来是为了预览只搜核心区（32K），不碰全文。 */
+/** 在任意文本上做「保留命中行 + 折叠其余」的过滤：搜索时定位命中行，其余行省略。 */
 private fun filterLines(text: String, query: String): String {
     val lines = text.split('\n')
     val matched = lines.indices.filter { lines[it].contains(query, ignoreCase = true) }
@@ -504,10 +506,22 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         val trimmedQuery = query.trim()
-        val display = remember(slice.text, trimmedQuery) {
-            if (trimmedQuery.isEmpty()) slice.text else filterLines(slice.text, trimmedQuery)
+        // 搜索时过滤**全文**（不限于核心区切片）：归档区内容也应能定位命中。
+        // 输出只保留命中行、数量很少，渲染量小；无搜索时仍渲染核心区切片（防全量布局白屏）。
+        val display = remember(content, trimmedQuery) {
+            if (trimmedQuery.isEmpty()) slice.text else filterLines(content, trimmedQuery)
         }
-        StaticMarkdown(content = display, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        if (trimmedQuery.isNotEmpty() && display.isBlank()) {
+            // 无命中时给明确反馈，而不是整页空白（用户感知为"没反应"）。
+            Text(
+                text = "未找到包含「$trimmedQuery」的内容 · 试试其他关键词",
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            StaticMarkdown(content = display, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        }
         if (slice.truncated && trimmedQuery.isEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text(
