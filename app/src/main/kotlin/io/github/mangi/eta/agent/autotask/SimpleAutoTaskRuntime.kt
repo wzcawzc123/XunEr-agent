@@ -77,6 +77,12 @@ internal class SimpleAutoTaskRuntime(
         // 而不是永远停在"等待中"。重复任务（every/daily）保持 active。
         val stillActive = task.schedule?.repeating != false
         store.saveBlocking(task.copy(lastRunAt = now, lastResult = result, active = stillActive))
+
+        // **必须重新导出 pending.txt**：脚本读的是「下次触发的绝对时间戳」，
+        // 而它是按 lastRunAt 算的。执行完不重导出，脚本仍拿着旧的（已过去的）时间戳，
+        // 于是每分钟都会判定「到点」——重复任务会被反复触发、反复花钱。
+        // 这一步是「执行完 → 下次何时再跑」的唯一连接点。
+        store.exportTo(context)
         AutoTaskNotifier.notifyFinished(context, task, result)
     }
 
