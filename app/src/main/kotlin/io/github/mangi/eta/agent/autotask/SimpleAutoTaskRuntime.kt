@@ -29,6 +29,7 @@ internal class SimpleAutoTaskRuntime(
         // 快速判空：没有任务时完全不打锁，避免无谓开销（该回调会被频繁触发）
         val store = AutoTaskStore(database.agentTaskDao())
         val tasks = store.runnableBlocking()
+        diag(context, "tryRunOnce: runnable=${tasks.size} ids=${tasks.map { it.id }}")
         if (tasks.isEmpty()) return
 
         // **锁必须是进程级的**：AutoTaskService 每次 onStartCommand 都会 new 一个
@@ -47,9 +48,29 @@ internal class SimpleAutoTaskRuntime(
     private fun runOnceLocked(context: Context, store: AutoTaskStore, tasks: List<AgentTask>) {
         val state = DeviceStateReader.read(context)
         val now = System.currentTimeMillis()
+        tasks.forEach { t ->
+            diag(
+                context,
+                "check ${t.id}: enabled=${t.enabled} active=${t.active} finished=${t.isFinished} " +
+                    "due=${t.isDue(now)} cond=${t.condition.satisfiedBy(state)} lastRun=${t.lastRunAt}",
+            )
+        }
+        diag(context, "state=$state")
         when (val decision = AutoTaskScheduler.decide(tasks, state, now)) {
-            AutoTaskScheduler.Decision.Idle -> return
-            is AutoTaskScheduler.Decision.Run -> execute(context, store, decision.task, now)
+            AutoTaskScheduler.Decision.Idle -> diag(context, "decision=Idle")
+            is AutoTaskScheduler.Decision.Run -> {
+                diag(context, "decision=Run ${decision.task.id}")
+                execute(context, store, decision.task, now)
+            }
+        }
+    }
+
+    /** 诊断日志：真机上 logcat 易被冲掉，判定链的每一步落到文件里最可靠。 */
+    private fun diag(context: Context, message: String) {
+        runCatching {
+            val f = java.io.File(java.io.File(context.filesDir, "autotask"), "diag.log")
+            f.parentFile?.mkdirs()
+            f.appendText("${System.currentTimeMillis()} $message\n")
         }
     }
 
@@ -60,6 +81,26 @@ internal class SimpleAutoTaskRuntime(
             return
         }
 
+        // ① 优先：投递到会话，走**正常对话流程**（等价用户发消息）。
+        //    对齐 dsh 的 `agent.followup(message)`：只有这样才会进 UI 状态、界面实时刷新，
+        //    落库与生命周期也由正常流程负责。第一版直接调 complete() 是错的（界面看不到）。
+        val prompt = buildPrompt(task)
+        if (AutoTaskDispatcher.tryDeliver(task.conversationId, prompt)) {
+            diag(context, "delivered via session (normal flow) ${task.id}")
+            val stillActiveDelivered = task.schedule?.repeating == true
+            store.saveBlocking(
+                task.copy(
+                    lastRunAt = now,
+                    lastResult = "已投递到会话，结果见当前对话",
+                    active = stillActiveDelivered,
+                ),
+            )
+            store.exportTo(context)
+            return
+        }
+
+        // ② 降级：App 不在前台 / 正忙 / 会话不匹配 —— 离线执行并写回历史 + 通知。
+        diag(context, "fallback to offline run ${task.id}")
         val result = runCatching { runAgentRound(context, task) }
             .getOrElse { error ->
                 "执行失败：${error.message ?: error.javaClass.simpleName}"
@@ -68,10 +109,20 @@ internal class SimpleAutoTaskRuntime(
         // 关键：结果必须写回会话，否则通知点开是空的。
         // 写两条：一条"自动触发"的 user 消息（让上下文读起来连贯）+ 一条 assistant 回复。
         runCatching { kotlinx.coroutines.runBlocking { persistRound(database.conversationDao(), task, result, now) } }
-            .onFailure {
-                AndroidAgentLogger.warnThrottled("auto_task_persist_failed") {
-                    "自动任务结果写回会话失败: type=${it.javaClass.simpleName}"
+            .onFailure { error ->
+                // 同时落一份文件：logcat 环形缓冲很容易被 App 重启冲掉，
+                // 而这里是「结果明明跑出来了却没进会话」的唯一线索。
+                val detail = buildString {
+                    appendLine("${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(now))}")
+                    appendLine("${error.javaClass.name}: ${error.message}")
+                    error.stackTrace.take(6).forEach { appendLine("  at $it") }
                 }
+                runCatching {
+                    val f = java.io.File(java.io.File(context.filesDir, "autotask"), "persist_error.log")
+                    f.parentFile?.mkdirs()
+                    f.appendText(detail + "\n")
+                }
+                AndroidAgentLogger.warnThrottled("auto_task_persist_failed") { "写回会话失败: ${error.message}" }
             }
 
         // 一次性任务（schedule=none 或 after）执行完即结束：active=false 让列表显示"已执行"。

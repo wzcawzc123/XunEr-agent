@@ -39,13 +39,31 @@ internal object DeviceStateReader {
             status == BatteryManager.BATTERY_STATUS_FULL
     }
 
-    /** 是否连着 WiFi 且能上网。 */
+    /**
+     * 是否连着 WiFi 且能上网。
+     *
+     * **不能只看 activeNetwork**：开着 VPN 时默认网络是 tun0，
+     * `hasTransport(TRANSPORT_WIFI)` 为 false → 条件永不满足。
+     * 真机上（本机长期挂 VPN）表现为「脚本判定到点、App 判定条件不满足、任务永不执行」。
+     *
+     * 也不能只依赖 ConnectivityManager：守护脚本读的是 sysfs（wlan0=up），
+     * 两边口径不一致会让人以为「明明连着 WiFi」。
+     * 这里做两层判断：默认网络是 WiFi 就通过；否则遍历所有网络找已连接的 WiFi。
+     */
     fun isOnWifi(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+
+        fun NetworkCapabilities.isWifi(): Boolean =
+            hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+
+        cm.activeNetwork?.let { network ->
+            cm.getNetworkCapabilities(network)?.let { if (it.isWifi()) return true }
+        }
+        // VPN / 蜂窝作默认网络时，WiFi 仍在 allNetworks 里
+        return cm.allNetworks.any { network ->
+            cm.getNetworkCapabilities(network)?.isWifi() == true
+        }
     }
 
     /** 屏幕是否亮着。 */

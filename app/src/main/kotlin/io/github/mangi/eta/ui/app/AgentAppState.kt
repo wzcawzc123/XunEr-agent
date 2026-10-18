@@ -156,6 +156,11 @@ internal class AgentAppState(
     init {
         refreshConversationSummaries()
         observeRuntimeSelection()
+        // 自动任务投递入口：后台到点时优先走这里（等价用户发消息），
+        // 而不是绕过会话自己调 complete() —— 对齐 dsh 的 agent.followup。
+        io.github.mangi.eta.agent.autotask.AutoTaskDispatcher.register { cid, prompt ->
+            deliverAutoTaskPrompt(cid, prompt)
+        }
         runtimeRecoveryInProgress.set(true)
         scope.launch(Dispatchers.IO) {
             try {
@@ -1292,6 +1297,49 @@ internal class AgentAppState(
             state = homeState.copy(journal = boundary.journalPrefix),
             reasoningEffort = homeState.reasoningEffort,
         )
+    }
+
+    /**
+     * 后台任务投递：在当前会话**发起一轮正常对话**（等价于用户发了一条消息）。
+     *
+     * 与「直接跑 complete() 再写库」的区别：这条路会走完整的 [launchConversationRun]，
+     * 因此会更新 UI 状态、界面实时刷新、落库与生命周期都由正常流程负责。
+     *
+     * 三条拒绝条件（返回 false，由调用方降级为离线投递）：
+     * 1. 目标不是当前选中的会话 —— 没有可用的会话状态；
+     * 2. 当前有轮次在跑 —— 对齐「轮次结束再发起」，不打断；
+     * 3. 提示词为空。
+     */
+    fun deliverAutoTaskPrompt(conversationId: String, prompt: String): Boolean {
+        if (conversationId != selectedConversationId) return false
+        if (currentRunId != null) return false
+        if (prompt.isBlank()) return false
+
+        val state = homeState
+        val runId = "run-${UUID.randomUUID()}"
+        val userMessage = UserMessageUi(
+            id = "user-$runId",
+            content = prompt,
+            images = emptyList(),
+            isEdited = false,
+        )
+        val userHistoryMessage = AgentModelClient.buildUserHistoryMessage(
+            text = prompt,
+            images = emptyList(),
+        ).copy(messageId = userMessage.id)
+
+        launchConversationRun(
+            conversationId = conversationId,
+            runId = runId,
+            prompt = prompt,
+            images = emptyList(),
+            history = state.history,
+            userHistoryMessage = userHistoryMessage,
+            messages = state.messages + userMessage,
+            state = state,
+            reasoningEffort = state.reasoningEffort,
+        )
+        return true
     }
 
     fun compactCurrentContext() {

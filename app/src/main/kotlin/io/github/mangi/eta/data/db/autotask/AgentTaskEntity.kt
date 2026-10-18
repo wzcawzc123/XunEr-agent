@@ -57,11 +57,11 @@ internal interface AgentTaskDao {
     @Query("SELECT * FROM agent_tasks ORDER BY created_at ASC")
     fun allBlocking(): List<AgentTaskEntity>
 
-    /** 只取可能执行的：已启用且没跑过。条件判定留给上层（需要设备状态）。 */
-    @Query("SELECT * FROM agent_tasks WHERE enabled = 1 AND last_run_at IS NULL ORDER BY created_at ASC")
+    /** 只取可能执行的：已启用且仍然活跃。是否到点由 TaskQueueSelector 判定（看 schedule + lastRunAt）。 */
+    @Query("SELECT * FROM agent_tasks WHERE enabled = 1 AND active = 1 ORDER BY created_at ASC")
     suspend fun runnable(): List<AgentTaskEntity>
 
-    @Query("SELECT * FROM agent_tasks WHERE enabled = 1 AND last_run_at IS NULL ORDER BY created_at ASC")
+    @Query("SELECT * FROM agent_tasks WHERE enabled = 1 AND active = 1 ORDER BY created_at ASC")
     fun runnableBlocking(): List<AgentTaskEntity>
 
     @Query("SELECT * FROM agent_tasks WHERE id = :id")

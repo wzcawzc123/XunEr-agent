@@ -60,10 +60,19 @@ internal data class AgentTask(
     val isFinished: Boolean
         get() = schedule?.repeating != true && lastRunAt != null
 
-    /** 是否已到点（无 schedule 视为"永远到点"，保持旧行为）。 */
+    /**
+     * 是否已到点。
+     *
+     * **首次（lastRunAt == null）直接放行**：此时是脚本按「到期」把我们唤醒的，
+     * 再算一遍 `nextRunAtMillis(now, null)` 只会得到「未来」（now 已经漂移过了），
+     * 于是永远判 false、任务永不执行 —— 真机终审时踩到（脚本 READY 了但 lastRun 一直是空）。
+     *
+     * 之后按 lastRunAt 推算，这才是稳定的判据。
+     */
     fun isDue(nowMillis: Long): Boolean {
         val spec = schedule ?: return true
-        return nowMillis >= spec.nextRunAtMillis(nowMillis, lastRunAt)
+        val last = lastRunAt ?: return true
+        return nowMillis >= spec.nextRunAtMillis(nowMillis, last)
     }
 
     /** 是否已经跑过（第一版：一次任务只跑一次，避免无人看管下反复花钱）。 */
