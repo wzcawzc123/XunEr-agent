@@ -505,30 +505,11 @@ internal class AgentLocalTools(
         errorResult("CREATE_AUTO_TASK_FAILED", "创建自动任务失败：${e.message ?: e::class.java.simpleName}")
     }
 
-    /** 把当前任务集导出给 root 守护脚本。失败不影响主流程。 */
+    /** 把当前任务集导出给 root 守护脚本（委托给 Store，避免逻辑分散）。 */
     private fun exportAutoTasks() {
-        runCatching {
-            val dao = EtaDatabase.get(context).agentTaskDao()
-            io.github.mangi.eta.agent.autotask.AutoTaskExport.export(
-                context = context,
-                tasks = dao.allBlocking().map { entity ->
-                    io.github.mangi.eta.agent.autotask.AgentTask(
-                        id = entity.id,
-                        title = entity.title,
-                        prompt = entity.prompt,
-                        condition = io.github.mangi.eta.agent.autotask.TaskCondition.fromMask(entity.conditionMask),
-                        maxRounds = entity.maxRounds,
-                        enabled = entity.enabled,
-                        readOnly = entity.readOnly,
-                        conversationId = entity.conversationId,
-                        lastRunAt = entity.lastRunAt,
-                        lastResult = entity.lastResult,
-                        createdAt = entity.createdAt,
-                    )
-                },
-                nowMillis = System.currentTimeMillis(),
-            )
-        }
+        io.github.mangi.eta.agent.autotask.AutoTaskStore(
+            EtaDatabase.get(context).agentTaskDao(),
+        ).exportTo(context)
     }
 
 

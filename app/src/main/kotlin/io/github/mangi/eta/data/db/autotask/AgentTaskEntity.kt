@@ -31,6 +31,14 @@ internal data class AgentTaskEntity(
     @ColumnInfo(name = "last_run_at") val lastRunAt: Long?,
     @ColumnInfo(name = "last_result") val lastResult: String?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    /**
+     * 是否仍活跃。一次性任务（after / 无 schedule）投递一次后转 false，
+     * 让列表显示「已执行」而不是永远停在「等待中」；重复任务保持 true。
+     *
+     * v26 新增：此前只有域模型有 active，Entity 没有 —— 赋值写不进去，
+     * 读回来永远是默认 true，等于该字段形同虚设。
+     */
+    @ColumnInfo(name = "active", defaultValue = "1") val active: Boolean = true,
 )
 
 @Dao

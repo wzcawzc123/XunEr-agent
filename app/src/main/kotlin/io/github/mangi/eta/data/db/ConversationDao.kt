@@ -86,6 +86,29 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("SELECT COALESCE(MAX(sort_index), -1) + 1 FROM conversation_messages WHERE conversation_id = :conversationId")
     suspend fun nextSortIndex(conversationId: String): Int
 
+    /**
+     * 原子追加「自动任务的一轮」：取序号与插入在同一事务内完成。
+     *
+     * 分开调用会有竞态：`nextSortIndex` 与 `insertMessages` 之间若用户发了消息，
+     * 双方会拿到同一个 sort_index，导致会话顺序错乱。
+     * 自动任务恰恰可能在用户正聊天时落结果，这不是理论风险。
+     */
+    @Transaction
+    suspend fun appendAutoTaskRound(
+        conversationId: String,
+        userMessage: ConversationMessageEntity,
+        assistantMessage: ConversationMessageEntity,
+    ) {
+        val start = nextSortIndex(conversationId)
+        insertMessages(
+            listOf(
+                userMessage.copy(sortIndex = start),
+                assistantMessage.copy(sortIndex = start + 1),
+            ),
+        )
+        touchConversation(conversationId, System.currentTimeMillis())
+    }
+
     /** 触达会话的 updated_at，让它在会话列表里冒到前面。 */
     @Query("UPDATE conversations SET updated_at = :at WHERE id = :conversationId")
     suspend fun touchConversation(conversationId: String, at: Long)

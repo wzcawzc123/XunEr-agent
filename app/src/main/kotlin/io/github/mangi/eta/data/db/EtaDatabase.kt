@@ -32,7 +32,7 @@ import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
         ConversationTodoEntity::class,
         AgentTaskEntity::class,
     ],
-    version = 25,
+    version = 26,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -76,6 +76,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_22_23,
                         MIGRATION_23_24,
                         MIGRATION_24_25,
+                        MIGRATION_25_26,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -174,6 +175,11 @@ internal abstract class EtaDatabase : RoomDatabase() {
                 "CREATE INDEX IF NOT EXISTS index_agent_tasks_enabled_last_run " +
                     "ON agent_tasks (enabled, last_run_at)",
             )
+        }
+
+        /** 自动任务活跃状态（v26）：一次性任务投递后置 false，区分「已执行」与「等待中」。 */
+        internal val MIGRATION_25_26 = Migration(25, 26) { database ->
+            database.execSQL("ALTER TABLE agent_tasks ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
         }
 
         /** 自动任务绑定会话（v25）：执行时在原会话追加一轮，而不是新建会话。 */

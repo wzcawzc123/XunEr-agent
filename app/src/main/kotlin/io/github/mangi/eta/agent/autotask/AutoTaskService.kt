@@ -41,6 +41,9 @@ internal class AutoTaskService : Service() {
         // 一次性语义：跑完就停，不留常驻
         runCatching {
             val database = EtaDatabase.get(applicationContext)
+            // 自愈：pending.txt 是数据库的投影，可能因为升级/清理/异常而与库不同步。
+            // 每次被唤醒都重写一次，保证脚本下次读到的是最新状态。
+            AutoTaskStore(database.agentTaskDao()).exportTo(applicationContext)
             val runtime = SimpleAutoTaskRuntime(database)
             runtime.tryRunOnce(applicationContext)
             // 清掉所有待执行标记：本次唤醒已处理完，不清的话任务只会触发一次。

@@ -36,9 +36,37 @@ internal class AutoTaskStore(private val dao: AgentTaskDao) {
 
     suspend fun delete(id: String) = dao.delete(id)
 
+    /**
+     * 把当前任务集导出给 root 守护脚本（写 pending.txt）。
+     *
+     * 为什么放在 Store 而不是调用方：导出是「数据库 → 文件」的投影，
+     * 和读写数据库是同一件事。之前写在 AgentLocalTools 里，导致
+     * ① 只能靠工具调用时触发，其他路径改了任务不会同步；
+     * ② 里面还手工重建了一份 Entity→域模型 的映射，漏了 active 字段。
+     *
+     * 失败静默：导出失败不应该影响任务本身的保存。
+     */
+    fun exportTo(context: android.content.Context) {
+        runCatching {
+            AutoTaskExport.export(
+                context = context,
+                tasks = allBlocking(),
+                nowMillis = System.currentTimeMillis(),
+            )
+        }
+    }
+
     // ---------- 转换 ----------
 
-    private fun AgentTaskEntity.toTask(): AgentTask = AgentTask(
+    /**
+     * Entity → 域模型。
+     *
+     * **internal 而不是 private**：导出给守护脚本时也要用这同一份映射。
+     * 之前 AgentLocalTools 里手工重建了一份，漏了 `active` 字段 ——
+     * 导致「一次性任务执行后不再触发」这个修复被静默抵消。
+     * 映射只允许有一份。
+     */
+    internal fun AgentTaskEntity.toTask(): AgentTask = AgentTask(
         id = id,
         title = title,
         prompt = prompt,
@@ -47,6 +75,7 @@ internal class AutoTaskStore(private val dao: AgentTaskDao) {
         enabled = enabled,
         readOnly = readOnly,
         conversationId = conversationId,
+        active = active,
         lastRunAt = lastRunAt,
         lastResult = lastResult,
         createdAt = createdAt,
@@ -61,6 +90,7 @@ internal class AutoTaskStore(private val dao: AgentTaskDao) {
         enabled = enabled,
         readOnly = readOnly,
         conversationId = conversationId,
+        active = active,
         lastRunAt = lastRunAt,
         lastResult = lastResult,
         createdAt = createdAt,

@@ -73,7 +73,10 @@ internal class SimpleAutoTaskRuntime(
                 }
             }
 
-        store.saveBlocking(task.copy(lastRunAt = now, lastResult = result))
+        // 一次性任务（无 schedule 或 after）执行完即结束：active=false 让列表显示"已执行"，
+        // 而不是永远停在"等待中"。重复任务（every/daily）保持 active。
+        val stillActive = task.schedule?.repeating != false
+        store.saveBlocking(task.copy(lastRunAt = now, lastResult = result, active = stillActive))
         AutoTaskNotifier.notifyFinished(context, task, result)
     }
 
@@ -119,27 +122,74 @@ internal class SimpleAutoTaskRuntime(
             conversationId = targetConversationId,
         )
 
+        // 轮数护栏：complete() 没有 maxRounds 参数，靠监听 RoundStarted 自己掐。
+        // 之前 buildPrompt 里写「最多执行 N 轮」只是提示词，模型完全可以无视 ——
+        // 成本不可控是自动任务最危险的失手方式（无人看着还可能一直跑）。
+        val controller = AgentRunController()
+        var rounds = 0
         val reply = AgentModelClient.complete(
             config = config,
             prompt = buildPrompt(task),
             toolExecutor = tools,
             provider = provider,
-            runController = AgentRunController(),
+            runController = controller,
             history = history,
             sessionId = targetConversationId,
+            onEvent = { event ->
+                if (event is io.github.mangi.eta.agent.runtime.AgentEvent.RoundStarted) {
+                    rounds += 1
+                    if (rounds > task.maxRounds) {
+                        AndroidAgentLogger.warnThrottled("auto_task_round_cap") {
+                            "自动任务 ${task.id} 超过轮数上限 ${task.maxRounds}，已取消"
+                        }
+                        controller.cancel()
+                    }
+                }
+            },
         )
 
         return reply.content.ifBlank { "（模型未返回内容）" }
     }
 
-    /** 读会话历史（historyJson → ConversationMessage 列表）。 */
+    /**
+     * 读会话历史（historyJson → ConversationMessage 列表），**带字符预算**。
+     *
+     * 没有预算会出大问题：一个上千条的会话（真实数据里有过 1287 条 / 100 万字符）
+     * 会被整段塞进每次自动任务的请求里 —— 单次就可能几块钱，而且可能超模型上下文。
+     * 自动任务只需要「最近的上下文」，从尾部取到预算为止。
+     */
     private suspend fun loadHistory(
         dao: io.github.mangi.eta.data.db.ConversationDao,
         conversationId: String,
     ): List<AgentModelClient.ConversationMessage> = runCatching {
         val raw = dao.historyJsonFor(conversationId) ?: return@runCatching emptyList()
-        io.github.mangi.eta.agent.model.AgentConversationCodec.decodeTranscript(raw)
+        val all = io.github.mangi.eta.agent.model.AgentConversationCodec.decodeTranscript(raw)
+        trimToBudget(all)
     }.getOrElse { emptyList() }
+
+    /** 从尾部往前累加，直到超出字符预算；保证最后一条（最新上下文）一定被保留。 */
+    private fun trimToBudget(
+        messages: List<AgentModelClient.ConversationMessage>,
+    ): List<AgentModelClient.ConversationMessage> {
+        var budget = HISTORY_CHAR_BUDGET
+        val kept = ArrayDeque<AgentModelClient.ConversationMessage>()
+        for (msg in messages.asReversed()) {
+            val len = runCatching { msg.content.length }.getOrDefault(0)
+            if (kept.isNotEmpty() && budget - len < 0) break
+            budget -= len
+            kept.addFirst(msg)
+        }
+        return kept.toList()
+    }
+
+    private companion object {
+        /**
+         * 自动任务的历史预算（字符）。
+         * 60k 字符 ≈ 中文 30k tokens 量级，留足工具与响应的余量，
+         * 又不至于让一次自动唤醒烧掉太多钱。
+         */
+        const val HISTORY_CHAR_BUDGET = 60_000
+    }
 
     private fun buildPrompt(task: AgentTask): String = buildString {
         appendLine("[自动任务] ${task.title}")
@@ -162,25 +212,24 @@ internal class SimpleAutoTaskRuntime(
         now: Long,
     ) {
         val conversationId = task.conversationId ?: return  // 旧数据没绑会话，不写
-        val start = dao.nextSortIndex(conversationId)
-        dao.insertMessages(
-            listOf(
-                io.github.mangi.eta.data.db.ConversationMessageEntity(
-                    id = "auto-user-$now",
-                    conversationId = conversationId,
-                    sortIndex = start,
-                    type = "user",
-                    content = "⚡ [自动任务] ${task.title}（${task.condition.describe()}）",
-                ),
-                io.github.mangi.eta.data.db.ConversationMessageEntity(
-                    id = "auto-assistant-$now",
-                    conversationId = conversationId,
-                    sortIndex = start + 1,
-                    type = "assistant",
-                    content = result,
-                ),
+        // ID 里带 taskId：同一毫秒内不同任务落结果时不会互相覆盖（@Upsert 会静默替换）
+        val uid = "${task.id}-$now"
+        dao.appendAutoTaskRound(
+            conversationId = conversationId,
+            userMessage = io.github.mangi.eta.data.db.ConversationMessageEntity(
+                id = "auto-user-$uid",
+                conversationId = conversationId,
+                sortIndex = 0,
+                type = "user",
+                content = "⚡ [自动任务] ${task.title}（${task.condition.describe()}）",
+            ),
+            assistantMessage = io.github.mangi.eta.data.db.ConversationMessageEntity(
+                id = "auto-assistant-$uid",
+                conversationId = conversationId,
+                sortIndex = 0,
+                type = "assistant",
+                content = result,
             ),
         )
-        dao.touchConversation(conversationId, now)
     }
 }

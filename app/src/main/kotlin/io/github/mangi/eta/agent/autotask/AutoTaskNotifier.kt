@@ -1,5 +1,8 @@
 package io.github.mangi.eta.agent.autotask
 
+import io.github.mangi.eta.ui.MainActivity
+import android.content.Intent
+import android.app.PendingIntent
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -39,8 +42,28 @@ internal object AutoTaskNotifier {
                 .setStyle(NotificationCompat.BigTextStyle().bigText(result.take(1_000)))
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
+                .apply {
+                    // 点击直达任务所属会话（复用 MainActivity 已有的 ACTION_OPEN_CONVERSATION_ID）。
+                    // 没有这个，用户点通知只会落在 App 首页，还得自己找 —
+                    // 自动任务的结果恰恰在某个具体会话里。
+                    val target = task.conversationId
+                    if (!target.isNullOrBlank()) {
+                        setContentIntent(
+                            PendingIntent.getActivity(
+                                context,
+                                task.id.hashCode(),
+                                Intent(context, MainActivity::class.java)
+                                    .setAction(MainActivity.ACTION_OPEN_CONVERSATION_ID)
+                                    .putExtra(MainActivity.EXTRA_CONVERSATION_ID, target)
+                                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                            ),
+                        )
+                    }
+                }
                 .build()
-            manager.notify(NOTIFICATION_ID + task.id.hashCode().and(0xFFFF), notification)
+            // 通知 ID：用 task 的 hash 但限制在正数范围，避免与低 ID 冲突
+            manager.notify(NOTIFICATION_ID + (task.id.hashCode() and 0x7FFF), notification)
         }
     }
 

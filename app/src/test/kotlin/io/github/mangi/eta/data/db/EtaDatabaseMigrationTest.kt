@@ -58,6 +58,7 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_22_23,
                 EtaDatabase.MIGRATION_23_24,
                 EtaDatabase.MIGRATION_24_25,
+                EtaDatabase.MIGRATION_25_26,
             )
             .build()
         try {
@@ -127,6 +128,40 @@ class EtaDatabaseMigrationTest {
             assertEquals(emptyList<RuntimeInFlightRunWithEvents>(), inFlightRuns)
             assertEquals(listOf("mcp-1"), mcpServers.map { it.id })
             assertEquals(null, mcpServers.single().toolsExpireAt)
+
+            // ===== 自动任务表契约（v24 建表 + v25/v26 加列）=====
+            //
+            // 这一段是补审查发现的漏洞：迁移测试此前**从未查询过 agent_tasks**，
+            // 也**没有 runMigrationsAndValidate**，所以 v24/v25/v26 的 DDL 是否正确
+            // 完全没有被验证过。真机上若迁移失败，会命中
+            // fallbackToDestructiveMigration(dropAllTables = true) —— **清空用户全部数据**。
+            //
+            // 这里逐个列出所有列做全字段 SELECT：少一列或拼错列名都会直接抛异常。
+            val agentTasksCursor = database.openHelper.readableDatabase.query(
+                "SELECT id, title, prompt, condition_mask, max_rounds, enabled, read_only, " +
+                    "conversation_id, last_run_at, last_result, created_at, active FROM agent_tasks",
+            )
+            agentTasksCursor.use { assertEquals(0, it.count) }
+
+            // v26 的 active 必须有 DEFAULT 1，否则从旧版本升级上来的行会是 NULL，
+            // 而 Entity 声明为非空 Boolean → Room 读取时抛异常。
+            val activeDefault = database.openHelper.readableDatabase.query(
+                "SELECT dflt_value FROM pragma_table_info('agent_tasks') WHERE name = 'active'",
+            ).use { cursor ->
+                check(cursor.moveToFirst()) { "agent_tasks.active 列不存在" }
+                cursor.getString(0)
+            }
+            assertEquals("1", activeDefault)
+
+            // v24 建的索引也要在（否则 pick() 的查询会全表扫）
+            val indexCount = database.openHelper.readableDatabase.query(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' " +
+                    "AND name = 'index_agent_tasks_enabled_last_run'",
+            ).use { cursor ->
+                check(cursor.moveToFirst())
+                cursor.getInt(0)
+            }
+            assertEquals(1, indexCount)
             assertEquals(null, provider.models.first().contextWindowOverride)
             assertEquals(null, provider.models.first().reasoningOverride)
             assertEquals(null, provider.models.first().reasoningCapabilitiesOverride)
