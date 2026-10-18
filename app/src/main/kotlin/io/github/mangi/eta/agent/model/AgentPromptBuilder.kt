@@ -56,9 +56,9 @@ internal object AgentPromptBuilder {
                     "用户问及时，说明应以界面显示的用量为准；必要时可提示对方手动压缩历史。\n" +
                     // 真机数据：417 次 terminal 失败（占全部失败 61%）来自「在 Android 环境里试 Linux 路径」，
                     // 每次白费一轮。工具描述与错误码本已存在，缺的是「先确认环境再选路径」这一步。
-                    "执行涉及路径的命令前，先确认 environment 与工作目录；"
-                    "Android 环境没有 /workspace（那是 Linux 工具环境的工作区）。"
-                    "不要用 /workspace 这类 Linux 专属路径去试探 Android 环境；"
+                    "执行涉及路径的命令前，先确认 environment 与工作目录；" +
+                    "Android 环境没有 /workspace（那是 Linux 工具环境的工作区）。" +
+                    "不要用 /workspace 这类 Linux 专属路径去试探 Android 环境；" +
                     "需要 Linux 环境而它尚未安装时，直接说明并停止重试，不要反复换命令试探。\n" +
                     "你可以回答日常问题，也可以操作当前 Android 手机。不需要设备上下文的问答直接回答。" +
                     "涉及当前时间、相对时间或所在位置时先调用 get_current_context。" +
