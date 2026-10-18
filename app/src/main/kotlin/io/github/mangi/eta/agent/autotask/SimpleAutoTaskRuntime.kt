@@ -64,6 +64,15 @@ internal class SimpleAutoTaskRuntime(
                 "执行失败：${error.message ?: error.javaClass.simpleName}"
             }
 
+        // 关键：结果必须写回会话，否则通知点开是空的。
+        // 写两条：一条"自动触发"的 user 消息（让上下文读起来连贯）+ 一条 assistant 回复。
+        runCatching { kotlinx.coroutines.runBlocking { persistRound(database.conversationDao(), task, result, now) } }
+            .onFailure {
+                AndroidAgentLogger.warnThrottled("auto_task_persist_failed") {
+                    "自动任务结果写回会话失败: type=${it.javaClass.simpleName}"
+                }
+            }
+
         store.saveBlocking(task.copy(lastRunAt = now, lastResult = result))
         AutoTaskNotifier.notifyFinished(context, task, result)
     }
@@ -138,5 +147,40 @@ internal class SimpleAutoTaskRuntime(
         appendLine("要求：只做只读操作；不要询问用户；完成后用一段话总结结果。")
         appendLine()
         append(task.prompt)
+    }
+
+    /**
+     * 把这一轮追加到会话。
+     *
+     * 写两条而不是一条：只有 assistant 消息的话，会话历史里会缺"这一轮因何而起"，
+     * 用户往上翻看不懂；补一条带 ⚡ 标记的 user 消息，语义完整且一眼可辨是自动轮。
+     */
+    private suspend fun persistRound(
+        dao: io.github.mangi.eta.data.db.ConversationDao,
+        task: AgentTask,
+        result: String,
+        now: Long,
+    ) {
+        val conversationId = task.conversationId ?: return  // 旧数据没绑会话，不写
+        val start = dao.nextSortIndex(conversationId)
+        dao.insertMessages(
+            listOf(
+                io.github.mangi.eta.data.db.ConversationMessageEntity(
+                    id = "auto-user-$now",
+                    conversationId = conversationId,
+                    sortIndex = start,
+                    type = "user",
+                    content = "⚡ [自动任务] ${task.title}（${task.condition.describe()}）",
+                ),
+                io.github.mangi.eta.data.db.ConversationMessageEntity(
+                    id = "auto-assistant-$now",
+                    conversationId = conversationId,
+                    sortIndex = start + 1,
+                    type = "assistant",
+                    content = result,
+                ),
+            ),
+        )
+        dao.touchConversation(conversationId, now)
     }
 }

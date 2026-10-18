@@ -82,6 +82,14 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("SELECT roleplay_json FROM conversations WHERE id = :conversationId")
     suspend fun roleplayJsonRow(conversationId: String): String?
 
+    /** 下一条消息的 sort_index（自动任务追加自动轮时用）。 */
+    @Query("SELECT COALESCE(MAX(sort_index), -1) + 1 FROM conversation_messages WHERE conversation_id = :conversationId")
+    suspend fun nextSortIndex(conversationId: String): Int
+
+    /** 触达会话的 updated_at，让它在会话列表里冒到前面。 */
+    @Query("UPDATE conversations SET updated_at = :at WHERE id = :conversationId")
+    suspend fun touchConversation(conversationId: String, at: Long)
+
     /** 只取历史 JSON：自动任务执行时需要在原会话追加一轮，要先读回上下文。 */
     @Query("SELECT history_json FROM conversations WHERE id = :conversationId")
     suspend fun historyJsonFor(conversationId: String): String?
