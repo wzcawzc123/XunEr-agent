@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.tool
 
+import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
 import android.content.Context
 import android.content.Intent
@@ -602,6 +603,18 @@ internal class AgentLocalTools(
                     if (!result.changed) put("message", "内容与写入前逐字节一致，未产生任何改动。")
                 }
                 .put("revision", result.snapshot.revision)
+                // 位置建议：核心预算只有 32K，写错地方会挤掉真正每轮都要用的规则。
+                // 只建议、不自动移动 —— MEMORY.md 是用户资产。
+                .apply {
+                    val written = args.optString("content")
+                    if (written.isNotBlank() && args.optString("mode") != "clear") {
+                        val suggestion = AgentMemoryPlacement.suggest(written)
+                        put("placement", JSONObject()
+                            .put("suggested", suggestion.placement.wire)
+                            .put("label", suggestion.placement.label)
+                            .put("reason", suggestion.reason))
+                    }
+                }
                 .put("bytes", result.snapshot.byteSize)
                 .put("line_count", result.snapshot.lineCount)
                 .toString()
