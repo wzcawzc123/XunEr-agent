@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.components
 
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -47,7 +48,11 @@ internal fun ConversationHeatmap(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(88.dp),
+                // **高度必须按宽高比算，不能写死**：
+                // 格子尺寸由宽度决定（cell = width / (weeks * 1.6)），
+                // 7 天纵向占 7 * (cell * 1.35)，写死 88dp 会在常见屏宽下裁掉最后 2 行 ——
+                // 真机表现为「只有 5 行、最后一行和图例挤在一起」。
+                .aspectRatio(weeks.size * 1.6f / (7 * 1.35f)),
         ) {
             val cell = size.width / (weeks.size * 1.6f)
             val gap = cell * 0.35f

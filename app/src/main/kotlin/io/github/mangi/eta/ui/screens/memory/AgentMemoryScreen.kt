@@ -139,6 +139,10 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
+                // **必须包一层 Column**：AnimatedVisibility 内部用 Layout 实现，
+                // 多个子元素会被测量后放在同一位置（堆叠），
+                // 结果设置卡片正好压在「长期/短期记忆」切换按钮上 —— 真机反馈「被挡住了」。
+                Column {
                 MemoryTargetSwitcher(
                     state = state,
                     onRequestSwitch = { target ->
@@ -152,6 +156,7 @@ internal fun AgentMemoryScreen(
                     onRollup = { onAction(AgentMemoryAction.Rollup) },
                 )
                 MemorySettingsGroup(state = state, onAction = onAction)
+                }
             }
             MemoryHeatmapSection()
             MemorySearchField(state = state, onAction = onAction)
