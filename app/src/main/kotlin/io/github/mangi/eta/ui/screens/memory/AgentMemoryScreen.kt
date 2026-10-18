@@ -1,5 +1,7 @@
 package io.github.mangi.eta.ui.screens.memory
 
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.animateFloatAsState
 import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -94,6 +96,9 @@ internal fun AgentMemoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
     var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
+    // 概览（启用开关 / 注入预算 / 热力图）默认收起：
+    // 这些是低频信息，常驻会把正文区挤成一小条，滚动像"卡在文件栏"。
+    var overviewExpanded by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -156,10 +161,23 @@ internal fun AgentMemoryScreen(
                     },
                     onRollup = { onAction(AgentMemoryAction.Rollup) },
                 )
-                MemorySettingsGroup(state = state, onAction = onAction)
+                // 概览：折叠时只占一行，展开才显示设置与热力图。
+                OverviewHeader(
+                    expanded = overviewExpanded,
+                    onToggle = { overviewExpanded = !overviewExpanded },
+                )
+                AnimatedVisibility(
+                    visible = overviewExpanded,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    Column {
+                        MemorySettingsGroup(state = state, onAction = onAction)
+                        MemoryHeatmapSection()
+                    }
+                }
                 }
             }
-            MemoryHeatmapSection()
             MemorySearchField(state = state, onAction = onAction)
             MemoryDocumentCard(
                 state = state,
@@ -297,6 +315,36 @@ private fun MemoryTargetSwitcher(
                 color = colors.onSurfaceVariantSummary,
             )
         }
+    }
+}
+
+/** 概览区的折叠头：一行标题 + 箭头，点整行切换。 */
+@Composable
+private fun OverviewHeader(expanded: Boolean, onToggle: () -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    val arrowAngle by animateFloatAsState(if (expanded) 180f else 0f, label = "overviewArrow")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(
+                horizontal = EtaPreferenceDefaults.SidePadding,
+                vertical = 10.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "记忆概览",
+            style = MiuixTheme.textStyles.body2,
+            color = colors.onSurfaceVariantSummary,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "▾",
+            style = MiuixTheme.textStyles.footnote1,
+            color = colors.onSurfaceVariantSummary,
+            modifier = Modifier.rotate(arrowAngle),
+        )
     }
 }
 
