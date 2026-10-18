@@ -43,6 +43,9 @@ internal class AutoTaskService : Service() {
             val database = EtaDatabase.get(applicationContext)
             val runtime = SimpleAutoTaskRuntime(database)
             runtime.tryRunOnce(applicationContext)
+            // 清掉所有待执行标记：本次唤醒已处理完，不清的话任务只会触发一次。
+            // 失败路径也清 —— 否则一条持续失败的任务会每次唤醒都重试，无限循环。
+            clearAllRunMarkers()
         }.onFailure {
             AndroidAgentLogger.warnThrottled("auto_task_service_failed") {
                 "AutoTaskService 执行失败: type=${it.javaClass.simpleName}"
@@ -51,6 +54,14 @@ internal class AutoTaskService : Service() {
         stopSelf(startId)
         // 不要 START_STICKY：本服务由外部按需唤醒，不该被系统反复重建
         return START_NOT_STICKY
+    }
+
+    /** 清空待执行标记文件（本次唤醒的所有标记都已处理）。 */
+    private fun clearAllRunMarkers() {
+        runCatching {
+            val file = AutoTaskExport.runMarkerFile(applicationContext)
+            if (file.exists()) file.delete()
+        }
     }
 
     private fun startForegroundSafely() {

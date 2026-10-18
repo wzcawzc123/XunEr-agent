@@ -69,6 +69,32 @@ internal object AutoTaskExport {
         }
     }
 
+
+    private const val RUN_FILE_NAME = "pending_run.txt"
+
+    /** 守护脚本写的「待执行标记」文件（App 私有目录，双方都可读写）。 */
+    fun runMarkerFile(context: Context): File = File(File(context.filesDir, DIR_NAME), RUN_FILE_NAME)
+
+    /**
+     * 清掉某条任务的待执行标记。
+     *
+     * **必须执行后立刻清**：脚本靠这个文件去重（已有标记就不再触发）。
+     * 不清的话这条任务只会跑一次 —— 审查时发现的断点。
+     */
+    fun clearRunMarker(context: Context, taskId: String) {
+        runCatching {
+            val file = runMarkerFile(context)
+            if (!file.exists()) return
+            val kept = file.readLines().filterNot { it.startsWith("$taskId|") }
+            val tmp = File(file.parentFile, "$RUN_FILE_NAME.tmp")
+            tmp.writeText(kept.joinToString("\n").let { if (it.isEmpty()) "" else "$it\n" })
+            if (!tmp.renameTo(file)) {
+                file.writeText(kept.joinToString("\n"))
+                tmp.delete()
+            }
+        }
+    }
+
     /** 供日志用：导出失败时静默（调用方无需感知）。 */
     private fun formatTime(millis: Long): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(millis))
