@@ -70,14 +70,16 @@ internal sealed interface ScheduleSpec {
          * 原实现总是从 now 往后算，返回的永远在未来，于是 isDue() 恒为 false，
          * 每日任务**永远不会触发**。
          *
-         * 从未执行过时用一个远早的基准，使「最近的某个 9 点」成为第一个目标：
-         * 若今天 9 点已过，它会立刻判为到点（补跑）；否则等今天 9 点。
+         * **从未执行过时以 now 为基准**（不是"一年前"）。
+         * 用"一年前"做基准会返回一个历史时刻，导致新建任务立刻触发 ——
+         * 用户下午 3 点建「每天 9 点」的任务，期望的是明天 9 点，而不是现在就跑。
+         * 这个语义错误是写测试时发现的（断言"next 应在 0~1 天内"直接把它照出来了）。
          */
         override fun nextRunAtMillis(now: Long, lastRunAt: Long?): Long {
             val zone = java.time.ZoneId.systemDefault()
             val baseInstant = lastRunAt
                 ?.let { java.time.Instant.ofEpochMilli(it) }
-                ?: java.time.Instant.ofEpochMilli(now).minus(365, java.time.temporal.ChronoUnit.DAYS)
+                ?: java.time.Instant.ofEpochMilli(now)
             var candidateLocal = baseInstant.atZone(zone).toLocalDate()
             var candidate = candidateLocal
                 .atTime(hourOfDay, minuteOfHour)
