@@ -6,6 +6,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import io.github.mangi.eta.data.db.plan.ConversationTodoDao
+import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 
 @Database(
     entities = [
@@ -25,8 +27,9 @@ import androidx.room.migration.Migration
         McpServerEntity::class,
         CharacterEntity::class,
         UserPersonaEntity::class,
+        ConversationTodoEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -36,6 +39,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun skillDao(): SkillDao
     abstract fun mcpServerDao(): McpServerDao
     abstract fun characterDao(): CharacterDao
+    abstract fun conversationTodoDao(): ConversationTodoDao
 
     companion object {
         @Volatile
@@ -65,6 +69,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_19_20,
                         MIGRATION_20_21,
                         MIGRATION_21_22,
+                        MIGRATION_22_23,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -111,6 +116,31 @@ internal abstract class EtaDatabase : RoomDatabase() {
 
         internal val MIGRATION_21_22 = Migration(21, 22) { database ->
             database.execSQL("ALTER TABLE conversations ADD COLUMN model_id TEXT")
+        }
+
+        /**
+         * 任务清单独立成表（v23）。
+         *
+         * 刻意**不**并入 conversation_context_checkpoints：检查点会被上下文压缩重写，
+         * 而清单的全部价值恰恰是「压缩之后仍然记得自己在做什么」。
+         * 独立表让它天然免疫压缩，代价只是一次额外查询。
+         */
+        internal val MIGRATION_22_23 = Migration(22, 23) { database ->
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS conversation_todos (" +
+                    "conversation_id TEXT NOT NULL, " +
+                    "item_id TEXT NOT NULL, " +
+                    "subject TEXT NOT NULL, " +
+                    "active_form TEXT NOT NULL, " +
+                    "status TEXT NOT NULL, " +
+                    "position INTEGER NOT NULL, " +
+                    "updated_at INTEGER NOT NULL, " +
+                    "PRIMARY KEY(conversation_id, item_id))",
+            )
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_conversation_todos_conversation_id_position " +
+                    "ON conversation_todos (conversation_id, position)",
+            )
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
