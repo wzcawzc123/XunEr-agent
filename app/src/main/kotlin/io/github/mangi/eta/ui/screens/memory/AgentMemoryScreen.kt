@@ -265,11 +265,31 @@ private fun MemoryTargetSwitcher(
         )
         Spacer(modifier = Modifier.weight(1f))
         if (state.target == MemoryTargetUi.Short) {
-            EtaTextButton(
-                text = if (state.isSaving) "整理中…" else "整理到长期",
-                enabled = !state.isLoading && !state.isSaving,
-                onClick = onRollup,
-            )
+            // 用与 TargetChip 同一套尺寸/字号的胶囊按钮：
+            // EtaTextButton 默认字号偏大，和左侧两个 chip 放一起很突兀（真机反馈）。
+            Row(
+                modifier = Modifier
+                    .background(colors.primary.copy(alpha = 0.15f), CircleShape)
+                    .clickable(
+                        enabled = !state.isLoading && !state.isSaving,
+                        onClick = onRollup,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 用文字箭头而不是图标库：本项目图标集里没有上移/归档类图标，自绘更稳。
+                Text(
+                    text = "↗",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.primary,
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (state.isSaving) "整理中…" else "整理到长期",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.primary,
+                )
+            }
         } else {
             Text(
                 text = "跨会话持久事实",
@@ -369,7 +389,11 @@ private fun MemorySearchField(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = EtaPreferenceDefaults.SidePadding)
-            .padding(top = EtaPreferenceDefaults.GroupSpacing),
+            // 上下都要留白：只留 top 会与下面的 MEMORY.md 卡片粘连（真机反馈）。
+            .padding(
+                top = EtaPreferenceDefaults.GroupSpacing,
+                bottom = EtaPreferenceDefaults.GroupSpacing,
+            ),
     )
 }
 

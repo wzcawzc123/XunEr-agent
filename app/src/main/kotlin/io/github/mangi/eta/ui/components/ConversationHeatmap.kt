@@ -52,9 +52,12 @@ internal fun ConversationHeatmap(
                 // 格子尺寸由宽度决定（cell = width / (weeks * 1.6)），
                 // 7 天纵向占 7 * (cell * 1.35)，写死 88dp 会在常见屏宽下裁掉最后 2 行 ——
                 // 真机表现为「只有 5 行、最后一行和图例挤在一起」。
-                .aspectRatio(weeks.size * 1.6f / (7 * 1.35f)),
+                // 宽高比 = 列数 / 行数（每格水平、垂直占位系数一致），
+                // 否则总宽 = 16 × cell × 1.35 < 容器宽，右侧会留一条空白（真机反馈「没铺满」）。
+                .aspectRatio(weeks.size / 7f),
         ) {
-            val cell = size.width / (weeks.size * 1.6f)
+            // 与 aspectRatio 保持一致：水平占位系数也用 1.35，保证正好铺满整行
+            val cell = size.width / (weeks.size * 1.35f)
             val gap = cell * 0.35f
             weeks.forEachIndexed { weekIndex, week ->
                 week.days.forEachIndexed { dayIndex, day ->
