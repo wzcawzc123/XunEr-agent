@@ -173,6 +173,9 @@ internal class AgentRuntimeRunExecutor(
                         currentPermissions().deviceSensitiveActionTools
                 },
                 supportsVision = { request.config.supportsVision },
+                // 任务清单按会话落库。无会话标识时由工具层明确拒绝写入，
+                // 而不是写进空 id 造成串会话。
+                conversationId = conversationId.orEmpty(),
                 memoryToolsEnabled = {
                     runBlocking { AgentMemoryRepository.isEnabled() }
                 },

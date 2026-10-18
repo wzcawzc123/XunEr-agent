@@ -18,6 +18,9 @@ import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanStore
+import io.github.mangi.eta.agent.plan.AgentPlanTool
+import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.device.LocalNetworkPermission
 import io.github.mangi.eta.agent.web.AgentWebTools
@@ -93,6 +96,13 @@ internal class AgentLocalTools(
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
     private val memoryWritable: Boolean = true,
+    /**
+     * 当前会话标识，供任务清单（todo_write）落库使用。
+     *
+     * 带默认值是为了不惊动现有构造点：没有会话标识时清单工具会明确拒绝写入
+     * （"当前会话尚无标识"），而不是悄悄写到空 id 下造成串会话。
+     */
+    private val conversationId: String = "",
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },
     private val supportsVision: () -> Boolean = { true },
     private val screenObservationProvider: (
@@ -268,6 +278,7 @@ internal class AgentLocalTools(
                 "androguard_analyze" -> textResult(terminalTool { androguardAnalyze(args) })
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
+                AgentPlanTool.NAME -> textResult(todoWrite(args))
                 "skills_list" -> textResult(skillsList(args))
                 "skills_read" -> textResult(skillsRead(args))
                 "skills_read_resource" -> textResult(skillsReadResource(args))
@@ -444,6 +455,25 @@ internal class AgentLocalTools(
     )
 
     private var lastMemoryPageKey: MemoryPageKey? = null
+
+    /**
+     * 任务清单：全量覆盖写入。
+     *
+     * 这里只做「取 DAO + 调工具」两件事，校验与落库都在 plan 包里完成，
+     * 保证工具行为可在纯 JVM 上测试（见 AgentPlanToolTest）。
+     * 会话标识缺失时由工具层返回可读文本拒绝，而不是抛异常 ——
+     * 抛异常会把一次参数问题升级成整个 run 失败。
+     */
+    private fun todoWrite(args: JSONObject): String = try {
+        AgentPlanTool.execute(
+            args = args,
+            store = AgentPlanStore(EtaDatabase.get(context).conversationTodoDao()),
+            conversationId = conversationId,
+            nowMillis = System.currentTimeMillis(),
+        )
+    } catch (e: Exception) {
+        errorResult("TODO_WRITE_FAILED", "写入任务清单失败：${e.message ?: e::class.java.simpleName}")
+    }
 
     /** target=short → 短期记忆仓库，默认 long（向后兼容）；两仓库接口一致可互换。 */
     private fun memoryRepositoryFor(args: JSONObject): MemoryRepository = if (args.optString("target") == "short") {
