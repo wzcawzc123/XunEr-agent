@@ -26,22 +26,72 @@ internal class SimpleAutoTaskRuntime(
 ) : AutoTaskRuntime {
 
     override fun tryRunOnce(context: Context) {
-        // 快速判空：没有任务时完全不打锁，避免无谓开销（该回调会被频繁触发）
-        val store = AutoTaskStore(database.agentTaskDao())
-        val tasks = store.runnableBlocking()
-        diag(context, "tryRunOnce: runnable=${tasks.size} ids=${tasks.map { it.id }}")
-        if (tasks.isEmpty()) return
-
         // **锁必须是进程级的**：AutoTaskService 每次 onStartCommand 都会 new 一个
         // SimpleAutoTaskRuntime，实例字段锁各管各的，两条 am 同时到达时会并行执行
         // 两条任务（各自真金白银跑一轮 Agent）。审查时发现的。
+        //
+        // **读取也必须进锁**（M1）：原来「锁外快照 + 锁内执行」在并发唤醒下，
+        // 两个唤醒线程可能都读到同一份就绪列表，各自跑一遍同一条任务。
         synchronized(RUN_LOCK) {
-            runCatching { runOnceLocked(context, store, tasks) }
-                .onFailure {
-                    AndroidAgentLogger.warnThrottled("auto_task_run_failed") {
-                        "自动任务执行失败: type=${it.javaClass.simpleName}"
-                    }
+            runCatching {
+                val store = AutoTaskStore(database.agentTaskDao())
+                // 崩溃恢复先于决策：被恢复停用的一次性任务不能又被选中跑一遍。
+                // 即使当前没有就绪任务，残留执行中标记也必须清理
+                //（否则任务被停用/删除后标记永远挂着，重新启用时会被误判为中断）。
+                val markers = AutoTaskExport.inProgressEntries(context)
+                if (markers.isNotEmpty()) recoverInterruptedRuns(context, store, markers)
+                val tasks = store.runnableBlocking()
+                diag(context, "tryRunOnce: runnable=${tasks.size} ids=${tasks.map { it.id }}")
+                if (tasks.isEmpty()) return@runCatching
+                runOnceLocked(context, store, tasks)
+            }.onFailure {
+                AndroidAgentLogger.warnThrottled("auto_task_run_failed") {
+                    "自动任务执行失败: type=${it.javaClass.simpleName}"
                 }
+            }
+        }
+    }
+
+    /**
+     * H2 崩溃恢复：离线轮中途被杀（系统回收/进程崩溃）后，执行中标记残留。
+     * 下次唤醒先按标记判定上一轮是「真中断」还是「已完成只差清标记」：
+     * - 任务 lastRunAt >= 标记开始时间 → 上一轮实际完成（execute 里标记与落库用同一个
+     *   now，完成路径二者相等），只清残留标记；
+     * - 否则 → 真中断：记录结果并消费掉这次执行（一次性任务停用，杜绝无时间限制
+     *   的任务每次唤醒都重跑 → 双烧费；周期任务只推进 lastRunAt，等下一次到点）。
+     */
+    private fun recoverInterruptedRuns(context: Context, store: AutoTaskStore, markers: Map<String, Long>) {
+        val byId = store.allBlocking().associateBy { it.id }
+        markers.forEach { (taskId, startedAt) ->
+            val task = byId[taskId]
+            if (task == null || !task.enabled) {
+                // 已删除或已停用：残留标记直接清掉，不动数据
+                AutoTaskExport.clearInProgress(context, taskId)
+                return@forEach
+            }
+            if ((task.lastRunAt ?: 0L) >= startedAt) {
+                // 上一轮已完成（lastRunAt 已推进，只剩清标记这一步没做）——只清残留标记
+                AutoTaskExport.clearInProgress(context, taskId)
+                return@forEach
+            }
+            val repeating = task.schedule?.repeating == true
+            store.saveBlocking(
+                task.copy(
+                    lastRunAt = startedAt,
+                    lastResult = if (repeating) {
+                        "上次执行被中断（进程被杀），已记录，等下一次到点"
+                    } else {
+                        "上次执行被中断（进程被杀），已按完成处理，不会重跑"
+                    },
+                    // 一次性任务：消费掉这次执行（否则每次唤醒都重跑 → 双烧费）。
+                    // 周期任务：只推进 lastRunAt，保持 active，下一次到点照常。
+                    active = if (repeating) task.active else false,
+                ),
+            )
+            AutoTaskExport.clearInProgress(context, taskId)
+            AndroidAgentLogger.warnThrottled("auto_task_interrupted_recovered") {
+                "自动任务 $taskId 上次离线执行被中断，已恢复记录（startedAt=$startedAt）"
+            }
         }
     }
 
@@ -85,7 +135,7 @@ internal class SimpleAutoTaskRuntime(
         //    对齐 dsh 的 `agent.followup(message)`：只有这样才会进 UI 状态、界面实时刷新，
         //    落库与生命周期也由正常流程负责。第一版直接调 complete() 是错的（界面看不到）。
         val prompt = buildPrompt(task)
-        if (AutoTaskDispatcher.tryDeliver(task.conversationId, prompt)) {
+        if (AutoTaskDispatcher.tryDeliver(task.conversationId, prompt, task.maxRounds)) {
             diag(context, "delivered via session (normal flow) ${task.id}")
             val nextRunCount = task.runCount + 1
             val stillActiveDelivered = task.schedule?.repeating == true && nextRunCount < task.maxRuns
@@ -109,7 +159,7 @@ internal class SimpleAutoTaskRuntime(
         //    这正是用户要的「轮次结束 → 自动发起新轮次」，而不是降级成看不见的离线记录。
         val target = task.conversationId
         if (AutoTaskDispatcher.hasHandler() && !target.isNullOrBlank()) {
-            AutoTaskDispatcher.enqueue(task.id, target, prompt)
+            AutoTaskDispatcher.enqueue(task.id, target, prompt, task.maxRounds)
             diag(context, "queued until current run ends ${task.id}")
             val nextRunCountQueued = task.runCount + 1
             store.saveBlocking(
@@ -126,6 +176,10 @@ internal class SimpleAutoTaskRuntime(
 
         // ③ 降级：App 不在前台（UI 未注册投递器）—— 离线执行并写回历史 + 通知，至少数据不丢。
         diag(context, "fallback to offline run ${task.id}")
+        // H2：执行前写「执行中」标记；进程中途被杀时残留，下次唤醒由 recoverInterruptedRuns 判定。
+        // 清除放在整个离线分支的最后（覆盖跑轮+落库+导出+通知全窗口），
+        // 即使清除这一步没执行，完成路径 lastRunAt 与 startedAt 相等，恢复逻辑也只清标记不误报。
+        AutoTaskExport.markInProgress(context, task.id, now)
         val result = runCatching { runAgentRound(context, task) }
             .getOrElse { error ->
                 "执行失败：${error.message ?: error.javaClass.simpleName}"
@@ -178,6 +232,7 @@ internal class SimpleAutoTaskRuntime(
         // 这一步是「执行完 → 下次何时再跑」的唯一连接点。
         store.exportTo(context)
         AutoTaskNotifier.notifyFinished(context, task, result)
+        AutoTaskExport.clearInProgress(context, task.id)
     }
 
     /**

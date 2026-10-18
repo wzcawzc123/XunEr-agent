@@ -77,23 +77,58 @@ internal object AutoTaskExport {
     /** 守护脚本写的「待执行标记」文件（App 私有目录，双方都可读写）。 */
     fun runMarkerFile(context: Context): File = File(File(context.filesDir, DIR_NAME), RUN_FILE_NAME)
 
-    /**
-     * 清掉某条任务的待执行标记。
-     *
-     * **必须执行后立刻清**：脚本靠这个文件去重（已有标记就不再触发）。
-     * 不清的话这条任务只会跑一次 —— 审查时发现的断点。
-     */
-    fun clearRunMarker(context: Context, taskId: String) {
+    // ---------- App 侧「执行中」标记（崩溃恢复用） ----------
+    //
+    // 与脚本的 pending_run.txt 是两套东西：这里记录「App 正在离线执行哪条任务」，
+    // 进程中途被杀（系统回收/崩溃）后，标记残留；下次唤醒据此恢复。
+    // 语义：任何残留标记都只可能来自死进程（活着时同进程内不会并发二次进入）。
+
+    private const val IN_PROGRESS_FILE_NAME = "in_progress.txt"
+
+    private fun inProgressFile(context: Context): File = File(File(context.filesDir, DIR_NAME), IN_PROGRESS_FILE_NAME)
+
+    /** 离线轮开始前写入执行中标记（taskId|startedAt）。写失败绝不影响执行。 */
+    fun markInProgress(context: Context, taskId: String, startedAt: Long) {
         runCatching {
-            val file = runMarkerFile(context)
+            val file = inProgressFile(context)
+            file.parentFile?.mkdirs()
+            val kept = file.takeIf { it.exists() }?.readLines()?.filterNot { it.startsWith("$taskId|") }
+                ?: emptyList()
+            writeLinesAtomically(file, kept + "$taskId|$startedAt")
+        }
+    }
+
+    /** 离线轮完成后清除执行中标记。 */
+    fun clearInProgress(context: Context, taskId: String) {
+        runCatching {
+            val file = inProgressFile(context)
             if (!file.exists()) return
             val kept = file.readLines().filterNot { it.startsWith("$taskId|") }
-            val tmp = File(file.parentFile, "$RUN_FILE_NAME.tmp")
-            tmp.writeText(kept.joinToString("\n").let { if (it.isEmpty()) "" else "$it\n" })
-            if (!tmp.renameTo(file)) {
-                file.writeText(kept.joinToString("\n"))
-                tmp.delete()
-            }
+            writeLinesAtomically(file, kept)
+        }
+    }
+
+    /** 读取全部执行中标记：taskId -> startedAt（用于崩溃恢复；不存在则空）。 */
+    fun inProgressEntries(context: Context): Map<String, Long> {
+        val file = inProgressFile(context)
+        if (!file.exists()) return emptyMap()
+        return runCatching {
+            file.readLines().mapNotNull { line ->
+                val idx = line.indexOf('|')
+                if (idx <= 0) return@mapNotNull null
+                val startedAt = line.substring(idx + 1).toLongOrNull() ?: return@mapNotNull null
+                line.substring(0, idx) to startedAt
+            }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun writeLinesAtomically(target: File, lines: List<String>) {
+        val tmp = File(target.parentFile, "${target.name}.tmp")
+        val body = if (lines.isEmpty()) "" else lines.joinToString("\n") + "\n"
+        tmp.writeText(body)
+        if (!tmp.renameTo(target)) {
+            target.writeText(body)
+            tmp.delete()
         }
     }
 

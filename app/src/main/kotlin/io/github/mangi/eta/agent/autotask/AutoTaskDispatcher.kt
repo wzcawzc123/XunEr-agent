@@ -32,12 +32,13 @@ internal object AutoTaskDispatcher {
      *
      * 返回 true 表示**已经发起一轮正常对话**（后续落库、刷新、生命周期都由正常流程负责）。
      * 返回 false 表示当前不可投递（目标不是当前会话 / 有轮次在跑）。
+     * [maxRounds] 为任务的轮数硬上限，随请求透传给模块侧执行器挂护栏。
      */
     @Volatile
-    private var deliver: ((conversationId: String, prompt: String) -> Boolean)? = null
+    private var deliver: ((conversationId: String, prompt: String, maxRounds: Int?) -> Boolean)? = null
 
     /** 由 UI 层在存活期间注册；传 null 表示卸载（例如 Activity 销毁）。 */
-    fun register(handler: ((conversationId: String, prompt: String) -> Boolean)?) {
+    fun register(handler: ((conversationId: String, prompt: String, maxRounds: Int?) -> Boolean)?) {
         deliver = handler
     }
 
@@ -52,21 +53,26 @@ internal object AutoTaskDispatcher {
      * 正确做法是排队，等这一轮结束再投递 —— 也就是「轮次结束再发起新轮次」。
      */
     /** 待投递项：带 taskId，便于任务被删除后精确清理。 */
-    private data class Pending(val taskId: String, val conversationId: String, val prompt: String)
+    private data class Pending(
+        val taskId: String,
+        val conversationId: String,
+        val prompt: String,
+        val maxRounds: Int?,
+    )
 
     private val pending = java.util.concurrent.ConcurrentLinkedQueue<Pending>()
 
     /** 有上限：后台反复到点时避免无限堆积（正常情况同一任务只会入队一次）。 */
     private const val MAX_PENDING = 20
 
-    fun enqueue(taskId: String, conversationId: String, prompt: String) {
+    fun enqueue(taskId: String, conversationId: String, prompt: String, maxRounds: Int? = null) {
         // 同一任务不重复排队：反复到点时保留最早的一条即可
         if (pending.any { it.taskId == taskId }) return
         if (pending.size >= MAX_PENDING) {
             AndroidAgentLogger.warnThrottled("auto_task_queue_full") { "待投递队列已满，丢弃最旧的一条" }
             pending.poll()
         }
-        pending.add(Pending(taskId, conversationId, prompt))
+        pending.add(Pending(taskId, conversationId, prompt, maxRounds))
     }
 
     /**
@@ -93,7 +99,7 @@ internal object AutoTaskDispatcher {
         val handler = deliver ?: return
         while (true) {
             val item = pending.peek() ?: return
-            val ok = runCatching { handler(item.conversationId, item.prompt) }.getOrDefault(false)
+            val ok = runCatching { handler(item.conversationId, item.prompt, item.maxRounds) }.getOrDefault(false)
             if (!ok) return
             pending.poll()
             AndroidAgentLogger.info("排队任务已投递: ${item.taskId}")
@@ -105,10 +111,10 @@ internal object AutoTaskDispatcher {
      *
      * @return true = 已交给正常对话流程；false = 调用方应走离线降级
      */
-    fun tryDeliver(conversationId: String?, prompt: String): Boolean {
+    fun tryDeliver(conversationId: String?, prompt: String, maxRounds: Int? = null): Boolean {
         if (conversationId.isNullOrBlank()) return false
         val handler = deliver ?: return false
-        return runCatching { handler(conversationId, prompt) }
+        return runCatching { handler(conversationId, prompt, maxRounds) }
             .onFailure {
                 AndroidAgentLogger.warnThrottled("auto_task_dispatch_failed") {
                     "投递到会话失败（将降级为离线投递）: ${it.javaClass.simpleName}: ${it.message}"

@@ -77,6 +77,7 @@ internal class AgentRuntimeRunExecutor(
         var response: AgentModelClient.ModelResponse.Text? = null
         var cancelled = false
         var checkpointRecorder: AgentRunCheckpointRecorder? = null
+        var autoTaskRounds = 0
         val timing = AgentRunTiming(AndroidAgentLogger)
 
         var memoryConversationId: String? = null
@@ -304,6 +305,30 @@ internal class AgentRuntimeRunExecutor(
                 additionalTools = runTools,
             ) { event ->
                 timing.accept(event)
+                // 自动任务轮数硬上限（投递主路径）：AgentLoop 不设本地轮数上限，
+                // 与离线路径 SimpleAutoTaskRuntime 同一套护栏 —— 先 steer「请收尾」给两轮宽限，
+                // 仍不收尾再强制中断（防止无人值守时无限烧钱）。
+                request.maxRounds?.let { maxRounds ->
+                    if (event is AgentEvent.RoundStarted) {
+                        autoTaskRounds += 1
+                        if (autoTaskRounds > maxRounds) {
+                            if (autoTaskRounds <= maxRounds + 2) {
+                                AndroidAgentLogger.warnThrottled("auto_task_round_cap") {
+                                    "自动任务投递轮数达上限 $maxRounds，请求收尾（第 $autoTaskRounds 轮）"
+                                }
+                                runController.steer(
+                                    "已达本次自动任务的轮数上限。请立即基于已获得的信息给出结论，" +
+                                        "不要再调用任何工具。",
+                                )
+                            } else {
+                                AndroidAgentLogger.warnThrottled("auto_task_round_hard_stop") {
+                                    "自动任务投递超限 ${autoTaskRounds - maxRounds} 轮仍不收尾，强制中断"
+                                }
+                                runController.cancel()
+                            }
+                        }
+                    }
+                }
                 acceptEvent(
                     session,
                     event,

@@ -158,8 +158,8 @@ internal class AgentAppState(
         observeRuntimeSelection()
         // 自动任务投递入口：后台到点时优先走这里（等价用户发消息），
         // 而不是绕过会话自己调 complete() —— 对齐 dsh 的 agent.followup。
-        io.github.mangi.eta.agent.autotask.AutoTaskDispatcher.register { cid, prompt ->
-            deliverAutoTaskPrompt(cid, prompt)
+        io.github.mangi.eta.agent.autotask.AutoTaskDispatcher.register { cid, prompt, maxRounds ->
+            deliverAutoTaskPrompt(cid, prompt, maxRounds)
         }
         runtimeRecoveryInProgress.set(true)
         scope.launch(Dispatchers.IO) {
@@ -1310,7 +1310,7 @@ internal class AgentAppState(
      * 2. 当前有轮次在跑 —— 对齐「轮次结束再发起」，不打断；
      * 3. 提示词为空。
      */
-    fun deliverAutoTaskPrompt(conversationId: String, prompt: String): Boolean {
+    fun deliverAutoTaskPrompt(conversationId: String, prompt: String, maxRounds: Int? = null): Boolean {
         if (conversationId != selectedConversationId) return false
         if (currentRunId != null) return false
         if (prompt.isBlank()) return false
@@ -1338,6 +1338,7 @@ internal class AgentAppState(
             messages = state.messages + userMessage,
             state = state,
             reasoningEffort = state.reasoningEffort,
+            maxRounds = maxRounds,
         )
         return true
     }
@@ -1427,6 +1428,8 @@ internal class AgentAppState(
         reasoningEffort: ReasoningEffort,
         operation: String = AgentRuntimeWire.OP_CHAT,
         rewriteTargetMessageId: String? = null,
+        /** 自动任务投递的轮数硬上限；null=普通对话不设限（模块侧执行器据此挂护栏）。 */
+        maxRounds: Int? = null,
     ) {
         runConversationIds[runId] = conversationId
         currentRunId = runId
@@ -1549,6 +1552,7 @@ internal class AgentAppState(
                         config = config,
                         images = modelImages,
                         history = history,
+                        maxRounds = maxRounds,
                         handoff = AgentRuntimeWire.EntryHandoff(
                             id = runId,
                             source = AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE,
