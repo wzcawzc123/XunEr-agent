@@ -40,6 +40,16 @@ internal interface ConversationTodoDao {
     )
     suspend fun list(conversationId: String): List<ConversationTodoEntity>
 
+    /**
+     * 同步读。工具执行本身跑在后台线程（见 AgentLocalTools 的调度约定），
+     * 这里提供同步入口是为了避免在工具层引入 `runBlocking` —— 那会把
+     * 「当前是否在 IO 线程」这个隐含前提藏进一行代码里，日后挪动调用点就会变成卡顿事故。
+     */
+    @Query(
+        "SELECT * FROM conversation_todos WHERE conversation_id = :conversationId ORDER BY position ASC",
+    )
+    fun listBlocking(conversationId: String): List<ConversationTodoEntity>
+
     @Upsert
     suspend fun upsert(items: List<ConversationTodoEntity>)
 
@@ -57,4 +67,17 @@ internal interface ConversationTodoDao {
         deleteAll(conversationId)
         if (items.isNotEmpty()) upsert(items)
     }
+
+    /** 同步版全量覆盖，供工具层（已在后台线程）使用。 */
+    @Transaction
+    fun replaceAllBlocking(conversationId: String, items: List<ConversationTodoEntity>) {
+        deleteAllBlocking(conversationId)
+        if (items.isNotEmpty()) upsertBlocking(items)
+    }
+
+    @Query("DELETE FROM conversation_todos WHERE conversation_id = :conversationId")
+    fun deleteAllBlocking(conversationId: String)
+
+    @Upsert
+    fun upsertBlocking(items: List<ConversationTodoEntity>)
 }

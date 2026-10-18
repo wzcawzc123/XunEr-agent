@@ -38,6 +38,24 @@ internal class AgentPlanStore(private val dao: ConversationTodoDao) {
         dao.deleteAll(conversationId)
     }
 
+    /**
+     * 同步读 —— 供工具层使用。
+     *
+     * 工具执行已运行在后台线程（AgentLocalTools 的调度约定），因此这里不提供 `runBlocking`
+     * 包装：那会把「当前线程必须不是主线程」这个前提藏进调用点，日后挪动就会变成卡顿事故。
+     */
+    fun loadBlocking(conversationId: String): List<AgentPlanItem> {
+        if (conversationId.isBlank()) return emptyList()
+        return dao.listBlocking(conversationId).map { it.toItem() }
+    }
+
+    /** 同步全量覆盖 —— 供工具层使用，理由同 [loadBlocking]。 */
+    fun replaceBlocking(conversationId: String, items: List<AgentPlanItem>, nowMillis: Long) {
+        if (conversationId.isBlank()) return
+        val entities = items.mapIndexed { index, item -> item.toEntity(conversationId, index, nowMillis) }
+        dao.replaceAllBlocking(conversationId, entities)
+    }
+
     private fun ConversationTodoEntity.toItem(): AgentPlanItem = AgentPlanItem(
         id = itemId,
         subject = subject,
