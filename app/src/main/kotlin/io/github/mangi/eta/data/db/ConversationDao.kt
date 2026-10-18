@@ -9,6 +9,49 @@ import androidx.room.Upsert
 
 @Dao
 internal interface ConversationDao : ChunkedTextDao {
+
+    /**
+     * 用量聚合的原始投影（Room 要求具名类，不能直接返回领域模型）。
+     * 全部用 Long：真机单会话输入已达十亿级。
+     */
+    data class TokenUsageProjection(
+        val turns: Int,
+        val inputTokens: Long,
+        val cachedTokens: Long,
+        val outputTokens: Long,
+        val reasoningTokens: Long,
+    )
+
+    /**
+     * 按会话聚合 token 用量。
+     *
+     * 在 SQL 里聚合而不是把消息读到内存再累加 —— 大会话有上万条消息，
+     * 只为算几个总数把整表读出来不值得。
+     * `input_tokens > 0` 过滤掉本地占位/提示记录（它们从未发出请求）。
+     * 全部 COALESCE：老数据里 cached/reasoning 可能是 NULL。
+     */
+    @Query(
+        "SELECT COUNT(*) AS turns, " +
+            "COALESCE(SUM(input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages " +
+            "WHERE conversation_id = :conversationId AND input_tokens > 0",
+    )
+    fun tokenUsageFor(conversationId: String): TokenUsageProjection
+
+    /** 全局聚合（所有会话）。用于「总账」展示。 */
+    @Query(
+        "SELECT COUNT(*) AS turns, " +
+            "COALESCE(SUM(input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages WHERE input_tokens > 0",
+    )
+    fun tokenUsageAll(): TokenUsageProjection
+
     @Query(
         "SELECT id, title, thinking_enabled, reasoning_effort, " +
             "applied_runtime_run_ids_json, roleplay_json, revisions_json, created_at, updated_at, model_id " +
