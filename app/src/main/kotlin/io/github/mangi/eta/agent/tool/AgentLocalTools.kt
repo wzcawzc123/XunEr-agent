@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.tool
 
+import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -496,8 +497,22 @@ internal class AgentLocalTools(
                 maxChars = args.optInt("max_chars", 12_000),
             )
         }
+        // 核心区水位：把「注入了多少 / 预算多少 / 有没有被截断」一并回报。
+        // 之前这些数字只存在于提示构造过程里，模型与用户都看不见 ——
+        // 真机上核心区已用到 89% 而无人知晓，直到某次截断把新规则悄悄丢掉。
+        val gauge = AgentMemoryContextBuilder.build(result.snapshot, null)
+        val coreUsed = gauge.coreContent.length
+        val coreBudget = gauge.coreBudgetChars
         val payload = JSONObject()
             .put("ok", true)
+            .put("core_usage", JSONObject()
+                .put("used_chars", coreUsed)
+                .put("budget_chars", coreBudget)
+                .put("percent", if (coreBudget > 0) coreUsed * 100 / coreBudget else 0)
+                .put("truncated", gauge.coreTruncated)
+                .put("sections", gauge.coreSectionCount)
+                .put("injected_lines", gauge.coreInjectedLines)
+                .put("total_lines", gauge.coreTotalLines))
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
             .put("line_count", result.snapshot.lineCount)
