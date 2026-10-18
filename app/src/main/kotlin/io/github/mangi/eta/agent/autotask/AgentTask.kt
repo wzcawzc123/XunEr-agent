@@ -49,6 +49,17 @@ internal data class AgentTask(
     fun canRun(state: DeviceState, nowMillis: Long): Boolean =
         enabled && active && condition.satisfiedBy(state) && isDue(nowMillis)
 
+    /**
+     * 是否已经彻底做完（一次性任务执行过即为真）。
+     *
+     * **必须在所有地方用同一份判断**：这次审查发现同一个 null 语义
+     * （`schedule == null` 表示一次性）在 execute / list / export 三处各写了一遍，
+     * 三处都写错成 `!= false` / `== false`，结果一次性任务永远「没做完」：
+     * 列表显示「等待中」、导出继续带给守护脚本、脚本每分钟重复唤醒。
+     */
+    val isFinished: Boolean
+        get() = schedule?.repeating != true && lastRunAt != null
+
     /** 是否已到点（无 schedule 视为"永远到点"，保持旧行为）。 */
     fun isDue(nowMillis: Long): Boolean {
         val spec = schedule ?: return true

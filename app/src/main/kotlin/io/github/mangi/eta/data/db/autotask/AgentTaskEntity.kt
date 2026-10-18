@@ -39,6 +39,13 @@ internal data class AgentTaskEntity(
      * 读回来永远是默认 true，等于该字段形同虚设。
      */
     @ColumnInfo(name = "active", defaultValue = "1") val active: Boolean = true,
+    /**
+     * 时间语义的持久化形式（`after:delay:anchor` / `every:interval` / `daily:h:m`）。
+     * 空串表示「无时间限制，条件满足就跑」。
+     *
+     * v27 新增：此前 Entity 缺这一列，写入时被静默丢弃 → 所有时间语义在真机上失效。
+     */
+    @ColumnInfo(name = "schedule_spec", defaultValue = "''") val scheduleSpec: String = "",
 )
 
 @Dao

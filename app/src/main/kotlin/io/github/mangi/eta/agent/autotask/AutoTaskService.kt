@@ -38,23 +38,30 @@ internal class AutoTaskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 一次性语义：跑完就停，不留常驻
-        runCatching {
-            val database = EtaDatabase.get(applicationContext)
-            // 自愈：pending.txt 是数据库的投影，可能因为升级/清理/异常而与库不同步。
-            // 每次被唤醒都重写一次，保证脚本下次读到的是最新状态。
-            AutoTaskStore(database.agentTaskDao()).exportTo(applicationContext)
-            val runtime = SimpleAutoTaskRuntime(database)
-            runtime.tryRunOnce(applicationContext)
-            // 清掉所有待执行标记：本次唤醒已处理完，不清的话任务只会触发一次。
-            // 失败路径也清 —— 否则一条持续失败的任务会每次唤醒都重试，无限循环。
-            clearAllRunMarkers()
-        }.onFailure {
-            AndroidAgentLogger.warnThrottled("auto_task_service_failed") {
-                "AutoTaskService 执行失败: type=${it.javaClass.simpleName}"
+        // **必须在后台线程做**：onStartCommand 跑在主线程，而 Room 禁止主线程访问数据库
+        // （跑查询会抛 IllegalStateException: Cannot access database on the main thread）。
+        // 之前整个流程放在主线程 + runCatching 里 → 异常被吞、什么都没执行，
+        // 表现就是「Service 启动了但 pending.txt 不生成」。真机实测才发现。
+        Thread({
+            runCatching {
+                val database = EtaDatabase.get(applicationContext)
+                // 自愈：pending.txt 是数据库的投影，可能因为升级/清理/异常而与库不同步。
+                // 每次被唤醒都重写一次，保证脚本下次读到的是最新状态。
+                AutoTaskStore(database.agentTaskDao()).exportTo(applicationContext)
+                val runtime = SimpleAutoTaskRuntime(database)
+                runtime.tryRunOnce(applicationContext)
+                // 清掉所有待执行标记：本次唤醒已处理完，不清的话任务只会触发一次。
+                // 失败路径也清 —— 否则一条持续失败的任务会每次唤醒都重试，无限循环。
+                clearAllRunMarkers()
+            }.onFailure {
+                // 记录 message 与首帧堆栈：只记 simpleName 时无法定位（这次的教训）。
+                AndroidAgentLogger.warnThrottled("auto_task_service_failed") {
+                    "AutoTaskService 执行失败: ${it.javaClass.simpleName}: ${it.message}; " +
+                        "at ${it.stackTrace.firstOrNull()?.toString() ?: "?"}"
+                }
             }
-        }
-        stopSelf(startId)
+            stopSelf(startId)
+        }, "auto-task-run").start()
         // 不要 START_STICKY：本服务由外部按需唤醒，不该被系统反复重建
         return START_NOT_STICKY
     }

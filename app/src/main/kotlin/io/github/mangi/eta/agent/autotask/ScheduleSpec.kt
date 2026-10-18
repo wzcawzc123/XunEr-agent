@@ -44,8 +44,15 @@ internal sealed interface ScheduleSpec {
             require(intervalMillis > 0) { "间隔必须为正" }
         }
 
+        /**
+         * 首次触发也间隔一个周期：`now + interval`。
+         *
+         * 此前首次返回 `now`，含义是「建完立刻跑一次」。真机上表现为
+         * 创建「每 5 分钟巡检」的瞬间就烧掉一轮 Agent —— 用户还没准备好，
+         * 也没等满一个周期，与「每 N 分钟」的字面语义不符。
+         */
         override fun nextRunAtMillis(now: Long, lastRunAt: Long?): Long =
-            if (lastRunAt == null) now else lastRunAt + intervalMillis
+            if (lastRunAt == null) now + intervalMillis else lastRunAt + intervalMillis
 
         override fun describe(): String = "每 ${formatDuration(intervalMillis)}"
         override val repeating: Boolean get() = true
@@ -103,6 +110,39 @@ internal sealed interface ScheduleSpec {
     }
 
     companion object {
+        /**
+         * 编码成可持久化的字符串。
+         *
+         * 为什么不用 JSON / TypeConverter：这是个三态 sealed interface，
+         * 用「kind + 两个整数」的紧凑单行就够，且**人眼可读** ——
+         * 排查时能直接 `SELECT schedule_spec FROM agent_tasks` 看明白。
+         *
+         * **这个字段本该从一开始就有**：`AgentTask.schedule` 是域模型字段，
+         * 但 Entity 里漏了一列，写入时被静默丢弃，读回来永远 null ——
+         * 于是所有时间语义（after/every/daily）在真机上退化成「条件满足就跑」。
+         * 只有真机端到端测试才暴露（pending.txt 里 nextRunAtMillis 恒为 0）。
+         */
+        fun encode(spec: ScheduleSpec?): String = when (spec) {
+            null -> ""
+            is After -> "after:${spec.delayMillis}:${spec.anchor}"
+            is Every -> "every:${spec.intervalMillis}"
+            is Daily -> "daily:${spec.hourOfDay}:${spec.minuteOfHour}"
+        }
+
+        /** 解析 [encode] 的产物；格式不认识时返回 null（旧数据/未来版本都安全降级）。 */
+        fun decode(raw: String?): ScheduleSpec? {
+            if (raw.isNullOrBlank()) return null
+            val parts = raw.split(':')
+            return runCatching {
+                when (parts.getOrNull(0)) {
+                    "after" -> After(parts[1].toLong(), parts[2].toLong())
+                    "every" -> Every(parts[1].toLong())
+                    "daily" -> Daily(parts[1].toInt(), parts[2].toInt())
+                    else -> null
+                }
+            }.getOrNull()
+        }
+
         /** 把毫秒差格式化成「30 分钟 / 2 小时 / 3 天」。 */
         fun formatDuration(millis: Long): String {
             val minutes = millis / 60_000

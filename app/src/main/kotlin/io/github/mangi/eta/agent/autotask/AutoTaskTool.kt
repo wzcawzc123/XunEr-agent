@@ -164,8 +164,8 @@ internal object AutoTaskTool {
         for (t in mine) {
             val state = when {
                 !t.enabled -> "未启用"
+                t.isFinished -> "已执行"
                 !t.active -> "已结束"
-                t.schedule?.repeating == false && t.lastRunAt != null -> "已执行"
                 else -> "等待中"
             }
             sb.append("\n· [").append(t.id).append("] ").append(t.title).append(" · ").append(state)

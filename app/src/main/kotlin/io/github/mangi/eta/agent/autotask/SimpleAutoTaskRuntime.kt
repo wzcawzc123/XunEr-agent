@@ -74,9 +74,13 @@ internal class SimpleAutoTaskRuntime(
                 }
             }
 
-        // 一次性任务（无 schedule 或 after）执行完即结束：active=false 让列表显示"已执行"，
-        // 而不是永远停在"等待中"。重复任务（every/daily）保持 active。
-        val stillActive = task.schedule?.repeating != false
+        // 一次性任务（schedule=none 或 after）执行完即结束：active=false 让列表显示"已执行"。
+        // 只有 every/daily 才保持 active。
+        //
+        // **这里曾经写反成 `!= false`**：schedule=null 时 `null != false` 为 true，
+        // 于是一次性任务永远保持活跃；再叠加「无时间限制 → isDue 恒 true」，
+        // 结果每 60 秒被重复触发一次。真机实测 25 秒内触发两次才暴露。
+        val stillActive = task.schedule?.repeating == true
         val stored = if (result.length > MAX_RESULT_CHARS) {
             result.take(MAX_RESULT_CHARS) + "\n…（已截断）"
         } else {
@@ -151,10 +155,24 @@ internal class SimpleAutoTaskRuntime(
                 if (event is io.github.mangi.eta.agent.runtime.AgentEvent.RoundStarted) {
                     rounds += 1
                     if (rounds > task.maxRounds) {
-                        AndroidAgentLogger.warnThrottled("auto_task_round_cap") {
-                            "自动任务 ${task.id} 超过轮数上限 ${task.maxRounds}，已取消"
+                        // 首次超限：不直接砍，而是注入「请收尾」让它基于已有信息给结论。
+                        // 直接 cancel 会让整轮返回 "Agent run cancelled"，用户拿到的是失败而非结果
+                        // —— 真机实测发现的（maxRounds=1 时必然踩到）。
+                        if (rounds <= task.maxRounds + 2) {
+                            AndroidAgentLogger.warnThrottled("auto_task_round_cap") {
+                                "自动任务 ${task.id} 达轮数上限 ${task.maxRounds}，请求收尾（第 $rounds 轮）"
+                            }
+                            controller.steer(
+                                "已达本次自动任务的轮数上限。请立即基于已获得的信息给出结论，" +
+                                    "不要再调用任何工具。",
+                            )
+                        } else {
+                            // 兜底：连续两轮仍不肯收尾，强制中断（防止无人值守时无限烧钱）
+                            AndroidAgentLogger.warnThrottled("auto_task_round_hard_stop") {
+                                "自动任务 ${task.id} 超限 ${rounds - task.maxRounds} 轮仍不收尾，强制中断"
+                            }
+                            controller.cancel()
                         }
-                        controller.cancel()
                     }
                 }
             },

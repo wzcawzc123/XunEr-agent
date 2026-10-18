@@ -40,9 +40,13 @@ class ScheduleSpecTest {
     // ---------- Every（固定间隔） ----------
 
     @Test
-    fun `every 首次以 now 为基准`() {
+    fun `every 首次等一个周期而不是立刻跑`() {
         val spec = ScheduleSpec.Every(60_000L)
-        assertEquals(5_000_000L, spec.nextRunAtMillis(now = 5_000_000L, lastRunAt = null))
+        assertEquals(
+            "首次应在 now + interval，避免建完立刻烧一轮",
+            5_060_000L,
+            spec.nextRunAtMillis(now = 5_000_000L, lastRunAt = null),
+        )
     }
 
     @Test
@@ -124,5 +128,42 @@ class ScheduleSpecTest {
         assertEquals("创建后 30 分钟", ScheduleSpec.After(30 * 60_000L, 0L).describe())
         assertEquals("每 2 小时", ScheduleSpec.Every(2 * 3600_000L).describe())
         assertEquals("每天 09:05", ScheduleSpec.Daily(9, 5).describe())
+    }
+
+    // ---------- 持久化编解码（真机暴露的 bug：Entity 缺列导致时间语义全失效） ----------
+
+    @Test
+    fun `编码解码往返一致`() {
+        val cases = listOf(
+            ScheduleSpec.After(1_800_000L, 1_000L),
+            ScheduleSpec.Every(300_000L),
+            ScheduleSpec.Daily(9, 30),
+        )
+        for (spec in cases) {
+            val round = ScheduleSpec.decode(ScheduleSpec.encode(spec))
+            assertEquals("往返应保持一致: $spec", spec, round)
+        }
+    }
+
+    @Test
+    fun `null 与空串都解码为无时间限制`() {
+        assertEquals(null, ScheduleSpec.decode(null))
+        assertEquals(null, ScheduleSpec.decode(""))
+        assertEquals(null, ScheduleSpec.decode("   "))
+    }
+
+    @Test
+    fun `未知格式安全降级为 null`() {
+        // 旧数据、未来版本、手改脏数据都不能让读取崩掉
+        listOf("weekly:1", "after:abc", "every:", "daily:9", "garbage").forEach {
+            assertEquals("非法输入 $it 应返回 null", null, ScheduleSpec.decode(it))
+        }
+    }
+
+    @Test
+    fun `编码结果人眼可读`() {
+        assertEquals("every:300000", ScheduleSpec.encode(ScheduleSpec.Every(300_000L)))
+        assertEquals("daily:9:5", ScheduleSpec.encode(ScheduleSpec.Daily(9, 5)))
+        assertEquals("", ScheduleSpec.encode(null))
     }
 }

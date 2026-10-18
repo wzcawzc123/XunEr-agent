@@ -39,7 +39,9 @@ internal object AutoTaskExport {
     /** 导出当前所有**可执行**任务（enabled + active）。 */
     fun export(context: Context, tasks: List<AgentTask>, nowMillis: Long) {
         runCatching {
-            val runnable = tasks.filter { it.enabled && it.active }
+            // 过滤掉已完结的一次性任务：它们不会再执行，留在文件里只会让脚本
+            // 每分钟白唤醒一次 App（真机实测：25 秒内被唤醒两次）。
+            val runnable = tasks.filter { it.enabled && it.active && !it.isFinished }
             val body = buildString {
                 appendLine("# 由 Eta 自动生成，勿手改")
                 appendLine("# 导出时间: ${formatTime(nowMillis)}")
