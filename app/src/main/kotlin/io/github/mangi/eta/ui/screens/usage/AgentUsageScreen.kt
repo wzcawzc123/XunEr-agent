@@ -1,5 +1,7 @@
 package io.github.mangi.eta.ui.screens.usage
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,14 +52,22 @@ internal fun AgentUsageScreen() {
     var all by remember { mutableStateOf<AgentCostSummary?>(null) }
 
     LaunchedEffect(Unit) {
-        all = runCatching {
-            AgentCostRepository(EtaDatabase.get(context).conversationDao()).all()
-        }.getOrNull()
+        // **必须切到 IO 线程**：LaunchedEffect 默认跑在主线程，
+        // 而 Room 的同步查询在主线程会抛 IllegalStateException。
+        // 异常又被 runCatching 吞掉 → 返回 EMPTY → 页面永远显示「还没有用量记录」。
+        // （与 AutoTaskService 主线程访问 Room 是同一类问题，真机才暴露。）
+        all = withContext(Dispatchers.IO) {
+            runCatching {
+                AgentCostRepository(EtaDatabase.get(context).conversationDao()).all()
+            }.getOrNull()
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // 不透明底色：否则会透出下层被覆盖的设置页（真机反馈「页面成了这样」）。
+            .background(MiuixTheme.colorScheme.surface)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
