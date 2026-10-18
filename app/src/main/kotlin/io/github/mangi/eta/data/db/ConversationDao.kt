@@ -22,6 +22,16 @@ internal interface ConversationDao : ChunkedTextDao {
         val reasoningTokens: Long,
     )
 
+    /** 按模型分组的用量投影（U3，v3.13.4）：会话表的 model_id 归属到消息行。 */
+    data class TokenUsageByModelProjection(
+        val modelId: String?,
+        val turns: Int,
+        val inputTokens: Long,
+        val cachedTokens: Long,
+        val outputTokens: Long,
+        val reasoningTokens: Long,
+    )
+
     /**
      * 按会话聚合 token 用量。
      *
@@ -51,6 +61,24 @@ internal interface ConversationDao : ChunkedTextDao {
             "FROM conversation_messages WHERE input_tokens > 0",
     )
     fun tokenUsageAll(): TokenUsageProjection
+
+    /**
+     * 按模型分组聚合（U3，v3.13.4）：模型归属在会话表（conversations.model_id），
+     * 消息表没有——JOIN 会话表把 model_id 投影到每行再分组。
+     * 会话 model_id 为空（老数据/未绑定）归入 null 组，UI 显示为「未绑定模型」。
+     */
+    @Query(
+        "SELECT c.model_id AS modelId, COUNT(*) AS turns, " +
+            "COALESCE(SUM(m.input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(m.cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(m.output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(m.reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages m " +
+            "JOIN conversations c ON c.id = m.conversation_id " +
+            "WHERE m.input_tokens > 0 " +
+            "GROUP BY c.model_id",
+    )
+    fun tokenUsageByModel(): List<TokenUsageByModelProjection>
 
     @Query(
         "SELECT id, title, thinking_enabled, reasoning_effort, " +

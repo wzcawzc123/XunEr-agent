@@ -16,7 +16,22 @@ internal data class AgentCostSummary(
     val cachedTokens: Long,
     val outputTokens: Long,
     val reasoningTokens: Long,
+    /** U3（v3.13.4）：按模型分组的用量；空列表表示未启用分组查询。 */
+    val byModel: List<ByModel> = emptyList(),
 ) {
+    /** 单个模型的用量小结（modelId 可能为空 = 老数据未绑定模型）。 */
+    data class ByModel(
+        val modelId: String?,
+        val turns: Int,
+        val inputTokens: Long,
+        val cachedTokens: Long,
+        val outputTokens: Long,
+        val reasoningTokens: Long,
+    ) {
+        val displayName: String get() = modelId?.takeIf { it.isNotBlank() } ?: "未绑定模型"
+        val billableInputTokens: Long get() = (inputTokens - cachedTokens).coerceAtLeast(0L)
+    }
+
     /** 实际按全价计费的输入（缓存未命中的部分）。 */
     val billableInputTokens: Long get() = (inputTokens - cachedTokens).coerceAtLeast(0L)
 

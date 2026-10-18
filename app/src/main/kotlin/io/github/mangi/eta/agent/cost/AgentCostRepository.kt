@@ -28,6 +28,35 @@ internal class AgentCostRepository(private val dao: ConversationDao) {
         return projection.toSummary()
     }
 
+    /** 按模型分组的总账（U3，v3.13.4）：总账 + 各模型小结。 */
+    fun byModel(): AgentCostSummary {
+        val rows = runCatching { dao.tokenUsageByModel() }.getOrNull()
+            ?: return AgentCostSummary.EMPTY
+        if (rows.isEmpty()) return AgentCostSummary.EMPTY
+        val byModel = rows.map { row ->
+            AgentCostSummary.ByModel(
+                modelId = row.modelId,
+                turns = row.turns,
+                inputTokens = row.inputTokens.coerceAtLeast(0L),
+                cachedTokens = row.cachedTokens.coerceAtLeast(0L),
+                outputTokens = row.outputTokens.coerceAtLeast(0L),
+                reasoningTokens = row.reasoningTokens.coerceAtLeast(0L),
+            )
+        }
+        // 总账 = 各模型之和（与 tokenUsageAll 同口径）。
+        val total = AgentCostSummary.fromRows(
+            byModel.map { model ->
+                AgentCostSummary.Row(
+                    inputTokens = model.inputTokens,
+                    cachedTokens = model.cachedTokens,
+                    outputTokens = model.outputTokens,
+                    reasoningTokens = model.reasoningTokens,
+                )
+            },
+        )
+        return total.copy(byModel = byModel.sortedByDescending { it.inputTokens })
+    }
+
     /**
      * 投影 → 领域模型。
      *

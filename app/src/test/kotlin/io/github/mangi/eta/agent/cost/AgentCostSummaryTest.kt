@@ -95,4 +95,26 @@ class AgentCostSummaryTest {
         assertEquals(110_000_000L, s.billableInputTokens)
         assertEquals(0.935f, s.cacheHitRate, 0.001f)
     }
+
+    @Test
+    fun `byModel 汇总与总账同口径且各自计算可计费输入`() {
+        // U3（v3.13.4）：byModel 由 Repository 从 DAO 投影构造；这里锁定 ByModel 的
+        // 可计费输入与 displayName 兜底（null modelId → 未绑定模型）。
+        val byModel = listOf(
+            AgentCostSummary.ByModel("model-a", turns = 4, inputTokens = 200, cachedTokens = 60, outputTokens = 30, reasoningTokens = 0),
+            AgentCostSummary.ByModel(null, turns = 2, inputTokens = 100, cachedTokens = 0, outputTokens = 20, reasoningTokens = 0),
+        )
+        assertEquals("model-a", byModel[0].displayName)
+        assertEquals("未绑定模型", byModel[1].displayName)
+        assertEquals(140L, byModel[0].billableInputTokens)
+        assertEquals(100L, byModel[1].billableInputTokens)
+
+        // 与 fromRows 同口径核对总账（Row = 一条消息记录，turns 按条数累加）。
+        val total = AgentCostSummary.fromRows(
+            byModel.map { AgentCostSummary.Row(it.inputTokens, it.cachedTokens, it.outputTokens, it.reasoningTokens) },
+        )
+        assertEquals(2, total.turns)
+        assertEquals(300L, total.inputTokens)
+        assertEquals(60L, total.cachedTokens)
+    }
 }
