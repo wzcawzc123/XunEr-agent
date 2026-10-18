@@ -156,4 +156,27 @@ class AutoTaskTest {
         assertEquals(2, o.waiting)
         assertEquals(0, o.ready)
     }
+
+    // ---------- 位掩码往返 ----------
+
+    @Test
+    fun `条件位掩码往返无损`() {
+        val cases = listOf(
+            TaskCondition.CONSERVATIVE,
+            TaskCondition.WIFI_ONLY,
+            TaskCondition.ANYTIME,
+            TaskCondition(requireCharging = true, requireWifi = false, requireScreenOff = true),
+        )
+        cases.forEach { original ->
+            val roundTrip = TaskCondition.fromMask(original.toMask())
+            assertEquals("往返应完全一致: $original", original, roundTrip)
+        }
+    }
+
+    @Test
+    fun `未知位被忽略而不是报错`() {
+        // 假设未来加了「蓝牙」= 8 位，旧版本读到应忽略该位
+        val withUnknown = TaskCondition.CONSERVATIVE.toMask() or 8
+        assertEquals(TaskCondition.CONSERVATIVE, TaskCondition.fromMask(withUnknown))
+    }
 }

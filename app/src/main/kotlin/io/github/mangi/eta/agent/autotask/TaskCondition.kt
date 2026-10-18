@@ -38,7 +38,27 @@ internal data class TaskCondition(
         return if (parts.isEmpty()) "随时" else parts.joinToString(" + ")
     }
 
+    /** 持久化用：1=充电 2=WiFi 4=灭屏。 */
+    fun toMask(): Int {
+        var mask = 0
+        if (requireCharging) mask = mask or BIT_CHARGING
+        if (requireWifi) mask = mask or BIT_WIFI
+        if (requireScreenOff) mask = mask or BIT_SCREEN_OFF
+        return mask
+    }
+
     companion object {
+        const val BIT_CHARGING = 1
+        const val BIT_WIFI = 2
+        const val BIT_SCREEN_OFF = 4
+
+        /** 从位掩码还原。未知位忽略（向前兼容：将来加的条件在旧版本里读不出来就当没要求）。 */
+        fun fromMask(mask: Int): TaskCondition = TaskCondition(
+            requireCharging = mask and BIT_CHARGING != 0,
+            requireWifi = mask and BIT_WIFI != 0,
+            requireScreenOff = mask and BIT_SCREEN_OFF != 0,
+        )
+
         /** 最严格（默认）。 */
         val CONSERVATIVE = TaskCondition()
 

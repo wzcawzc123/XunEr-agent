@@ -6,6 +6,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import io.github.mangi.eta.data.db.autotask.AgentTaskDao
+import io.github.mangi.eta.data.db.autotask.AgentTaskEntity
 import io.github.mangi.eta.data.db.plan.ConversationTodoDao
 import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 
@@ -28,8 +30,9 @@ import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
         CharacterEntity::class,
         UserPersonaEntity::class,
         ConversationTodoEntity::class,
+        AgentTaskEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -40,6 +43,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun mcpServerDao(): McpServerDao
     abstract fun characterDao(): CharacterDao
     abstract fun conversationTodoDao(): ConversationTodoDao
+    abstract fun agentTaskDao(): AgentTaskDao
 
     companion object {
         @Volatile
@@ -70,6 +74,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_20_21,
                         MIGRATION_21_22,
                         MIGRATION_22_23,
+                        MIGRATION_23_24,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -140,6 +145,33 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL(
                 "CREATE INDEX IF NOT EXISTS index_conversation_todos_conversation_id_position " +
                     "ON conversation_todos (conversation_id, position)",
+            )
+        }
+
+        /**
+         * 自动任务表（v24）。
+         *
+         * 独立于 conversations：任务的生命周期比单个会话长得多
+         * （"帮我盯 CI"可能跨十几个会话），挂在会话上会跟着会话一起被删。
+         * condition_mask 用位掩码存三个条件，便于后续加新条件而不改表结构。
+         */
+        internal val MIGRATION_23_24 = Migration(23, 24) { database ->
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS agent_tasks (" +
+                    "id TEXT NOT NULL PRIMARY KEY, " +
+                    "title TEXT NOT NULL, " +
+                    "prompt TEXT NOT NULL, " +
+                    "condition_mask INTEGER NOT NULL, " +
+                    "max_rounds INTEGER NOT NULL, " +
+                    "enabled INTEGER NOT NULL, " +
+                    "read_only INTEGER NOT NULL, " +
+                    "last_run_at INTEGER, " +
+                    "last_result TEXT, " +
+                    "created_at INTEGER NOT NULL)",
+            )
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_agent_tasks_enabled_last_run " +
+                    "ON agent_tasks (enabled, last_run_at)",
             )
         }
 
