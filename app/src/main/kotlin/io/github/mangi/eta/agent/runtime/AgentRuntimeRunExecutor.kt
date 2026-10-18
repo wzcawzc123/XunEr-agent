@@ -7,6 +7,8 @@ import io.github.mangi.eta.agent.model.AgentConversationToolCatalog
 import io.github.mangi.eta.agent.tool.ConversationHistoryTool
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanStore
+import io.github.mangi.eta.agent.plan.AgentPlanTool
 import io.github.mangi.eta.agent.model.AgentModelExecutionException
 import io.github.mangi.eta.agent.model.AgentModelFailure
 import io.github.mangi.eta.agent.model.AgentHttpClient
@@ -262,6 +264,18 @@ internal class AgentRuntimeRunExecutor(
                 initialSupplementIndex = uiPayload?.lastSupplementIndex ?: 0,
                 roleplayContext = roleplayContext,
                 rewriteReply = request.operation == AgentRuntimeWire.OP_REWRITE_REPLY,
+                // 压缩时把任务清单概览带进摘要，避免长会话压缩后模型忘记执行到第几步。
+                // 读库失败一律降级为 null：清单是辅助信息，绝不能因为它让整轮对话失败。
+                planOverview = {
+                    conversationId?.let { id ->
+                        runCatching {
+                            AgentPlanTool.overviewText(
+                                AgentPlanStore(EtaDatabase.get(appContext).conversationTodoDao())
+                                    .loadBlocking(id),
+                            )
+                        }.getOrNull()
+                    }
+                },
                 compactOnly = request.operation == AgentRuntimeWire.OP_COMPACT,
                 onContextSnapshot = { snapshot ->
                     // 压缩会把历史里的记忆写入摘要掉，下一轮需要重新注入最新记忆。

@@ -32,6 +32,8 @@ internal class AgentLoop(
     private val onTranscript: (List<AgentModelClient.ConversationMessage>) -> Unit = {},
     private val purpose: ProviderRequestPurpose = ProviderRequestPurpose.CHAT,
     private val roleplayContext: RoleplayRunContext? = null,
+    /** 压缩时读取任务清单概览；由运行时层注入（它持有会话标识与数据库）。 */
+    private val planOverview: () -> String? = { null },
     initialSupplementIndex: Int = 0,
 ) {
     data class Result(
@@ -53,6 +55,7 @@ internal class AgentLoop(
         config, messages, systemCount, operationId, provider, runController,
         { sensitiveToolCallIds }, onEvent, onContextSnapshot, { transcript.length() },
         roleplay = roleplayContext != null,
+        planOverview = planOverview,
     )
     private var supplementIndex = initialSupplementIndex
     /** 连续空回合的纠偏计数；出现工具进展会复位。 */

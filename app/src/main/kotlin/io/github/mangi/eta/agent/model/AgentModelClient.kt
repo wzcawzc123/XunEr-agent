@@ -102,6 +102,8 @@ internal object AgentModelClient {
         initialSupplementIndex: Int = 0,
         roleplayContext: RoleplayRunContext? = null,
         rewriteReply: Boolean = false,
+        /** 压缩时读取任务清单概览（由运行时层注入；缺省时压缩不写清单）。 */
+        planOverview: () -> String? = { null },
         assistantScreenContext: String = "",
         onContextSnapshot: (AgentContextSnapshot) -> Unit = {},
         onTranscript: (List<ConversationMessage>) -> Unit = {},
@@ -184,6 +186,7 @@ internal object AgentModelClient {
             onEvent = onEvent,
             purpose = if (rewriteReply) ProviderRequestPurpose.REPLY_REWRITE else ProviderRequestPurpose.CHAT,
             roleplayContext = roleplayContext,
+            planOverview = planOverview,
             initialSupplementIndex = initialSupplementIndex,
             toolsForRound = {
                 val capabilities = capabilitiesProvider()

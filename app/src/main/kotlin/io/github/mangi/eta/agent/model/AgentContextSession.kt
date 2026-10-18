@@ -17,6 +17,13 @@ internal class AgentContextSession(
     private val onContextSnapshot: (AgentContextSnapshot) -> Unit,
     private val transcriptSize: () -> Int = { 0 },
     private val roleplay: Boolean = false,
+    /**
+     * 压缩时读取当前任务清单概览（一行文本）。
+     *
+     * 用回调而不是直接依赖 DAO：Session 属于 model 层，不应知道存储细节；
+     * 由运行时层（持有 conversationId 与数据库）注入实现，缺失时返回 null 即可。
+     */
+    private val planOverview: () -> String? = { null },
 ) {
     private val contextWindow = config.knownContextWindow
     private var inputTokens: Int? = null
@@ -135,6 +142,8 @@ internal class AgentContextSession(
                 // P1-2（2026-10-16）：传入本轮实测 input tokens 作为「压后超线判定」的基准，
                 // 与真实请求同口径（同时消除「估算分母含/不含 tools」的口径不一致）。
                 observedInputTokens = before,
+                // 把清单概览写进摘要，避免压缩后模型忘记「我在第几步」。
+                planOverview = planOverview(),
             )
             runController.throwIfCancelled()
             val wasCompacted = compacted

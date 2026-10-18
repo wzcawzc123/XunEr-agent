@@ -25,6 +25,14 @@ internal class AgentContextCompactor(
          * 直接采用实测值则口径天然一致，且不依赖估算精度。缺省 null 时回退旧式。
          */
         observedInputTokens: Int? = null,
+        /**
+         * 当前任务清单的一行概览（见 AgentPlanTool.overviewText）。
+         *
+         * 清单本身存在独立表里、不会被压缩丢掉；但**模型只能看到历史，看不到库表**。
+         * 压缩会把此前所有 todo_write 的回执摘要掉，模型便失去「我在第几步」的记忆。
+         * 把概览写进摘要正文，让它在每一代摘要里延续。
+         */
+        planOverview: String? = null,
     ): JSONArray {
         controller.throwIfCancelled()
         if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
@@ -106,6 +114,11 @@ internal class AgentContextCompactor(
                             "该值是压缩【前】的实测，压缩后的实际占用显著更低；" +
                             "后续请以此为准，不要凭对话长度推测用量。]",
                     )
+                }
+                // 任务清单概览：随每一代摘要延续，避免压缩后模型忘记执行到第几步。
+                // 位置在占用说明之后、需求锚点之前 —— 锚点是原始需求，永远压轴。
+                if (!planOverview.isNullOrBlank()) {
+                    append("\n\n[当前任务清单] $planOverview")
                 }
             },
             contextSummary = true,
