@@ -61,7 +61,7 @@ internal fun AgentPlanProgressBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            // 左右边距由调用方（输入区 Column）统一控制：组件自己再缩进会与输入框错位。
             .clip(RoundedCornerShape(14.dp))
             .background(MiuixTheme.colorScheme.surfaceVariant),
     ) {

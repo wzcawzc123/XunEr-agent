@@ -933,8 +933,10 @@ private fun AgentChatBottomBar(
             .fillMaxWidth()
             .imePadding(),
     ) {
-        // 任务清单进度：有未完成步骤时才出现，全部完成后自动消失。
-        planUi?.let { AgentPlanProgressBar(it) }
+        // 磨砂/渐隐层（消息区到底部的过渡）必须在进度条**之上**：
+        // 否则进度条与输入框之间会夹着一段「顶部透明」的磨砂，
+        // 视觉上像一条缝、还会透出下面的消息文字（真机反馈）。
+        // 先画过渡层，再把进度条放到最下面紧贴输入框。
         if (messageBackdrop != null) {
             val blurColors = BlurDefaults.blurColors(
                 blendColors = listOf(
@@ -988,6 +990,14 @@ private fun AgentChatBottomBar(
                 .navigationBarsPadding()
                 .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
         ) {
+            // 进度条放在**输入区内部、最顶部**：父 Column 已有 surface 实体背景，
+            // 这样它到输入框之间没有任何透明间隙（真机反馈「有留空、透字」）。
+            planUi?.let {
+                AgentPlanProgressBar(
+                    plan = it,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
             if (resumableInterrupted) {
                 Row(
                     modifier = Modifier
