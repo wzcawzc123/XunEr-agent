@@ -41,6 +41,10 @@ internal object AgentToolRequirements {
             "skills_list", "skills_read", "skills_read_resource", "skills_list_curated",
             "skills_inspect_github", "skills_install_from_github",
         )
+        // 任务清单：只读写应用私有库表，不碰系统能力，因此不要求 root / LSPosed / 无障碍。
+        // 未在此登记的工具不会被发布（project 会抛 Missing tool requirements），
+        // 所以新增工具时这一步是必须的，漏了会在任何构造目录的测试里立刻炸出来。
+        register(RootRequirement.NONE, "todo_write")
         register(
             RootRequirement.PARTIAL,
             "press_key", "network_info", "get_setting", "recent_notifications",
