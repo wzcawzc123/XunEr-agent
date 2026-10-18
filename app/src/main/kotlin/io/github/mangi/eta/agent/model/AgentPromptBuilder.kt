@@ -214,6 +214,12 @@ internal object AgentPromptBuilder {
             if (writable) {
                 appendLine("需要更新时调用 memory_write。优先用 mode=\"replace_section\" + section 替换已有章节（不要再追加同名标题）；只改几行用 replace_range；只有需要详细背景或发生 revision 冲突时才调用 memory_get。")
                 appendLine("memory_write 报错时按提示自救：先 memory_get 预览实际标题/行号再重试（可用错误里列出的可用标题），不要在原样重发同一套参数；删除整节用空 content，清空全部用 mode=\"clear\"+\\\"DELETE_ALL\\\"。")
+                // 短期记忆：机制早已存在（独立文件 + target=short），但提示词从未提及，
+                // 模型根本不知道有这东西，于是它在真机上永远是空的。
+                appendLine("记忆有长期与短期两层，用 target 参数区分（缺省为长期）。")
+                appendLine("· 长期（默认）：跨会话稳定的项目事实、用户偏好、环境约定 —— 大部分情况写这里。")
+                appendLine("· 短期（memory_write 带 target=short）：当前任务的工作草稿 —— 多步任务的中间结论、待验证的假设、跨几轮才用完的临时数据。它不进每轮注入，需要时用 memory_get 带 target=short 读，因此不污染长期记忆的缓存前缀；任务结束后可以清空。")
+                appendLine("判断标准：这条信息下次开新会话还需要吗？需要就写长期；只对当前任务有用就写短期。")
             } else {
                 appendLine("这是用户的现实记忆，在角色会话中只读；按需调用 memory_get，禁止把虚构人设或剧情写入此文件。剧情记忆使用 character_memory_get/character_memory_write。")
             }

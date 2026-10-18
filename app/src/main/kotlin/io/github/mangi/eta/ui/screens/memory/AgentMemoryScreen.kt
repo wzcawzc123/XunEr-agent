@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.screens.memory
 
+import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -376,7 +377,12 @@ private fun MemorySearchField(
 private fun filteredDraft(state: AgentMemoryUiState): String {
     val query = state.searchQuery.trim()
     if (query.isEmpty()) return state.draft
-    val lines = state.draft.split('\n')
+    return filterLines(state.draft, query)
+}
+
+/** 在任意文本上做「保留命中行 + 折叠其余」的过滤。抽出来是为了预览只搜核心区（32K），不碰全文。 */
+private fun filterLines(text: String, query: String): String {
+    val lines = text.split('\n')
     val matched = lines.indices.filter { lines[it].contains(query, ignoreCase = true) }
     if (matched.isEmpty()) return ""
     return buildString {
@@ -445,7 +451,8 @@ private fun MemoryDocumentCard(
                 else -> Crossfade(targetState = mode, label = "memory_mode") { current ->
                     when (current) {
                         MemoryViewMode.Preview -> MemoryPreview(
-                            content = if (state.searchQuery.isBlank()) state.draft else filteredDraft(state),
+                            content = state.draft,
+                            query = state.searchQuery,
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(
@@ -461,7 +468,12 @@ private fun MemoryDocumentCard(
 }
 
 @Composable
-private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
+private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
+    // **只渲染核心区**：整个 MEMORY.md 有 17 万字符（242KB），
+    // 全塞进一个可滚动 Text 会让 Compose 全量测量布局 —— 进页面白屏半秒以上。
+    // 核心区是每轮真正注入模型的部分（默认 32K 预算），也是用户最常看的；
+    // 归档区按需进「编辑」查看。
+    val slice = remember(content) { AgentMemoryPreview.slice(content) }
     if (content.isBlank()) {
         Column(
             modifier = Modifier
@@ -486,13 +498,26 @@ private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
         }
         return
     }
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        StaticMarkdown(content = content, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        val trimmedQuery = query.trim()
+        val display = remember(slice.text, trimmedQuery) {
+            if (trimmedQuery.isEmpty()) slice.text else filterLines(slice.text, trimmedQuery)
+        }
+        StaticMarkdown(content = display, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        if (slice.truncated && trimmedQuery.isEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "归档区还有 ${slice.archivedChars / 1024} KB（未在预览中渲染）· 切到「编辑」查看全文",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
