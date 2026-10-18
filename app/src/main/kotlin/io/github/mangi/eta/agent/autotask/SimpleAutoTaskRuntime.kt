@@ -99,7 +99,24 @@ internal class SimpleAutoTaskRuntime(
             return
         }
 
-        // ② 降级：App 不在前台 / 正忙 / 会话不匹配 —— 离线执行并写回历史 + 通知。
+        // ② App 活着但当前有轮次在跑（或目标不是当前会话）：**排队**，等本轮结束再投递。
+        //    这正是用户要的「轮次结束 → 自动发起新轮次」，而不是降级成看不见的离线记录。
+        val target = task.conversationId
+        if (AutoTaskDispatcher.hasHandler() && !target.isNullOrBlank()) {
+            AutoTaskDispatcher.enqueue(target, prompt)
+            diag(context, "queued until current run ends ${task.id}")
+            store.saveBlocking(
+                task.copy(
+                    lastRunAt = now,
+                    lastResult = "已排队，等当前对话结束后投递",
+                    active = task.schedule?.repeating == true,
+                ),
+            )
+            store.exportTo(context)
+            return
+        }
+
+        // ③ 降级：App 不在前台（UI 未注册投递器）—— 离线执行并写回历史 + 通知，至少数据不丢。
         diag(context, "fallback to offline run ${task.id}")
         val result = runCatching { runAgentRound(context, task) }
             .getOrElse { error ->

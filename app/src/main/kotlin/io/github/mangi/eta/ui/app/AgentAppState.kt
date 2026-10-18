@@ -1967,6 +1967,12 @@ internal class AgentAppState(
         if (runId == currentRunId) {
             currentRunId = null
             currentRunJob = null
+            // 本轮结束：投递排队中的自动任务（对齐「轮次结束再发起新轮次」）。
+            // 用 scope.launch 错开当前调用栈，避免在本轮收尾流程里重入 launchConversationRun。
+            scope.launch {
+                kotlinx.coroutines.yield()
+                io.github.mangi.eta.agent.autotask.AutoTaskDispatcher.flushPending()
+            }
         }
         if (rewriting) {
             val conversationId = conversationIdForRun(runId)

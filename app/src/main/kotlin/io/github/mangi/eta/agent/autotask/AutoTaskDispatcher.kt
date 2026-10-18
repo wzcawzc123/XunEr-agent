@@ -41,6 +41,45 @@ internal object AutoTaskDispatcher {
         deliver = handler
     }
 
+    /** UI 是否在场（决定「排队等轮次结束」还是「立刻降级离线执行」）。 */
+    fun hasHandler(): Boolean = deliver != null
+
+    /**
+     * 待投递队列。
+     *
+     * 为什么需要：后台任务到点时，用户可能**正在跟 Agent 对话**（`currentRunId != null`）。
+     * 这时不能打断，也不能直接降级（那样界面看不到）。
+     * 正确做法是排队，等这一轮结束再投递 —— 也就是「轮次结束再发起新轮次」。
+     */
+    private val pending = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, String>>()
+
+    /** 有上限：后台反复到点时避免无限堆积（正常情况同一任务只会入队一次）。 */
+    private const val MAX_PENDING = 20
+
+    fun enqueue(conversationId: String, prompt: String) {
+        if (pending.size >= MAX_PENDING) {
+            AndroidAgentLogger.warnThrottled("auto_task_queue_full") { "待投递队列已满，丢弃最旧的一条" }
+            pending.poll()
+        }
+        pending.add(conversationId to prompt)
+    }
+
+    /**
+     * 轮次结束时调用：把排队中的任务投递出去。
+     *
+     * 只投递队首且成功才出队 —— 失败（仍然忙/条件不满足）就保留，等下一次结束再试。
+     */
+    fun flushPending() {
+        val handler = deliver ?: return
+        while (true) {
+            val item = pending.peek() ?: return
+            val ok = runCatching { handler(item.first, item.second) }.getOrDefault(false)
+            if (!ok) return
+            pending.poll()
+            AndroidAgentLogger.info("排队任务已投递: ${item.first}")
+        }
+    }
+
     /**
      * 尝试把任务投递成会话里的一轮对话。
      *
