@@ -121,6 +121,71 @@ internal object AutoTaskTool {
         }
     }
 
+    // ---------- list / delete（对齐 dsh 四件套里的两个） ----------
+
+    const val LIST_NAME = "list_auto_tasks"
+    const val DELETE_NAME = "delete_auto_task"
+
+    fun listSchema(): JSONObject = JSONObject()
+        .put("name", LIST_NAME)
+        .put("description", "列出自动任务：标题、状态、下次触发时间、上次结果。用于回答「我的任务呢」「为什么没跑」。")
+        .put(
+            "parameters",
+            JSONObject().put("type", "object").put("properties", JSONObject()),
+        )
+
+    fun deleteSchema(): JSONObject = JSONObject()
+        .put("name", DELETE_NAME)
+        .put("description", "删除一条自动任务。已投递到会话的结果仍保留，不会被撤回。")
+        .put(
+            "parameters",
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject().put("id", JSONObject().put("type", "string").put("description", "任务 id")),
+                )
+                .put("required", JSONArray().put("id")),
+        )
+
+    /** 列出任务。只返回"本会话的"和"未绑定会话的"，避免泄露其他会话的任务名。 */
+    fun executeList(store: AutoTaskStore, conversationId: String?, nowMillis: Long): String {
+        val tasks = store.allBlocking()
+        if (tasks.isEmpty()) return "当前没有任何自动任务。"
+        val mine = tasks.filter { it.conversationId == null || it.conversationId == conversationId }
+        if (mine.isEmpty()) return "本会话没有自动任务（其他会话共有 ${tasks.size} 条）。"
+        val sb = StringBuilder("自动任务 ${mine.size} 条：")
+        for (t in mine) {
+            val state = when {
+                !t.enabled -> "未启用"
+                !t.active -> "已结束"
+                t.schedule?.repeating == false && t.lastRunAt != null -> "已执行"
+                else -> "等待中"
+            }
+            sb.append("\n· [").append(t.id).append("] ").append(t.title).append(" · ").append(state)
+            val next = t.schedule?.nextRunAtMillis(nowMillis, t.lastRunAt)
+            if (next != null && next > nowMillis) {
+                val mins = (next - nowMillis) / 60_000
+                sb.append(" · 约 ").append(if (mins >= 60) "${mins / 60} 小时" else "$mins 分钟").append("后")
+            }
+            sb.append(" · 条件 ").append(t.condition.describe())
+            t.lastResult?.takeIf { it.isNotBlank() }?.let {
+                sb.append("\n    上次：").append(it.lineSequence().first().take(80))
+            }
+        }
+        return sb.toString()
+    }
+
+    /** 删除任务。返回给模型的文本；失败不抛异常。 */
+    fun executeDelete(args: JSONObject, dao: () -> io.github.mangi.eta.data.db.autotask.AgentTaskDao): String {
+        val id = args.optString("id").trim()
+        if (id.isEmpty()) return "失败：缺少 id。"
+        return runCatching {
+            kotlinx.coroutines.runBlocking { dao().delete(id) }
+            "已删除任务 $id。"
+        }.getOrElse { "失败：${it.message ?: it.javaClass.simpleName}" }
+    }
+
     /** 解析时间参数；`none`/缺省返回 null（表示无时间限制）。参数不合法返回 null 但调用方需区分，故用 Result。 */
     private fun parseSchedule(args: JSONObject, nowMillis: Long): ScheduleSpec? {
         val kind = args.optString("schedule").ifBlank { "none" }

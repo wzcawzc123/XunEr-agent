@@ -1,5 +1,7 @@
 package io.github.mangi.eta.ui.components
 
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.Backspace
@@ -67,6 +69,8 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "todo_write" -> Icons.Rounded.CheckBox
     // 自动任务：闹钟表达「到点才动」，与本功能的语义一致。
     "create_auto_task" -> Icons.Rounded.Alarm
+    "list_auto_tasks" -> Icons.Rounded.List
+    "delete_auto_task" -> Icons.Rounded.Delete
     "locate_on_screen" -> Icons.Rounded.CenterFocusStrong
     "click", "tap", "tap_element" -> Icons.Rounded.AdsClick
     "tap_area" -> Icons.Rounded.MyLocation

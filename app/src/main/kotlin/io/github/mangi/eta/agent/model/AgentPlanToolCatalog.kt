@@ -35,5 +35,14 @@ internal object AgentPlanToolCatalog {
                 parameters = autoTask.getJSONObject("parameters"),
             ),
         )
+        for (extra in listOf(AutoTaskTool.listSchema(), AutoTaskTool.deleteSchema())) {
+            tools.put(
+                AgentToolSchema.function(
+                    name = extra.getString("name"),
+                    description = extra.getString("description"),
+                    parameters = extra.getJSONObject("parameters"),
+                ),
+            )
+        }
     }
 }

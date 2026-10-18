@@ -46,6 +46,7 @@ internal object AgentToolRequirements {
         // 所以新增工具时这一步是必须的，漏了会在任何构造目录的测试里立刻炸出来。
         register(RootRequirement.NONE, "todo_write")
         register(RootRequirement.NONE, "create_auto_task")
+        register(RootRequirement.NONE, "list_auto_tasks", "delete_auto_task")
         register(
             RootRequirement.PARTIAL,
             "press_key", "network_info", "get_setting", "recent_notifications",
