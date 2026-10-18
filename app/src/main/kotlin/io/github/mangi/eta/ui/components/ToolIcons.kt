@@ -65,6 +65,8 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "observe", "observe_screen" -> Icons.Rounded.DocumentScanner
     // 任务清单：勾选框最直观地表达「步骤 + 完成状态」。
     "todo_write" -> Icons.Rounded.CheckBox
+    // 自动任务：闹钟表达「到点才动」，与本功能的语义一致。
+    "create_auto_task" -> Icons.Rounded.Alarm
     "locate_on_screen" -> Icons.Rounded.CenterFocusStrong
     "click", "tap", "tap_element" -> Icons.Rounded.AdsClick
     "tap_area" -> Icons.Rounded.MyLocation
