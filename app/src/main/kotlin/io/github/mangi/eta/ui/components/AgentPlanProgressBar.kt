@@ -1,17 +1,31 @@
 package io.github.mangi.eta.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.agent.plan.AgentPlanUi
@@ -19,18 +33,17 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 输入框上方的任务清单进度条。
+ * 输入框上方的任务清单进度条（可收起 / 展开）。
  *
- * 设计原则：
- * - **只在有未完成步骤时出现**。没有 todo 的会话（绝大多数）完全不受影响、不占高度 ——
- *   「不打扰」优先于「可发现性」。
- * - 全部完成后自动消失，不留下已完成列表的视觉噪音。
- * - **必须有不透明底色**：早期版本只画一行透明文字，滚动时会和下面的消息文字叠在一起，
- *   读起来像花屏（真机反馈）。
- * - **左右边距与输入框一致**（16dp），视觉上属于输入区而不是消息流。
+ * 设计：
+ * - **收起态**（默认）：一行——`1/3` + 进度线 + 当前步骤，尽量不占高度。
+ * - **展开态**：整条清单向上展开（消息区被压缩，输入框位置不变），便于"临时看一眼还剩什么"。
+ * - 默认收起，因为绝大多数轮次用户只想知道"到第几步了"，不需要看全文。
+ * - 全部完成时整个组件不渲染。
  *
- * 进度线用 Box + background 手绘，不依赖 Material3 的 LinearProgressIndicator ——
- * 本项目的 UI 栈是 Miuix，混入 Material 组件会在主题/圆角上与周围不一致。
+ * 布局细节：
+ * - 左右外边距与输入框一致（16dp），底部不留额外间距，紧贴输入框 —— 视觉上属于输入区。
+ * - 展开后高度受限并可滚动：清单可能十几项，不能把消息区挤没。
  */
 @Composable
 internal fun AgentPlanProgressBar(
@@ -39,21 +52,25 @@ internal fun AgentPlanProgressBar(
 ) {
     if (!plan.isActive || plan.total <= 0) return
 
+    var expanded by remember { mutableStateOf(false) }
     val fraction = (plan.done.toFloat() / plan.total.toFloat()).coerceIn(0f, 1f)
     val headline = plan.running ?: "下一步待开始"
+    // 箭头旋转动画：收起 0°，展开 180°
+    val arrowAngle by animateFloatAsState(if (expanded) 180f else 0f, label = "planArrow")
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            // 外边距与输入框对齐，让它看起来属于输入区
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp)
             .clip(RoundedCornerShape(14.dp))
-            // 不透明底色：避免与滚动中的消息文字叠字
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .background(MiuixTheme.colorScheme.surfaceVariant),
     ) {
+        // ---- 收起态：一行 ----
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -86,6 +103,55 @@ internal fun AgentPlanProgressBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1.4f, fill = false),
             )
+            // 用文字箭头而不是图标库：本项目的图标集里没有 chevron，自绘更稳。
+            Text(
+                text = "▾",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.rotate(arrowAngle),
+            )
+        }
+
+        // ---- 展开态：完整清单（向上撑开，输入框不动）----
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                plan.items.forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val (mark, color) = when (item.label) {
+                            "已完成" -> "✓" to MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            "进行中" -> "▸" to MiuixTheme.colorScheme.primary
+                            else -> "○" to MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        }
+                        Text(text = mark, style = MiuixTheme.textStyles.footnote1, color = color)
+                        Text(
+                            text = item.subject,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = if (item.label == "已完成") {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            } else {
+                                MiuixTheme.colorScheme.onSurface
+                            },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }
