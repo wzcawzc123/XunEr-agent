@@ -301,19 +301,28 @@ private fun MemoryTargetSwitcher(
         }
         Spacer(modifier = Modifier.weight(1f))
         if (state.target == MemoryTargetUi.Short) {
-            // 纯文字动作，不加图形符号 —— 箭头在这里只是噪音。
-            Text(
-                text = if (state.isSaving) "整理中…" else "整理到长期",
-                style = MiuixTheme.textStyles.footnote1,
-                color = if (state.isLoading || state.isSaving) {
-                    colors.onSurfaceVariantSummary
-                } else {
-                    colors.primary
-                },
+            // 与左侧分段控件同款 squircle 胶囊，两字「整理」；不加图形符号。
+            val busy = state.isLoading || state.isSaving
+            Box(
                 modifier = Modifier
-                    .clickable(enabled = !state.isLoading && !state.isSaving, onClick = onRollup)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-            )
+                    .squircleSurface(
+                        color = if (busy) {
+                            colors.surfaceContainerHigh
+                        } else {
+                            colors.primary.copy(alpha = 0.12f)
+                        },
+                        cornerRadius = 12.dp,
+                    )
+                    .clickable(enabled = !busy, onClick = onRollup)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (state.isSaving) "整理中" else "整理",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = if (busy) colors.onSurfaceVariantSummary else colors.primary,
+                )
+            }
         } else {
             Text(
                 text = "跨会话持久事实",
