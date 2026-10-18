@@ -25,15 +25,16 @@ internal class SimpleAutoTaskRuntime(
     private val database: EtaDatabase,
 ) : AutoTaskRuntime {
 
-    private val lock = Any()
-
     override fun tryRunOnce(context: Context) {
         // 快速判空：没有任务时完全不打锁，避免无谓开销（该回调会被频繁触发）
         val store = AutoTaskStore(database.agentTaskDao())
         val tasks = store.runnableBlocking()
         if (tasks.isEmpty()) return
 
-        synchronized(lock) {
+        // **锁必须是进程级的**：AutoTaskService 每次 onStartCommand 都会 new 一个
+        // SimpleAutoTaskRuntime，实例字段锁各管各的，两条 am 同时到达时会并行执行
+        // 两条任务（各自真金白银跑一轮 Agent）。审查时发现的。
+        synchronized(RUN_LOCK) {
             runCatching { runOnceLocked(context, store, tasks) }
                 .onFailure {
                     AndroidAgentLogger.warnThrottled("auto_task_run_failed") {
@@ -76,7 +77,12 @@ internal class SimpleAutoTaskRuntime(
         // 一次性任务（无 schedule 或 after）执行完即结束：active=false 让列表显示"已执行"，
         // 而不是永远停在"等待中"。重复任务（every/daily）保持 active。
         val stillActive = task.schedule?.repeating != false
-        store.saveBlocking(task.copy(lastRunAt = now, lastResult = result, active = stillActive))
+        val stored = if (result.length > MAX_RESULT_CHARS) {
+            result.take(MAX_RESULT_CHARS) + "\n…（已截断）"
+        } else {
+            result
+        }
+        store.saveBlocking(task.copy(lastRunAt = now, lastResult = stored, active = stillActive))
 
         // **必须重新导出 pending.txt**：脚本读的是「下次触发的绝对时间戳」，
         // 而它是按 lastRunAt 算的。执行完不重导出，脚本仍拿着旧的（已过去的）时间戳，
@@ -189,6 +195,12 @@ internal class SimpleAutoTaskRuntime(
     }
 
     private companion object {
+        /** 进程级互斥：跨 SimpleAutoTaskRuntime 实例共享。 */
+        private val RUN_LOCK = Any()
+
+        /** 写入数据库与通知的结果上限，避免模型长输出把库撑大。 */
+        const val MAX_RESULT_CHARS = 8_000
+
         /**
          * 自动任务的历史预算（字符）。
          * 60k 字符 ≈ 中文 30k tokens 量级，留足工具与响应的余量，
