@@ -280,6 +280,11 @@ internal class AgentTraceFormatter {
             "memory_get", "memory_write", "character_memory_get", "character_memory_write" ->
                 json?.let { summarizeMemoryResult(toolName, it) } ?: "完成"
             "search_apps" -> json?.let(::summarizeSearchAppsResult) ?: "完成"
+            // todo_write 返回的是**纯文本清单**（不是 JSON）。若不单独处理，
+            // 会走下面的 else 分支：json=null → 结果被兜底成"完成"，
+            // 计划数据全丢 → UI 的 latestPlanUi 解析不出来 → 进度条永远不显示。
+            // 真机验证时发现（表里有数据、消息里只有"完成"两个字）。
+            "todo_write" -> result.content
             "launch_app" -> json?.let(::summarizeLaunchAppResult) ?: "已打开"
             else -> json?.let { summarizeGenericResult(it, result) } ?: "完成"
         }
