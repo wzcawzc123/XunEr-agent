@@ -51,17 +51,37 @@ internal object AutoTaskDispatcher {
      * 这时不能打断，也不能直接降级（那样界面看不到）。
      * 正确做法是排队，等这一轮结束再投递 —— 也就是「轮次结束再发起新轮次」。
      */
-    private val pending = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, String>>()
+    /** 待投递项：带 taskId，便于任务被删除后精确清理。 */
+    private data class Pending(val taskId: String, val conversationId: String, val prompt: String)
+
+    private val pending = java.util.concurrent.ConcurrentLinkedQueue<Pending>()
 
     /** 有上限：后台反复到点时避免无限堆积（正常情况同一任务只会入队一次）。 */
     private const val MAX_PENDING = 20
 
-    fun enqueue(conversationId: String, prompt: String) {
+    fun enqueue(taskId: String, conversationId: String, prompt: String) {
+        // 同一任务不重复排队：反复到点时保留最早的一条即可
+        if (pending.any { it.taskId == taskId }) return
         if (pending.size >= MAX_PENDING) {
             AndroidAgentLogger.warnThrottled("auto_task_queue_full") { "待投递队列已满，丢弃最旧的一条" }
             pending.poll()
         }
-        pending.add(conversationId to prompt)
+        pending.add(Pending(taskId, conversationId, prompt))
+    }
+
+    /**
+     * 任务被删除/停用时调用，清掉它还没投递的排队项。
+     *
+     * **不加这个会出「幽灵消息」**：真机上删完任务、停了守护脚本，
+     * 用户仍会陆续收到几条该任务的自动轮 —— 因为内存队列还留着。
+     */
+    fun dropByTaskId(taskId: String) {
+        pending.removeIf { it.taskId == taskId }
+    }
+
+    /** 清空全部排队项（例如会话被删除）。 */
+    fun clearAll() {
+        pending.clear()
     }
 
     /**
@@ -73,10 +93,10 @@ internal object AutoTaskDispatcher {
         val handler = deliver ?: return
         while (true) {
             val item = pending.peek() ?: return
-            val ok = runCatching { handler(item.first, item.second) }.getOrDefault(false)
+            val ok = runCatching { handler(item.conversationId, item.prompt) }.getOrDefault(false)
             if (!ok) return
             pending.poll()
-            AndroidAgentLogger.info("排队任务已投递: ${item.first}")
+            AndroidAgentLogger.info("排队任务已投递: ${item.taskId}")
         }
     }
 

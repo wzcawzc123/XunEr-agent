@@ -103,7 +103,7 @@ internal class SimpleAutoTaskRuntime(
         //    这正是用户要的「轮次结束 → 自动发起新轮次」，而不是降级成看不见的离线记录。
         val target = task.conversationId
         if (AutoTaskDispatcher.hasHandler() && !target.isNullOrBlank()) {
-            AutoTaskDispatcher.enqueue(target, prompt)
+            AutoTaskDispatcher.enqueue(task.id, target, prompt)
             diag(context, "queued until current run ends ${task.id}")
             store.saveBlocking(
                 task.copy(

@@ -480,10 +480,16 @@ internal class AgentLocalTools(
     }
 
     private fun deleteAutoTask(args: JSONObject): String {
+        val taskId = args.optString("id").trim()
         val outcome = io.github.mangi.eta.agent.autotask.AutoTaskTool.executeDelete(
             args = args,
             dao = { EtaDatabase.get(context).agentTaskDao() },
         )
+        // 清掉它还没投递的排队项：否则删完任务、停了守护脚本，
+        // 用户仍会陆续收到几条"幽灵"自动轮（真机踩过）。
+        if (taskId.isNotEmpty()) {
+            io.github.mangi.eta.agent.autotask.AutoTaskDispatcher.dropByTaskId(taskId)
+        }
         exportAutoTasks()
         return outcome
     }
