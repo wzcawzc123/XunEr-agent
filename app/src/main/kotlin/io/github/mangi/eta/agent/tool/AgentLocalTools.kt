@@ -479,14 +479,17 @@ internal class AgentLocalTools(
         errorResult("LIST_AUTO_TASK_FAILED", "读取自动任务失败：${e.message ?: e::class.java.simpleName}")
     }
 
-    private fun deleteAutoTask(args: JSONObject): String =
-        io.github.mangi.eta.agent.autotask.AutoTaskTool.executeDelete(
+    private fun deleteAutoTask(args: JSONObject): String {
+        val outcome = io.github.mangi.eta.agent.autotask.AutoTaskTool.executeDelete(
             args = args,
             dao = { EtaDatabase.get(context).agentTaskDao() },
         )
+        exportAutoTasks()
+        return outcome
+    }
 
     private fun createAutoTask(args: JSONObject): String = try {
-        io.github.mangi.eta.agent.autotask.AutoTaskTool.execute(
+        val outcome = io.github.mangi.eta.agent.autotask.AutoTaskTool.execute(
             args = args,
             store = io.github.mangi.eta.agent.autotask.AutoTaskStore(
                 EtaDatabase.get(context).agentTaskDao(),
@@ -494,8 +497,38 @@ internal class AgentLocalTools(
             conversationId = conversationId.ifBlank { null },
             nowMillis = System.currentTimeMillis(),
         )
+        // 任务变更后必须重写 pending.txt —— 守护脚本读的就是它。
+        // 少了这一步，任务只进数据库、脚本永远看不到（审查时发现的真实断点）。
+        exportAutoTasks()
+        outcome
     } catch (e: Exception) {
         errorResult("CREATE_AUTO_TASK_FAILED", "创建自动任务失败：${e.message ?: e::class.java.simpleName}")
+    }
+
+    /** 把当前任务集导出给 root 守护脚本。失败不影响主流程。 */
+    private fun exportAutoTasks() {
+        runCatching {
+            val dao = EtaDatabase.get(context).agentTaskDao()
+            io.github.mangi.eta.agent.autotask.AutoTaskExport.export(
+                context = context,
+                tasks = dao.allBlocking().map { entity ->
+                    io.github.mangi.eta.agent.autotask.AgentTask(
+                        id = entity.id,
+                        title = entity.title,
+                        prompt = entity.prompt,
+                        condition = io.github.mangi.eta.agent.autotask.TaskCondition.fromMask(entity.conditionMask),
+                        maxRounds = entity.maxRounds,
+                        enabled = entity.enabled,
+                        readOnly = entity.readOnly,
+                        conversationId = entity.conversationId,
+                        lastRunAt = entity.lastRunAt,
+                        lastResult = entity.lastResult,
+                        createdAt = entity.createdAt,
+                    )
+                },
+                nowMillis = System.currentTimeMillis(),
+            )
+        }
     }
 
 
