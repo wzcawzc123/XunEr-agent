@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.components
 
+import io.github.mangi.eta.agent.plan.AgentPlanUi
 import io.github.mangi.eta.ui.voice.SpeechPlaybackHost
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -174,6 +175,9 @@ internal fun AgentChatBody(
     val contextUsage = remember(messages, modelPickerState.selectedModel) {
         latestContextUsage(messages, modelPickerState.selectedModel)
     }
+    // 任务清单进度：从历史里最后一次 todo_write 的工具结果解析。
+    // 纯函数、无副作用；没有清单时为 null，BottomBar 因此不占额外高度。
+    val planUi = remember(messages) { latestPlanUi(messages) }
 
     val visibleMessages = remember(messages, messageEdit?.targetMessageId, messageEdit?.preserveFollowingMessages) {
         AgentConversationRevisionReducer.visibleMessagesForEdit(
@@ -229,6 +233,7 @@ internal fun AgentChatBody(
             resumableInterrupted = resumableInterrupted,
             onResumeInterrupted = onResumeInterrupted,
             contextUsage = contextUsage,
+            planUi = planUi,
             isStreaming = isStreaming,
             messagesLoaded = messagesLoaded,
             reasoningEffort = reasoningEffort,
@@ -285,6 +290,7 @@ private fun AgentChatScaffold(
     resumableInterrupted: Boolean,
     onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
+    planUi: AgentPlanUi?,
     isStreaming: Boolean,
     messagesLoaded: Boolean,
     reasoningEffort: ReasoningEffort,
@@ -347,6 +353,7 @@ private fun AgentChatScaffold(
                 resumableInterrupted = resumableInterrupted,
                 onResumeInterrupted = onResumeInterrupted,
                 contextUsage = contextUsage,
+                planUi = planUi,
                 showContextUsage = hasMessages,
                 isStreaming = isStreaming,
                 reasoningEffort = reasoningEffort,
@@ -898,6 +905,7 @@ private fun AgentChatBottomBar(
     resumableInterrupted: Boolean,
     onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
+    planUi: AgentPlanUi?,
     showContextUsage: Boolean,
     isStreaming: Boolean,
     reasoningEffort: ReasoningEffort,
@@ -925,6 +933,8 @@ private fun AgentChatBottomBar(
             .fillMaxWidth()
             .imePadding(),
     ) {
+        // 任务清单进度：有未完成步骤时才出现，全部完成后自动消失。
+        planUi?.let { AgentPlanProgressBar(it) }
         if (messageBackdrop != null) {
             val blurColors = BlurDefaults.blurColors(
                 blendColors = listOf(
@@ -1226,3 +1236,22 @@ private data class SuggestionItem(
     val icon: ImageVector,
     val prompt: String,
 )
+
+/**
+ * 取历史里最后一次 `todo_write` 的工具结果并解析成 UI 摘要。
+ *
+ * 只看 [ToolActivityMessageUi]：清单回执正是该工具的 resultSummary，
+ * 用 toolName 精确匹配比扫所有消息的文本可靠得多（普通回复里出现同类字样不会误判）。
+ * 从后往前找：清单是全量覆盖语义，最后一条即当前全貌。
+ * 全程 runCatching —— 解析失败只让进度条不显示，绝不影响聊天界面。
+ */
+private fun latestPlanUi(messages: List<AgentChatMessageUi>): AgentPlanUi? {
+    for (index in messages.indices.reversed()) {
+        val message = messages[index]
+        if (message !is ToolActivityMessageUi) continue
+        if (message.toolName != io.github.mangi.eta.agent.plan.AgentPlanTool.NAME) continue
+        val text = message.resultSummary ?: continue
+        return runCatching { AgentPlanUi.parseFrom(text) }.getOrNull()
+    }
+    return null
+}
