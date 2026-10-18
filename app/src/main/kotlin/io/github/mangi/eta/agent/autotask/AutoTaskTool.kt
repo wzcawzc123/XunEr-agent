@@ -81,8 +81,14 @@ internal object AutoTaskTool {
             return "失败：title 与 prompt 都是必填。"
         }
 
-        val schedule = parseSchedule(args, nowMillis)
-            ?: return "失败：时间参数不合法（after 需 after_minutes>0；every 需 every_minutes>0；daily 需 at_time=HH:mm）。"
+        // 关键区分：`null` 表示「不限制时间」（schedule=none 或省略），
+        // 而参数写错必须报错。之前两者都返回 null，导致最常见的
+        // 「只要条件满足就跑」被判成参数非法、任务根本创建不出来。
+        val schedule = when (val parsed = parseSchedule(args, nowMillis)) {
+            is ScheduleParse.None -> null
+            is ScheduleParse.Spec -> parsed.spec
+            is ScheduleParse.Invalid -> return "失败：${parsed.reason}"
+        }
 
         val condition = when (args.optString("condition").ifBlank { "charging_wifi_idle" }) {
             "charging_wifi_idle" -> TaskCondition.CONSERVATIVE
@@ -186,31 +192,48 @@ internal object AutoTaskTool {
         }.getOrElse { "失败：${it.message ?: it.javaClass.simpleName}" }
     }
 
-    /** 解析时间参数；`none`/缺省返回 null（表示无时间限制）。参数不合法返回 null 但调用方需区分，故用 Result。 */
-    private fun parseSchedule(args: JSONObject, nowMillis: Long): ScheduleSpec? {
+    /** 时间参数解析结果：三态明确区分「无时间限制」「有具体时间」「参数错误」。 */
+    @org.jetbrains.annotations.VisibleForTesting
+    internal sealed interface ScheduleParse {
+        /** `schedule=none` 或未传：只看条件，不限制时间。 */
+        data object None : ScheduleParse
+        data class Spec(val spec: ScheduleSpec) : ScheduleParse
+        data class Invalid(val reason: String) : ScheduleParse
+    }
+
+    @org.jetbrains.annotations.VisibleForTesting
+    internal fun parseSchedule(args: JSONObject, nowMillis: Long): ScheduleParse {
         val kind = args.optString("schedule").ifBlank { "none" }
         return when (kind) {
-            "none" -> null
+            "none" -> ScheduleParse.None
             "after" -> {
                 val minutes = args.optInt("after_minutes", 0)
-                if (minutes <= 0) return null
-                ScheduleSpec.After(minutes * 60_000L, anchor = nowMillis)
+                if (minutes <= 0) {
+                    ScheduleParse.Invalid("schedule=after 需要 after_minutes > 0（分钟）")
+                } else {
+                    ScheduleParse.Spec(ScheduleSpec.After(minutes * 60_000L, anchor = nowMillis))
+                }
             }
             "every" -> {
                 val minutes = args.optInt("every_minutes", 0)
-                if (minutes <= 0) return null
-                ScheduleSpec.Every(minutes * 60_000L)
+                if (minutes <= 0) {
+                    ScheduleParse.Invalid("schedule=every 需要 every_minutes > 0（分钟）")
+                } else {
+                    ScheduleParse.Spec(ScheduleSpec.Every(minutes * 60_000L))
+                }
             }
             "daily" -> {
                 val raw = args.optString("at_time")
                 val parts = raw.split(":")
-                if (parts.size != 2) return null
-                val h = parts[0].toIntOrNull() ?: return null
-                val m = parts[1].toIntOrNull() ?: return null
-                if (h !in 0..23 || m !in 0..59) return null
-                ScheduleSpec.Daily(h, m)
+                val h = parts.getOrNull(0)?.toIntOrNull()
+                val m = parts.getOrNull(1)?.toIntOrNull()
+                if (parts.size != 2 || h == null || m == null || h !in 0..23 || m !in 0..59) {
+                    ScheduleParse.Invalid("schedule=daily 需要 at_time 形如 HH:mm（如 09:00）")
+                } else {
+                    ScheduleParse.Spec(ScheduleSpec.Daily(h, m))
+                }
             }
-            else -> null
+            else -> ScheduleParse.Invalid("schedule 只能是 after / every / daily / none")
         }
     }
 }
