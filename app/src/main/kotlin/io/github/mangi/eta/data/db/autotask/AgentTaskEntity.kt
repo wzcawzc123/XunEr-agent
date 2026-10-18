@@ -3,6 +3,7 @@ package io.github.mangi.eta.data.db.autotask
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Upsert
@@ -13,7 +14,10 @@ import androidx.room.Upsert
  * 独立的表，不并进 conversations：任务的生命周期比单个会话长得多
  * （"帮我盯 CI"这件事可能跨十几个会话），把它挂在会话上会跟着会话一起被删除或归档。
  */
-@Entity(tableName = "agent_tasks")
+@Entity(
+    tableName = "agent_tasks",
+    indices = [Index(value = ["enabled", "last_run_at"])],
+)
 internal data class AgentTaskEntity(
     @PrimaryKey val id: String,
     val title: String,
