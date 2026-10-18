@@ -82,6 +82,10 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("SELECT roleplay_json FROM conversations WHERE id = :conversationId")
     suspend fun roleplayJsonRow(conversationId: String): String?
 
+    /** 只取历史 JSON：自动任务执行时需要在原会话追加一轮，要先读回上下文。 */
+    @Query("SELECT history_json FROM conversations WHERE id = :conversationId")
+    suspend fun historyJsonFor(conversationId: String): String?
+
     @Transaction
     suspend fun roleplayJson(conversationId: String): String? = roleplayJsonRow(conversationId)?.let {
         restoreText("conversations", conversationId, "roleplay", it)

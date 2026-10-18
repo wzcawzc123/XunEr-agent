@@ -32,7 +32,7 @@ import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
         ConversationTodoEntity::class,
         AgentTaskEntity::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -75,6 +75,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_21_22,
                         MIGRATION_22_23,
                         MIGRATION_23_24,
+                        MIGRATION_24_25,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -173,6 +174,11 @@ internal abstract class EtaDatabase : RoomDatabase() {
                 "CREATE INDEX IF NOT EXISTS index_agent_tasks_enabled_last_run " +
                     "ON agent_tasks (enabled, last_run_at)",
             )
+        }
+
+        /** 自动任务绑定会话（v25）：执行时在原会话追加一轮，而不是新建会话。 */
+        internal val MIGRATION_24_25 = Migration(24, 25) { database ->
+            database.execSQL("ALTER TABLE agent_tasks ADD COLUMN conversation_id TEXT")
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {

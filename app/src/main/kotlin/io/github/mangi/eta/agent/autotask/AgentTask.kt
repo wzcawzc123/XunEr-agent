@@ -23,6 +23,14 @@ internal data class AgentTask(
     val enabled: Boolean = false,
     /** 第一版恒为 true；开放写操作前必须先扩护栏（额度、确认、白名单）。 */
     val readOnly: Boolean = true,
+    /**
+     * 任务所属会话。
+     *
+     * 执行时**在同一个会话追加一轮**，而不是新建会话：
+     * 这样自动轮能继承原会话上下文（知道你们之前聊了什么），
+     * 会话列表也不会被"自动任务"刷屏。null 表示尚未绑定（旧数据）。
+     */
+    val conversationId: String? = null,
     val lastRunAt: Long? = null,
     val lastResult: String? = null,
     val createdAt: Long,
@@ -52,6 +60,7 @@ internal data class AgentTask(
             condition: TaskCondition = TaskCondition.CONSERVATIVE,
             maxRounds: Int = DEFAULT_MAX_ROUNDS,
             enabled: Boolean = false,
+            conversationId: String? = null,
             nowMillis: Long,
         ): Result<AgentTask> {
             val cleanTitle = title.trim()
@@ -77,6 +86,7 @@ internal data class AgentTask(
                     condition = condition,
                     maxRounds = maxRounds,
                     enabled = enabled,
+                    conversationId = conversationId,
                     createdAt = nowMillis,
                 ),
             )

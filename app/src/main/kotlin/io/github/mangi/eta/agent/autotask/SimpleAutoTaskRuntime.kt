@@ -79,29 +79,35 @@ internal class SimpleAutoTaskRuntime(
             ?: return "未配置可用的模型"
         val provider: AgentProviderClient = ProviderClientFactory.getClient(config)
 
-        // 为这次执行建一个独立会话：结果有地方落，通知也能跳回来回看全过程。
-        // 用 auto-task-<id>-<时间戳> 作 id：同一条任务重复执行也不会串会话。
-        val sessionId = "auto-task-${task.id}-${System.currentTimeMillis()}"
+        // 核心修正：**在任务所属会话里追加一轮**，不新建会话。
+        // 这样自动轮能继承原会话上下文（知道你们之前聊什么），会话列表也不会被刷屏。
+        // 任务没绑会话时（旧数据）退化为临时会话，保证仍能执行。
+        val targetConversationId = task.conversationId
+            ?: "auto-task-${task.id}-${System.currentTimeMillis()}"
         val dao = database.conversationDao()
-        kotlinx.coroutines.runBlocking {
-            dao.insertConversationRow(
-                io.github.mangi.eta.data.db.ConversationEntity(
-                    id = sessionId,
-                    title = "[自动] ${task.title}",
-                    thinkingEnabled = false,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                ),
-            )
+
+        // 读该会话已有历史；旧数据没绑会话时从空历史开始
+        val history = if (task.conversationId != null) {
+            kotlinx.coroutines.runBlocking { loadHistory(dao, targetConversationId) }
+        } else {
+            kotlinx.coroutines.runBlocking {
+                dao.insertConversationRow(
+                    io.github.mangi.eta.data.db.ConversationEntity(
+                        id = targetConversationId,
+                        title = "[自动] ${task.title}",
+                        thinkingEnabled = false,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
+            emptyList()
         }
 
-        // 真实工具链：AgentLocalTools 本身就是 ToolExecutor，直接交给 Agent 循环。
-        // 只读靠「不给写类工具」+ prompt 约束双保险；这里仍启用 terminal，
-        // 否则连 `gh run list` 都跑不了。
         val tools = io.github.mangi.eta.agent.tool.AgentLocalTools(
             context = context,
             logger = AndroidAgentLogger,
-            conversationId = sessionId,
+            conversationId = targetConversationId,
         )
 
         val reply = AgentModelClient.complete(
@@ -110,12 +116,21 @@ internal class SimpleAutoTaskRuntime(
             toolExecutor = tools,
             provider = provider,
             runController = AgentRunController(),
-            history = emptyList(),
+            history = history,
+            sessionId = targetConversationId,
         )
 
-        val text = reply.content
-        return text.ifBlank { "（模型未返回内容）" }
+        return reply.content.ifBlank { "（模型未返回内容）" }
     }
+
+    /** 读会话历史（historyJson → ConversationMessage 列表）。 */
+    private suspend fun loadHistory(
+        dao: io.github.mangi.eta.data.db.ConversationDao,
+        conversationId: String,
+    ): List<AgentModelClient.ConversationMessage> = runCatching {
+        val raw = dao.historyJsonFor(conversationId) ?: return@runCatching emptyList()
+        io.github.mangi.eta.agent.model.AgentConversationCodec.decodeTranscript(raw)
+    }.getOrElse { emptyList() }
 
     private fun buildPrompt(task: AgentTask): String = buildString {
         appendLine("[自动任务] ${task.title}")

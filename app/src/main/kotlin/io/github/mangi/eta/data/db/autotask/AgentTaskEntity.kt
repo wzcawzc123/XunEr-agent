@@ -27,6 +27,7 @@ internal data class AgentTaskEntity(
     @ColumnInfo(name = "max_rounds") val maxRounds: Int,
     val enabled: Boolean,
     @ColumnInfo(name = "read_only") val readOnly: Boolean,
+    @ColumnInfo(name = "conversation_id") val conversationId: String?,
     @ColumnInfo(name = "last_run_at") val lastRunAt: Long?,
     @ColumnInfo(name = "last_result") val lastResult: String?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
