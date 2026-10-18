@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.tool
 
+import io.github.mangi.eta.agent.memory.AgentMemoryFreshness
 import io.github.mangi.eta.agent.memory.AgentMemoryHeadingCheck
 import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
@@ -525,6 +526,22 @@ internal class AgentLocalTools(
             // 归档区标识：文末 `# 归档` 之后是已结项的项目档案。
             // 不给这个标记的话，模型会把「一加11独显已收官」这类历史结论当成现状继续引用。
             .put("archived", isArchivedRead(result.snapshot.content, result.startLine))
+            // 时效性：只标记不隐藏。内容里最晚的日期超过 30 天时提示「当前状态类描述可能过时」，
+            // 因为「当前在跑 v0.17」这类句子一周就失效，而「Debian 13」几年都成立 ——
+            // 机器无法区分二者，只把事实（最晚日期与天数）交给模型判断。
+            .apply {
+                val freshness = AgentMemoryFreshness.assess(
+                    content = result.snapshot.content,
+                    today = java.time.LocalDate.now(),
+                )
+                if (freshness.latestDate != null) {
+                    put("freshness", JSONObject()
+                        .put("latest_date", freshness.latestDate)
+                        .put("age_days", freshness.ageDays ?: 0L)
+                        .put("stale", freshness.stale))
+                    freshness.hint()?.let { put("freshness_hint", it) }
+                }
+            }
             .put("has_more", result.hasMore)
         // ★ 分页续读指引：不带 section/query 时这是"从 start_line 读一页"的分页语义。
         //   只给 has_more 而不给出"下一段从哪读"，模型就只能用同样的参数反复重试
