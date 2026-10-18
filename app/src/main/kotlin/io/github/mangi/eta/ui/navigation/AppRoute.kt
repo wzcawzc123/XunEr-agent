@@ -68,6 +68,9 @@ sealed interface AppRoute : NavKey {
     @Serializable
     data object Memory : AppRoute
 
+    /** 用量统计：token 消耗与缓存命中率（只读，无副作用）。 */
+    data object UsageStats : AppRoute
+
     @Serializable
     data object LinuxEnvironment : AppRoute
 

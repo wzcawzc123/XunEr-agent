@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.app
 
+import io.github.mangi.eta.ui.screens.usage.AgentUsageScreen
 import io.github.mangi.eta.ui.voice.SpeechOssScreen
 import io.github.mangi.eta.ui.voice.SpeechRecognitionScreen
 import io.github.mangi.eta.ui.voice.SpeechSettingsScreen
@@ -702,6 +703,9 @@ fun AgentAppRoot(
                     onImport = agentState::importBackup,
                     onExportDiagnostics = { output -> agentState.exportDiagnostics(output) },
                 )
+            }
+            entry<AppRoute.UsageStats>(swipeDismiss = swipeDismiss) {
+                AgentUsageScreen()
             }
             entry<AppRoute.Memory>(swipeDismiss = swipeDismiss) {
                 LaunchedEffect(Unit) {
