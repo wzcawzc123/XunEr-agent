@@ -20,14 +20,15 @@ internal object TaskQueueSelector {
      * 从 [tasks] 中选出此刻应该执行的**一个**任务。
      *
      * @param state 当前设备状态（充电/WiFi/亮屏）
+     * @param nowMillis 当前时刻，用于判定「是否到点」
      * @return 选中的任务；没有可执行的就返回 null（调用方据此决定是否休眠）
      */
-    fun pick(tasks: List<AgentTask>, state: DeviceState): AgentTask? = tasks
+    fun pick(tasks: List<AgentTask>, state: DeviceState, nowMillis: Long): AgentTask? = tasks
         .asSequence()
         // 已经跑过的不再重复（第一版的一次性语义）
         .filterNot { it.hasRun }
         // 必须启用且条件满足
-        .filter { it.canRun(state) }
+        .filter { it.canRun(state, nowMillis) }
         // 先来先做：创建早的先跑，保证顺序可预期
         .minByOrNull { it.createdAt }
 

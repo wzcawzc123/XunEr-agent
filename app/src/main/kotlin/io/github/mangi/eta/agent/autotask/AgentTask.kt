@@ -31,12 +31,29 @@ internal data class AgentTask(
      * 会话列表也不会被"自动任务"刷屏。null 表示尚未绑定（旧数据）。
      */
     val conversationId: String? = null,
+    /**
+     * 时间语义（借鉴 dsh 的 schedule）。到点 + 条件满足才执行。
+     * null 表示"只要条件满足就跑"（旧行为，向后兼容）。
+     */
+    val schedule: ScheduleSpec? = null,
+    /**
+     * 是否仍活跃。一次性任务投递后转 inactive（但不删除 —— 保留历史，
+     * 用户能回看"这条提醒什么时候跑过"）。
+     */
+    val active: Boolean = true,
     val lastRunAt: Long? = null,
     val lastResult: String? = null,
     val createdAt: Long,
 ) {
-    /** 是否允许此刻执行。 */
-    fun canRun(state: DeviceState): Boolean = enabled && condition.satisfiedBy(state)
+    /** 是否允许此刻执行：启用 + 活跃 + 条件满足 + 到点。 */
+    fun canRun(state: DeviceState, nowMillis: Long): Boolean =
+        enabled && active && condition.satisfiedBy(state) && isDue(nowMillis)
+
+    /** 是否已到点（无 schedule 视为"永远到点"，保持旧行为）。 */
+    fun isDue(nowMillis: Long): Boolean {
+        val spec = schedule ?: return true
+        return nowMillis >= spec.nextRunAtMillis(nowMillis, lastRunAt)
+    }
 
     /** 是否已经跑过（第一版：一次任务只跑一次，避免无人看管下反复花钱）。 */
     val hasRun: Boolean get() = lastRunAt != null

@@ -134,6 +134,15 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <service
+            android:name=".agent.autotask.AutoTaskService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="automatic task execution triggered by a root daemon" />
+        </service>
+
+        <service
             android:name=".agent.runtime.AgentRuntimeService"
             android:exported="true"
             tools:ignore="ExportedService" />

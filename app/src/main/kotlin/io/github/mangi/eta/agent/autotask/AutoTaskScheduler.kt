@@ -30,7 +30,7 @@ internal object AutoTaskScheduler {
      */
     fun decide(tasks: List<AgentTask>, state: DeviceState, nowMillis: Long): Decision {
         // 一次只做一件：pick 已按 createdAt 排序并跳过不可执行项
-        val task = TaskQueueSelector.pick(tasks, state) ?: return Decision.Idle
+        val task = TaskQueueSelector.pick(tasks, state, nowMillis) ?: return Decision.Idle
         return Decision.Run(task)
     }
 
@@ -48,14 +48,14 @@ internal object AutoTaskScheduler {
      *
      * 这是最容易被忽略、但对用户最重要的一块 —— 任务不跑时的沉默最让人困惑。
      */
-    fun explainIdle(tasks: List<AgentTask>, state: DeviceState): String = when {
+    fun explainIdle(tasks: List<AgentTask>, state: DeviceState, nowMillis: Long = Long.MAX_VALUE): String = when {
         tasks.isEmpty() -> "还没有自动任务"
         tasks.none { it.enabled } -> "有 ${tasks.size} 个任务，但都未启用"
         tasks.all { it.hasRun } -> "所有任务都已执行过（第一版每个任务只跑一次）"
         else -> {
             val pending = tasks.filter { it.enabled && !it.hasRun }
             val unmet = pending.mapNotNull { task ->
-                if (task.condition.satisfiedBy(state)) null else task.condition.describe()
+                if (task.condition.satisfiedBy(state) && task.isDue(nowMillis)) null else task.condition.describe()
             }.distinct()
             if (unmet.isEmpty()) {
                 "条件已满足，等下一次唤醒"
