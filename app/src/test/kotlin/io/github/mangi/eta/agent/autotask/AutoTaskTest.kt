@@ -74,7 +74,7 @@ class AutoTaskTest {
     fun `默认不启用`() {
         val t = AgentTask.create("t", "标题", "指令", nowMillis = 1L).getOrThrow()
         assertFalse("新建任务必须默认关闭", t.enabled)
-        assertFalse(t.canRun(chargingIdle))
+        assertFalse(t.canRun(chargingIdle, 1_000_000L))
     }
 
     @Test
@@ -106,31 +106,31 @@ class AutoTaskTest {
 
     @Test
     fun `未启用的任务不会被选中`() {
-        assertNull(TaskQueueSelector.pick(listOf(task(enabled = false)), chargingIdle))
+        assertNull(TaskQueueSelector.pick(listOf(task(enabled = false)), chargingIdle, 1_000_000L))
     }
 
     @Test
     fun `条件不满足时不会被选中`() {
-        assertNull(TaskQueueSelector.pick(listOf(task()), unplugged))
+        assertNull(TaskQueueSelector.pick(listOf(task()), unplugged, 1_000_000L))
     }
 
     @Test
     fun `已执行过的任务不再重复`() {
-        assertNull(TaskQueueSelector.pick(listOf(task(lastRunAt = 100L)), chargingIdle))
+        assertNull(TaskQueueSelector.pick(listOf(task(lastRunAt = 100L)), chargingIdle, 1_000_000L))
     }
 
     @Test
     fun `多个可执行任务时取创建最早的一个`() {
         val early = task(id = "early", createdAt = 10L)
         val late = task(id = "late", createdAt = 20L)
-        assertEquals("early", TaskQueueSelector.pick(listOf(late, early), chargingIdle)?.id)
+        assertEquals("early", TaskQueueSelector.pick(listOf(late, early), chargingIdle, 1_000_000L)?.id)
     }
 
     @Test
     fun `一次只挑一个任务`() {
         val tasks = listOf(task(id = "a", createdAt = 1L), task(id = "b", createdAt = 2L))
         // pick 返回单个对象，天然保证一次只做一件事
-        assertEquals("a", TaskQueueSelector.pick(tasks, chargingIdle)?.id)
+        assertEquals("a", TaskQueueSelector.pick(tasks, chargingIdle, 1_000_000L)?.id)
     }
 
     @Test
