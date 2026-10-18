@@ -63,23 +63,37 @@ internal sealed interface ScheduleSpec {
             require(minuteOfHour in 0..59) { "分钟必须在 0..59" }
         }
 
+        /**
+         * 返回「上次执行之后的下一个 [hourOfDay]:[minuteOfHour]」。
+         *
+         * **必须基于 lastRunAt 而不是 now** —— 审查时发现的 bug：
+         * 原实现总是从 now 往后算，返回的永远在未来，于是 isDue() 恒为 false，
+         * 每日任务**永远不会触发**。
+         *
+         * 从未执行过时用一个远早的基准，使「最近的某个 9 点」成为第一个目标：
+         * 若今天 9 点已过，它会立刻判为到点（补跑）；否则等今天 9 点。
+         */
         override fun nextRunAtMillis(now: Long, lastRunAt: Long?): Long {
             val zone = java.time.ZoneId.systemDefault()
-            val nowLocal = java.time.Instant.ofEpochMilli(now).atZone(zone)
-            var candidate = nowLocal.toLocalDate()
+            val baseInstant = lastRunAt
+                ?.let { java.time.Instant.ofEpochMilli(it) }
+                ?: java.time.Instant.ofEpochMilli(now).minus(365, java.time.temporal.ChronoUnit.DAYS)
+            var candidateLocal = baseInstant.atZone(zone).toLocalDate()
+            var candidate = candidateLocal
                 .atTime(hourOfDay, minuteOfHour)
                 .atZone(zone)
                 .toInstant()
-                .toEpochMilli()
-            // 今天的点已过 → 顺延到明天
-            if (candidate <= now) {
-                candidate = nowLocal.toLocalDate().plusDays(1)
+            // 候选必须严格晚于基准；最多顺延两天（时区/DST 兜底）
+            var guard = 0
+            while (!candidate.isAfter(baseInstant) && guard < 3) {
+                candidateLocal = candidateLocal.plusDays(1)
+                candidate = candidateLocal
                     .atTime(hourOfDay, minuteOfHour)
                     .atZone(zone)
                     .toInstant()
-                    .toEpochMilli()
+                guard += 1
             }
-            return candidate
+            return candidate.toEpochMilli()
         }
 
         override fun describe(): String = "每天 %02d:%02d".format(hourOfDay, minuteOfHour)

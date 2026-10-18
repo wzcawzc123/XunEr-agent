@@ -25,8 +25,10 @@ internal object TaskQueueSelector {
      */
     fun pick(tasks: List<AgentTask>, state: DeviceState, nowMillis: Long): AgentTask? = tasks
         .asSequence()
-        // 已经跑过的不再重复（第一版的一次性语义）
-        .filterNot { it.hasRun }
+        // 跑过的任务：一次性（after / 无 schedule）不再重复；
+        // **重复任务（every / daily）必须放行** —— 否则「每天检查 CI」只会跑一次，
+        // 与 ScheduleSpec.repeating 声明的语义矛盾。是否到点由 isDue() 用 lastRunAt 推算。
+        .filter { !it.hasRun || it.schedule?.repeating == true }
         // 必须启用且条件满足
         .filter { it.canRun(state, nowMillis) }
         // 先来先做：创建早的先跑，保证顺序可预期

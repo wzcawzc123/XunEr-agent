@@ -179,4 +179,56 @@ class AutoTaskTest {
         val withUnknown = TaskCondition.CONSERVATIVE.toMask() or 8
         assertEquals(TaskCondition.CONSERVATIVE, TaskCondition.fromMask(withUnknown))
     }
+
+    // ---------- 重复任务语义（审查发现的缺陷，回归测试） ----------
+
+    @Test
+    fun `一次性任务跑过就不再选`() {
+        val once = task(id = "once", lastRunAt = 500L).copy(
+            schedule = ScheduleSpec.After(60_000L, anchor = 0L),
+        )
+        assertNull(
+            "after 类型投递后不应再跑",
+            TaskQueueSelector.pick(listOf(once), chargingIdle, 100_000_000L),
+        )
+    }
+
+    @Test
+    fun `every 任务到点后可以再跑`() {
+        val every = task(id = "every", lastRunAt = 1_000_000L).copy(
+            schedule = ScheduleSpec.Every(60_000L),
+        )
+        // lastRunAt + 间隔 = 1_060_000；now 超过它 → 应被选中
+        assertEquals(
+            "every 类型到点后必须能再次投递",
+            "every",
+            TaskQueueSelector.pick(listOf(every), chargingIdle, 1_100_000L)?.id,
+        )
+    }
+
+    @Test
+    fun `every 任务未到点不跑`() {
+        val every = task(id = "every", lastRunAt = 1_000_000L).copy(
+            schedule = ScheduleSpec.Every(600_000L),  // 10 分钟
+        )
+        assertNull(
+            "距离上次不足间隔时不该跑",
+            TaskQueueSelector.pick(listOf(every), chargingIdle, 1_100_000L),
+        )
+    }
+
+    @Test
+    fun `daily 任务跨天后可以再跑`() {
+        val daily = task(id = "daily", lastRunAt = 1_000_000L).copy(
+            schedule = ScheduleSpec.Daily(9, 0),
+        )
+        // 用一个远期时刻，保证已过下一个 9 点
+        val far = System.currentTimeMillis() + 3L * 24 * 3600 * 1000
+        assertEquals(
+            "daily 类型跨天后必须能再次投递",
+            "daily",
+            TaskQueueSelector.pick(listOf(daily), chargingIdle, far)?.id,
+        )
+    }
+
 }
