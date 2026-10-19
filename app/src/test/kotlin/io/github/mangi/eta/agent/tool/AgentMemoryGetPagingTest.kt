@@ -108,7 +108,10 @@ class AgentMemoryGetPagingTest {
 
     private fun writeLongMemory() {
         val snapshot = AgentMemoryRepository.snapshot()
-        val body = (1..400).joinToString("\n") {
+        // 默认页大小 12,000 字符；原 400 行约 12k，恰好卡在边界上 ——
+        // 共享记忆文件被其他用例清空时，这里会因为"只有一页"而失败。
+        // 写到 ~36k 保证至少 3 页，让分页断言不依赖测试执行顺序。
+        val body = (1..1_200).joinToString("\n") {
             "第 $it 行：这是一段用于把记忆文件撑到一页以上的填充内容"
         }
         val result = AgentMemoryRepository.mutate(
