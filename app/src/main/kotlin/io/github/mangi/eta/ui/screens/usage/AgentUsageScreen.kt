@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.agent.cost.AgentCostRepository
 import io.github.mangi.eta.agent.cost.AgentCostSummary
@@ -40,18 +41,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 用量统计页。
  *
- * 设计取自主流观测工具的共性（见 llm-usage-dashboard / MLflow / Braintrust 的实践）：
- * 先给**三件事**，不堆图表 ——
- * 1. 总量（多少轮、多少 token）
- * 2. **缓存命中率**（省钱的关键指标，也是「有没有破坏 prompt 缓存」的直接证据）
- * 3. **可计费输入**（真正按全价付钱的部分）
- * 4. （v3.13.4）按模型分组：总账之外，钱花在哪个模型上一目了然
+ * v3.13.8 重排：原来三张卡各带一份标题+副标题，六个数字撑一整屏、信息密度极低。
+ * 现在按「结论 → 明细」两层组织：
+ * 1. **Hero 卡**：真正按全价付钱的「计费输入」放大展示，缓存命中率与"省了多少"作为
+ *    它的解释 —— 用户扫一眼就能回答"这次为什么没超预算"；
+ * 2. **明细卡**：全部原始数字收进一张卡的分行里，去掉重复的卡片外壳开销；
+ * 3. **按模型**：保留（v3.13.4），钱花在哪个模型上一目了然。
  *
  * 刻意只读、无副作用、无网络：这一页不产生任何费用。
  * 数据在进入页面时读一次，支持下拉刷新（U4，v3.13.4）。
- *
- * 布局与交互统一到项目标准（v3.13.4）：EtaCard（24dp 圆角）+ EtaPreferenceGroupItem/
- * EtaPreferenceRow（与设置页/记忆页同款 squircle 分段与分割线），消除与其他页面的割裂感。
  */
 @Composable
 internal fun AgentUsageScreen() {
@@ -102,8 +100,9 @@ internal fun AgentUsageScreen() {
                     style = MiuixTheme.textStyles.title2,
                     color = MiuixTheme.colorScheme.onSurface,
                 )
+                // 副标题只留一句；轮次放 hero/明细里，不再单独占一行解释。
                 Text(
-                    text = "统计所有会话里已发出的请求；本地提示与占位不计入。",
+                    text = "统计所有会话已发出的请求；本地提示与占位不计入。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -113,9 +112,8 @@ internal fun AgentUsageScreen() {
                     summary == null -> LoadingCard()
                     summary.isEmpty -> EmptyCard()
                     else -> {
-                        TotalCard(summary)
-                        CacheCard(summary)
-                        BillableCard(summary)
+                        HeroCard(summary)
+                        DetailCard(summary)
                         if (summary.byModel.isNotEmpty()) ByModelCard(summary)
                     }
                 }
@@ -148,31 +146,92 @@ private fun EmptyCard() {
     }
 }
 
-/** 卡片外壳：与记忆页/设置页同款 EtaCard + PreferenceGroup 分段，保证全局视觉一致。 */
+/**
+ * 结论卡：计费输入大字 + 缓存命中率条 + 一句"为什么"。
+ *
+ * 之所以把三张卡压成一张：缓存命中率、计费输入、输入总量本来就是同一件事的三个面
+ * （计费输入 = 输入 × (1 − 命中率)），拆三张卡反而让用户自己做算术。
+ */
 @Composable
-private fun EtaMetricCard(
-    title: String,
-    subtitle: String? = null,
-    content: @Composable () -> Unit,
-) {
+private fun HeroCard(summary: AgentCostSummary) {
+    val rate = summary.cacheHitRate
+    val ratePercent = (rate * 100).toInt()
+    EtaCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text = "实际计费输入",
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = formatTokens(summary.billableInputTokens),
+                style = MiuixTheme.textStyles.headline1,
+                color = MiuixTheme.colorScheme.primary,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "缓存命中率",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "$ratePercent%",
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MiuixTheme.colorScheme.surfaceVariant),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(rate)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MiuixTheme.colorScheme.primary),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                // 用命中率直接给结论，不再让用户自己拿两个数相减。
+                text = "输入的 $ratePercent% 走了缓存价；只有未命中的部分按全价计费。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
+/** 明细卡：全部原始数字收进一张卡，行间分割线与设置页同款。 */
+@Composable
+private fun DetailCard(summary: AgentCostSummary) {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = title,
+                text = "明细",
                 style = MiuixTheme.textStyles.body1,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                fontWeight = FontWeight.Medium,
                 color = MiuixTheme.colorScheme.onSurface,
             )
-            subtitle?.let {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = it,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
             Spacer(Modifier.height(10.dp))
-            content()
+            MetricRow("输入 token", formatTokens(summary.inputTokens))
+            MetricRow("其中缓存命中", formatTokens(summary.cachedTokens))
+            MetricRow("输出 token", formatTokens(summary.outputTokens))
+            if (summary.reasoningTokens > 0) {
+                MetricRow("推理 token", formatTokens(summary.reasoningTokens))
+            }
+            MetricRow("请求轮次", formatCount(summary.turns.toLong()), isLast = true)
         }
     }
 }
@@ -194,67 +253,27 @@ private fun MetricRow(label: String, value: String, isLast: Boolean = false) {
     }
 }
 
-@Composable
-private fun TotalCard(summary: AgentCostSummary) {
-    EtaMetricCard(title = "总量", subtitle = "所有会话累计") {
-        MetricRow("请求轮次", formatCount(summary.turns.toLong()))
-        MetricRow("输入 token", formatTokens(summary.inputTokens))
-        MetricRow("输出 token", formatTokens(summary.outputTokens), isLast = summary.reasoningTokens <= 0)
-        if (summary.reasoningTokens > 0) {
-            MetricRow("推理 token", formatTokens(summary.reasoningTokens), isLast = true)
-        }
-    }
-}
-
-@Composable
-private fun CacheCard(summary: AgentCostSummary) {
-    val rate = summary.cacheHitRate
-    EtaMetricCard(title = "缓存命中", subtitle = "命中越高越省：未命中的输入按全价计费。") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "${(rate * 100).toInt()}%",
-                style = MiuixTheme.textStyles.title2,
-                color = MiuixTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(MiuixTheme.colorScheme.surfaceVariant),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(rate)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(MiuixTheme.colorScheme.primary),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BillableCard(summary: AgentCostSummary) {
-    EtaMetricCard(title = "实际计费输入", subtitle = "＝ 输入 − 缓存命中。这一项才是真正按全价付钱的部分。") {
-        MetricRow("计费输入", formatTokens(summary.billableInputTokens), isLast = true)
-    }
-}
-
 /** U3（v3.13.4）：按模型分组——总账之外，每个模型一行，钱花在哪一目了然。 */
 @Composable
 private fun ByModelCard(summary: AgentCostSummary) {
-    EtaMetricCard(title = "按模型分组", subtitle = "每个模型独立累计；按输入 token 降序。") {
-        val models = summary.byModel
-        models.forEachIndexed { index, model ->
-            val value = "${formatCount(model.turns.toLong())} 轮 · ${formatTokens(model.inputTokens)} 输入"
-            MetricRow(
-                label = model.displayName,
-                value = value,
-                isLast = index == models.lastIndex,
+    EtaCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                text = "按模型",
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
             )
+            Spacer(Modifier.height(10.dp))
+            val models = summary.byModel
+            models.forEachIndexed { index, model ->
+                val value = "${formatCount(model.turns.toLong())} 轮 · ${formatTokens(model.inputTokens)} 输入"
+                MetricRow(
+                    label = model.displayName,
+                    value = value,
+                    isLast = index == models.lastIndex,
+                )
+            }
         }
     }
 }
