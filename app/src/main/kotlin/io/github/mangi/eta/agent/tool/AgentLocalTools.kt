@@ -107,6 +107,15 @@ internal class AgentLocalTools(
      * （"当前会话尚无标识"），而不是悄悄写到空 id 下造成串会话。
      */
     private val conversationId: String = "",
+    /**
+     * 当前计划模式阶段。默认 NORMAL，供旧构造点与纯 JVM 测试使用。
+     *
+     * 运行时传入的是「每次工具调用都回查数据库」的 lambda：阶段可能在同一个 run 内
+     * 因 enter_plan_mode / exit_plan_mode 改变，缓存成 run 开始时的值会漏拦。
+     */
+    private val planPhaseProvider: () -> io.github.mangi.eta.agent.plan.AgentPlanPhase = {
+        io.github.mangi.eta.agent.plan.AgentPlanPhase.NORMAL
+    },
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },
     private val supportsVision: () -> Boolean = { true },
     private val screenObservationProvider: (
@@ -239,6 +248,16 @@ internal class AgentLocalTools(
                     )
                 }
             }
+            // 计划模式硬约束：只读阶段拒绝一切修改类工具，不能只靠提示词。
+            val planPhase = planPhaseProvider()
+            if (io.github.mangi.eta.agent.plan.AgentPlanModePolicy.isBlocked(planPhase, toolCall.name, args)) {
+                return@runCatching textResult(
+                    errorResult(
+                        code = "PLAN_MODE_READ_ONLY",
+                        message = io.github.mangi.eta.agent.plan.AgentPlanModePolicy.rejection(planPhase, toolCall.name),
+                    ),
+                )
+            }
             when (toolCall.name) {
                 "get_current_context" -> textResult(DeviceContextTool.current(context))
                 "search_apps" -> textResult(searchApps(args))
@@ -283,6 +302,8 @@ internal class AgentLocalTools(
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
                 AgentPlanTool.NAME -> textResult(todoWrite(args))
+                io.github.mangi.eta.agent.plan.AgentPlanModeTool.ENTER_NAME -> textResult(enterPlanMode())
+                io.github.mangi.eta.agent.plan.AgentPlanModeTool.EXIT_NAME -> textResult(exitPlanMode(args))
                 io.github.mangi.eta.agent.autotask.AutoTaskTool.NAME -> textResult(createAutoTask(args))
                 io.github.mangi.eta.agent.autotask.AutoTaskTool.LIST_NAME -> textResult(listAutoTasks())
                 io.github.mangi.eta.agent.autotask.AutoTaskTool.DELETE_NAME -> textResult(deleteAutoTask(args))
@@ -528,14 +549,69 @@ internal class AgentLocalTools(
      * 抛异常会把一次参数问题升级成整个 run 失败。
      */
     private fun todoWrite(args: JSONObject): String = try {
-        AgentPlanTool.execute(
+        val database = EtaDatabase.get(context)
+        val planStore = AgentPlanStore(database.conversationTodoDao())
+        val modeStore = io.github.mangi.eta.agent.plan.AgentPlanModeStore(database.conversationPlanDao())
+        val now = System.currentTimeMillis()
+        val phase = if (conversationId.isBlank()) {
+            io.github.mangi.eta.agent.plan.AgentPlanPhase.NORMAL
+        } else {
+            modeStore.phaseBlocking(conversationId)
+        }
+        val result = AgentPlanTool.execute(
             args = args,
-            store = AgentPlanStore(EtaDatabase.get(context).conversationTodoDao()),
+            store = planStore,
+            conversationId = conversationId,
+            nowMillis = now,
+            // 执行阶段新增/删除/改写步骤 = 改变用户批准过的范围，回执会让调用方退回待批准。
+            enforceApprovedScope = phase == io.github.mangi.eta.agent.plan.AgentPlanPhase.EXECUTING,
+        )
+        if (conversationId.isNotBlank() && !result.startsWith("失败")) {
+            if (result.startsWith(AgentPlanTool.SCOPE_CHANGE_PREFIX)) {
+                // 清单已照常落库，但版本要重新走一次审批：approved_version 归零、phase → REVIEW。
+                // 这一步不能省 —— 否则模型可以靠"先改清单再继续"绕过用户的批准。
+                modeStore.reReviewBlocking(conversationId, now)
+            } else if (io.github.mangi.eta.agent.plan.AgentPlanModeStore.shouldFinish(
+                    phase,
+                    planStore.loadBlocking(conversationId),
+                )
+            ) {
+                // 执行阶段所有步骤结束（完成/取消）后自动收尾，避免下一轮还背着 EXECUTING 提示。
+                modeStore.cancelBlocking(conversationId, System.currentTimeMillis())
+            }
+        }
+        result
+    } catch (e: Exception) {
+        errorResult("TODO_WRITE_FAILED", "写入任务清单失败：${e.message ?: e::class.java.simpleName}")
+    }
+
+    /** 进入计划模式：只切换阶段并返回只读指引，不改动业务数据。 */
+    private fun enterPlanMode(): String = try {
+        io.github.mangi.eta.agent.plan.AgentPlanModeTool.enter(
+            modeStore = io.github.mangi.eta.agent.plan.AgentPlanModeStore(
+                EtaDatabase.get(context).conversationPlanDao(),
+            ),
+            planStore = AgentPlanStore(EtaDatabase.get(context).conversationTodoDao()),
             conversationId = conversationId,
             nowMillis = System.currentTimeMillis(),
         )
     } catch (e: Exception) {
-        errorResult("TODO_WRITE_FAILED", "写入任务清单失败：${e.message ?: e::class.java.simpleName}")
+        errorResult("ENTER_PLAN_MODE_FAILED", "进入计划模式失败：${e.message ?: e::class.java.simpleName}")
+    }
+
+    /** 提交计划：写步骤与计划正文，切到 REVIEW；失败时不改变任何状态。 */
+    private fun exitPlanMode(args: JSONObject): String = try {
+        io.github.mangi.eta.agent.plan.AgentPlanModeTool.exit(
+            args = args,
+            modeStore = io.github.mangi.eta.agent.plan.AgentPlanModeStore(
+                EtaDatabase.get(context).conversationPlanDao(),
+            ),
+            planStore = AgentPlanStore(EtaDatabase.get(context).conversationTodoDao()),
+            conversationId = conversationId,
+            nowMillis = System.currentTimeMillis(),
+        )
+    } catch (e: Exception) {
+        errorResult("EXIT_PLAN_MODE_FAILED", "提交计划失败：${e.message ?: e::class.java.simpleName}")
     }
 
     /** target=short → 短期记忆仓库，默认 long（向后兼容）；两仓库接口一致可互换。 */

@@ -104,6 +104,18 @@ internal object AgentModelClient {
         rewriteReply: Boolean = false,
         /** 压缩时读取任务清单概览（由运行时层注入；缺省时压缩不写清单）。 */
         planOverview: () -> String? = { null },
+        /**
+         * 本次 run 开始时的任务清单快照（完整清单文本）。
+         *
+         * 与 [planOverview] 的区别：这个在 run 开始就读取并注入请求，用于恢复
+         * "还剩哪几步"；[planOverview] 只在压缩发生时读取，用于把清单写进摘要。
+         * 两者都由运行时层从数据库加载，model 层不依赖 Room。
+         */
+        planSnapshot: String? = null,
+        /** 是否挂载 todo_write；无会话标识的入口（语音/外部助手）不挂载。 */
+        planToolsEnabled: Boolean = true,
+        /** 本次 run 所处的计划模式阶段（用于系统提示与工具只读约束）。 */
+        planPhase: io.github.mangi.eta.agent.plan.AgentPlanPhase = io.github.mangi.eta.agent.plan.AgentPlanPhase.NORMAL,
         assistantScreenContext: String = "",
         onContextSnapshot: (AgentContextSnapshot) -> Unit = {},
         onTranscript: (List<ConversationMessage>) -> Unit = {},
@@ -120,6 +132,7 @@ internal object AgentModelClient {
             memoryContext,
             rootAvailable = initialCapabilities.rootAvailable,
             roleplayContext = roleplayContext,
+            planPhase = planPhase,
         )
         // 图片剥离统一由 AgentLoop 每轮出站前执行（含循环中新增的工具截图），持久 messages 保持原样。
         if (rewriteReply) {
@@ -131,12 +144,14 @@ internal object AgentModelClient {
         } else if (!compactOnly) {
             messages.getJSONObject(messages.length() - 1).put("_eta_message_id", initialUserMessageId)
             AssistantScreenContextProjection.attach(messages.getJSONObject(messages.length() - 1), assistantScreenContext)
+            // 任务清单快照只投影到本轮请求，不进入持久历史（见 AgentPlanContextProjection）。
+            AgentPlanContextProjection.attach(messages.getJSONObject(messages.length() - 1), planSnapshot)
         }
         if (compactOnly) messages.remove(messages.length() - 1)
         val transcript = JSONArray()
         // 旧 history 中的无效消息可能在组装时被跳过，系统边界不能由 history 条数倒推。
         val systemCount = AgentPromptBuilder.buildSystemMessages(
-            config, skillContext, memoryContext, initialCapabilities.rootAvailable, roleplayContext,
+            config, skillContext, memoryContext, initialCapabilities.rootAvailable, roleplayContext, planPhase,
         ).length()
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             if (rewriteReply) return JSONArray()
@@ -150,6 +165,7 @@ internal object AgentModelClient {
                 skillGitHubInstall = true,
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
+                planTools = planToolsEnabled,
                 capabilities = capabilities,
                 localWebSearch = !config.usesHostedWebSearch,
             )
@@ -192,7 +208,7 @@ internal object AgentModelClient {
                 val capabilities = capabilitiesProvider()
                 if (capabilities.rootAvailable != promptRootAvailable) {
                     val systemMessages = AgentPromptBuilder.buildSystemMessages(
-                        config, skillContext, memoryContext, capabilities.rootAvailable, roleplayContext,
+                        config, skillContext, memoryContext, capabilities.rootAvailable, roleplayContext, planPhase,
                     )
                     for (index in 0 until systemMessages.length()) {
                         messages.put(index, systemMessages.getJSONObject(index))

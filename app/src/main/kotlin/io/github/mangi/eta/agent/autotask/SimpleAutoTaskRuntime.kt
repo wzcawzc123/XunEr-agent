@@ -290,6 +290,8 @@ internal class SimpleAutoTaskRuntime(
             runController = controller,
             history = history,
             sessionId = targetConversationId,
+            // 自动任务不参与计划模式：不挂 todo_write/enter/exit，避免后台任务改写用户计划。
+            planToolsEnabled = false,
             onEvent = { event ->
                 if (event is io.github.mangi.eta.agent.runtime.AgentEvent.RoundStarted) {
                     rounds += 1

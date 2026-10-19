@@ -259,8 +259,22 @@ internal class AgentTraceFormatter {
         }.getOrDefault("更新记忆")
 
     /** 结果成败供事件与 UI 状态使用，不再依赖摘要文本里的标记。 */
-    fun isSuccessResult(result: AgentModelClient.ToolResult): Boolean =
-        parseResultJson(result)?.optBoolean("ok", true) ?: true
+    fun isSuccessResult(result: AgentModelClient.ToolResult): Boolean = isSuccessResult(null, result)
+
+    /**
+     * 带工具名的成败判定。
+     *
+     * `todo_write` 的回执是**纯文本清单**（不是 JSON），失败时同样是纯文本 `"失败：…"`。
+     * 旧实现对所有非 JSON 结果一律返回 true，导致一次校验失败在 UI 上显示为成功；
+     * 这里对 `todo_write` 显式识别失败前缀（异常路径仍是 `{"ok":false}` JSON）。
+     */
+    fun isSuccessResult(toolName: String?, result: AgentModelClient.ToolResult): Boolean {
+        if (toolName in PLAIN_TEXT_RESULT_TOOLS) {
+            if (result.content.trimStart().startsWith("失败")) return false
+            return parseResultJson(result)?.optBoolean("ok", true) ?: true
+        }
+        return parseResultJson(result)?.optBoolean("ok", true) ?: true
+    }
 
     fun summarizeResult(
         toolName: String,
@@ -272,19 +286,17 @@ internal class AgentTraceFormatter {
         if (toolName == "terminal" || toolName == "run_command") {
             return summarizeTerminalResult(json)
         }
+        // todo_write / 计划模式工具的回执是纯文本（含失败原因），原样保留给 UI；
+        // 成败由 isSuccessResult(toolName, …) 单独判定，不能再从文本里猜。
+        if (toolName in PLAIN_TEXT_RESULT_TOOLS) return result.content
         if (json?.optString("status") == "unconfirmed") return "操作已提交，效果未确认"
-        if (!isSuccessResult(result)) return summarizeFailure(json)
+        if (!isSuccessResult(toolName, result)) return summarizeFailure(json)
         return when (toolName) {
             BROWSER_TOOL_NAME -> json?.let(::summarizeBrowserResult) ?: "浏览器操作完成"
             AgentConversationToolCatalog.READ_HISTORY -> "已读取历史分页"
             "memory_get", "memory_write", "character_memory_get", "character_memory_write" ->
                 json?.let { summarizeMemoryResult(toolName, it) } ?: "完成"
             "search_apps" -> json?.let(::summarizeSearchAppsResult) ?: "完成"
-            // todo_write 返回的是**纯文本清单**（不是 JSON）。若不单独处理，
-            // 会走下面的 else 分支：json=null → 结果被兜底成"完成"，
-            // 计划数据全丢 → UI 的 latestPlanUi 解析不出来 → 进度条永远不显示。
-            // 真机验证时发现（表里有数据、消息里只有"完成"两个字）。
-            "todo_write" -> result.content
             "launch_app" -> json?.let(::summarizeLaunchAppResult) ?: "已打开"
             else -> json?.let { summarizeGenericResult(it, result) } ?: "完成"
         }
@@ -582,6 +594,12 @@ internal class AgentTraceFormatter {
 
     private companion object {
         const val BROWSER_TOOL_NAME = "browser_use"
+        /** 这些工具的结果是纯文本契约，不是 JSON；成败按前缀判定，摘要原样保留。 */
+        val PLAIN_TEXT_RESULT_TOOLS = setOf(
+            "todo_write",
+            io.github.mangi.eta.agent.plan.AgentPlanModeTool.ENTER_NAME,
+            io.github.mangi.eta.agent.plan.AgentPlanModeTool.EXIT_NAME,
+        )
         const val MAX_DISPLAY_COMMAND_CHARS = 4_000
         const val MAX_QUERY_SUMMARY_CHARS = 30
         const val MAX_LISTED_APP_NAMES = 3

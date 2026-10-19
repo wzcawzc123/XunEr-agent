@@ -66,4 +66,26 @@ class AgentTraceFormatterPlanTest {
         )
         assertFalse("terminal 不该返回清单原文", terminal.contains("任务清单已更新"))
     }
+
+    @Test
+    fun `todo_write 失败回执不能被判定为成功`() {
+        // 真机 bug：纯文本失败被 isSuccessResult 兜底成 true，UI 卡片显示成功。
+        assertFalse(
+            formatter.isSuccessResult("todo_write", AgentModelClient.ToolResult("失败：缺少 items")),
+        )
+        assertTrue(
+            formatter.isSuccessResult("todo_write", AgentModelClient.ToolResult(receipt)),
+        )
+    }
+
+    @Test
+    fun `计划模式工具的计划正文不能被压成完成`() {
+        val exit = AgentModelClient.ToolResult(
+            "计划 v1 已提交，共 2 步，等待用户批准。\n\n--- 计划正文 ---\n# 计划\n先调研再执行。",
+        )
+        val summary = formatter.summarizeResult("exit_plan_mode", exit)
+        assertTrue("必须保留计划正文：$summary", summary.contains("# 计划"))
+        assertTrue(formatter.isSuccessResult("exit_plan_mode", exit))
+        assertFalse(formatter.isSuccessResult("exit_plan_mode", AgentModelClient.ToolResult("失败：当前不在计划模式")))
+    }
 }

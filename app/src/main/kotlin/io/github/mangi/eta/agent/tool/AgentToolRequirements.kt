@@ -45,6 +45,7 @@ internal object AgentToolRequirements {
         // 未在此登记的工具不会被发布（project 会抛 Missing tool requirements），
         // 所以新增工具时这一步是必须的，漏了会在任何构造目录的测试里立刻炸出来。
         register(RootRequirement.NONE, "todo_write")
+        register(RootRequirement.NONE, "enter_plan_mode", "exit_plan_mode")
         register(RootRequirement.NONE, "create_auto_task")
         register(RootRequirement.NONE, "list_auto_tasks", "delete_auto_task")
         register(

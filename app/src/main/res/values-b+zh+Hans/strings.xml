@@ -1123,6 +1123,16 @@
   <string name="chat_input_hint">交给 Eta 去完成</string>
   <string name="chat_stop">停止</string>
   <string name="chat_send">发送</string>
+  <string name="chat_plan_mode_enter">计划</string>
+  <string name="chat_plan_mode_planning">规划中</string>
+  <string name="chat_plan_mode_review">待批准</string>
+  <string name="chat_plan_mode_executing">执行中</string>
+  <string name="chat_plan_review_title">计划已提交，等待你确认</string>
+  <string name="chat_plan_review_hint">批准后开始执行；也可以直接在下面输入修改意见。</string>
+  <string name="chat_plan_review_footer">批准后开始执行；也可以直接在下面输入修改意见。</string>
+  <string name="chat_plan_approve">批准并执行</string>
+  <string name="chat_plan_cancel">取消计划</string>
+  <string name="chat_plan_input_hint">描述任务，我先只读调研，再给你方案</string>
   <string name="chat_reasoning_effort">思考强度，当前为 %1$s</string>
   <string name="status_unsupported">不支持</string>
   <string name="attachment_image">图片</string>

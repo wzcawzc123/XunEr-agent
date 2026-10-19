@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -16,6 +17,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -42,6 +45,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.runtime.Composable
@@ -70,10 +74,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.plan.AgentPlanModeEntry
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.ui.model.AgentContextUsageUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
@@ -97,6 +104,9 @@ private val SendButtonVisualSize = ChatInputActionIconSize
 private val SendIconSize = 16.dp
 private val StopIconSize = 10.dp
 private val ThinkingIconSize = 21.dp
+private val PlanChipHeight = 26.dp
+private val PlanChipIconSize = 14.dp
+private val ApprovalBarCorner = 14.dp
 private val InputContainerShape = RoundedCornerShape(20.dp)
 
 /**
@@ -114,6 +124,13 @@ internal fun AgentChatInputBar(
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
+    planPreview: String? = null,
+    /** 角色扮演会话没有"只读规划→批准执行"这回事，入口直接隐藏。 */
+    planAvailable: Boolean = true,
+    onTogglePlanMode: () -> Unit = {},
+    onApprovePlan: () -> Unit = {},
+    onCancelPlan: () -> Unit = {},
     isEditingMessage: Boolean,
     editHasLaterTurns: Boolean,
     preserveFollowingMessages: Boolean,
@@ -181,6 +198,24 @@ internal fun AgentChatInputBar(
             .fillMaxWidth(),
     ) {
         SpeechInputFeedback(dictation)
+
+        // 审批条放在输入区最上方：计划已提交时，这里是用户唯一需要做的决定。
+        // 用常驻条而不是弹窗 —— 用户可能中途离开再回来，弹窗会丢失且有打断感。
+        AnimatedVisibility(
+            visible = planAvailable &&
+                AgentPlanModeEntry.showsApproval(planPhase) &&
+                !isEditingMessage,
+            enter = fadeIn(tween(160)) + expandVertically(tween(180)),
+            exit = fadeOut(tween(100)) + shrinkVertically(tween(160)),
+        ) {
+            PlanApprovalBar(
+                enabled = !isStreaming,
+                preview = planPreview,
+                onApprove = onApprovePlan,
+                onCancel = onCancelPlan,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         AnimatedVisibility(
             visible = pendingFileReferences.isNotEmpty(),
             enter = fadeIn(tween(160)),
@@ -262,7 +297,14 @@ internal fun AgentChatInputBar(
                 ) {
                     if (textFieldState.text.isBlank()) {
                         Text(
-                            text = if (isStreaming) stringResource(R.string.chat_eta_working) else stringResource(R.string.chat_input_hint),
+                            text = when {
+                                isStreaming -> stringResource(R.string.chat_eta_working)
+                                // 进入计划模式后明确告诉用户"现在只会调研"，
+                                // 否则用户会以为消息发出去就会直接动手改设备。
+                                planPhase == AgentPlanPhase.PLANNING ->
+                                    stringResource(R.string.chat_plan_input_hint)
+                                else -> stringResource(R.string.chat_input_hint)
+                            },
                             style = MiuixTheme.textStyles.body1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
@@ -314,6 +356,17 @@ internal fun AgentChatInputBar(
                             )
 
                             Spacer(modifier = Modifier.width(2.dp))
+
+                            // 计划模式入口：不再要求用户手打 /plan。
+                            // REVIEW 阶段由上方审批条接管，这里隐藏，避免出现两个"取消"。
+                            if (planAvailable && AgentPlanModeEntry.showsToggle(planPhase)) {
+                                PlanModeChip(
+                                    phase = planPhase,
+                                    enabled = !isStreaming,
+                                    onClick = onTogglePlanMode,
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                            }
 
                             if (availableReasoningEfforts.isNotEmpty()) {
                                 ThinkingEffortChip(
@@ -421,6 +474,189 @@ internal fun AgentChatInputBar(
         }
     }
 
+}
+
+/**
+ * 计划模式开关。
+ *
+ * 形态是 pill 而不是纯图标：计划模式是一个「会持续影响后续行为」的状态，
+ * 只用颜色表达容易让用户不知道自己还在计划模式里。
+ */
+@Composable
+private fun PlanModeChip(
+    phase: AgentPlanPhase,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val active = phase != AgentPlanPhase.NORMAL
+    val containerColor by animateColorAsState(
+        targetValue = if (active) MiuixTheme.colorScheme.primary else Color.Transparent,
+        animationSpec = tween(durationMillis = 160),
+        label = "plan_chip_container",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (active) {
+            MiuixTheme.colorScheme.onPrimary
+        } else {
+            MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+        animationSpec = tween(durationMillis = 160),
+        label = "plan_chip_content",
+    )
+    val label = when (phase) {
+        AgentPlanPhase.NORMAL -> stringResource(R.string.chat_plan_mode_enter)
+        AgentPlanPhase.PLANNING -> stringResource(R.string.chat_plan_mode_planning)
+        AgentPlanPhase.REVIEW -> stringResource(R.string.chat_plan_mode_review)
+        AgentPlanPhase.EXECUTING -> stringResource(R.string.chat_plan_mode_executing)
+    }
+    Row(
+        modifier = modifier
+            .height(PlanChipHeight)
+            .clip(RoundedCornerShape(PlanChipHeight / 2))
+            .background(containerColor)
+            .then(
+                if (active) {
+                    Modifier
+                } else {
+                    Modifier.border(
+                        width = 0.5.dp,
+                        color = MiuixTheme.colorScheme.outline.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(PlanChipHeight / 2),
+                    )
+                },
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Checklist,
+            contentDescription = null,
+            modifier = Modifier.size(PlanChipIconSize),
+            tint = contentColor,
+        )
+        Spacer(modifier = Modifier.width(3.dp))
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            color = contentColor,
+        )
+    }
+}
+
+/**
+ * 计划审批条：计划提交后常驻在输入框上方。
+ *
+ * 不用弹窗的原因：移动端用户可能中途切走再回来，弹窗会消失且带走上下文；
+ * 常驻条把「批准 / 取消 / 直接写修改意见」三件事都放在同一个位置。
+ */
+@Composable
+private fun PlanApprovalBar(
+    enabled: Boolean,
+    preview: String?,
+    onApprove: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // 默认只显示三行：计划正文可能很长，审批条不能把聊天区顶满。
+    // 想看全文就点一下正文展开 —— 比"往上翻找工具卡"省事得多。
+    var expanded by remember(preview) { mutableStateOf(false) }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .squircleSurface(
+                color = MiuixTheme.colorScheme.surfaceContainer,
+                cornerRadius = ApprovalBarCorner,
+            )
+            .squircleBorder(
+                width = 0.5.dp,
+                color = MiuixTheme.colorScheme.outline.copy(alpha = 0.5f),
+                cornerRadius = ApprovalBarCorner,
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.chat_plan_review_title),
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurface,
+        )
+        if (preview.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = stringResource(R.string.chat_plan_review_hint),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        } else {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = preview,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurface,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 2.dp),
+            )
+        }
+        Spacer(modifier = Modifier.height(9.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlanApprovalButton(
+                text = stringResource(R.string.chat_plan_approve),
+                primary = true,
+                enabled = enabled,
+                onClick = onApprove,
+            )
+            PlanApprovalButton(
+                text = stringResource(R.string.chat_plan_cancel),
+                primary = false,
+                enabled = enabled,
+                onClick = onCancel,
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.chat_plan_review_footer),
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
+}
+
+@Composable
+private fun PlanApprovalButton(
+    text: String,
+    primary: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val container = if (primary) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.surfaceContainerHigh
+    }
+    val content = if (primary) {
+        MiuixTheme.colorScheme.onPrimary
+    } else {
+        MiuixTheme.colorScheme.onSurfaceVariantSummary
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (enabled) container else container.copy(alpha = 0.45f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text = text,
+            style = MiuixTheme.textStyles.footnote1,
+            color = if (enabled) content else content.copy(alpha = 0.5f),
+        )
+    }
 }
 
 /** 思考强度选择保持为单一图标，当前状态仅通过图标颜色表达。 */

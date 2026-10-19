@@ -7,8 +7,15 @@ import io.github.mangi.eta.agent.model.AgentConversationToolCatalog
 import io.github.mangi.eta.agent.tool.ConversationHistoryTool
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanInjectionScope
+import io.github.mangi.eta.agent.plan.AgentPlanItem
+import io.github.mangi.eta.agent.plan.AgentPlanModePolicy
+import io.github.mangi.eta.agent.plan.AgentPlanModeRouter
+import io.github.mangi.eta.agent.plan.AgentPlanModeStore
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.agent.plan.AgentPlanStore
 import io.github.mangi.eta.agent.plan.AgentPlanTool
+import io.github.mangi.eta.agent.plan.injectionScope
 import io.github.mangi.eta.agent.model.AgentModelExecutionException
 import io.github.mangi.eta.agent.model.AgentModelFailure
 import io.github.mangi.eta.agent.model.AgentHttpClient
@@ -120,6 +127,27 @@ internal class AgentRuntimeRunExecutor(
                     EtaDatabase.get(appContext).conversationDao().hasAssistantMessage(conversationId, target)
                 }) { "角色回复目标不存在或不属于当前会话" }
             }
+            // 计划模式：会话级状态 + 入口路由（UI 按钮、/plan、批准/取消/修改意见）。
+            // 自动任务（maxRounds != null）、改写/压缩、角色扮演不参与：
+            // 后台任务不该改写用户计划；角色对话里没有"只读规划→批准执行"这回事。
+            val planStore = AgentPlanStore(EtaDatabase.get(appContext).conversationTodoDao())
+            val planModeStore = AgentPlanModeStore(EtaDatabase.get(appContext).conversationPlanDao())
+            val planEligible = conversationId != null &&
+                request.maxRounds == null &&
+                request.operation == AgentRuntimeWire.OP_CHAT &&
+                roleplayContext == null
+            val routedPrompt = if (planEligible) {
+                AgentPlanModeRouter.route(
+                    rawPrompt = request.prompt,
+                    conversationId = conversationId,
+                    modeStore = planModeStore,
+                    planStore = planStore,
+                    nowMillis = System.currentTimeMillis(),
+                )
+            } else {
+                AgentPlanModeRouter.RoutedPrompt(request.prompt, AgentPlanPhase.NORMAL)
+            }
+            val planPhase = routedPrompt.phase
             val characterMemoryTools = roleplayContext?.let { roleplay ->
                 CharacterMemoryTools(appContext, roleplay.characterId) {
                     runBlocking { AgentMemoryRepository.isEnabled() }
@@ -179,6 +207,9 @@ internal class AgentRuntimeRunExecutor(
                 // 任务清单按会话落库。无会话标识时由工具层明确拒绝写入，
                 // 而不是写进空 id 造成串会话。
                 conversationId = conversationId.orEmpty(),
+                planPhaseProvider = {
+                    if (planEligible) planModeStore.phaseBlocking(conversationId) else AgentPlanPhase.NORMAL
+                },
                 memoryToolsEnabled = {
                     runBlocking { AgentMemoryRepository.isEnabled() }
                 },
@@ -255,8 +286,53 @@ internal class AgentRuntimeRunExecutor(
                     }
                 }
             }
+            // 计划模式统一守卫：本地工具在 AgentLocalTools 里已拦一次；这里再包一层，
+            // 覆盖 MCP / 动态注入工具 —— 否则一个第三方 MCP 的写工具就能绕过只读约束。
+            val planGuardedToolExecutor = AgentModelClient.ToolExecutor { call ->
+                val phase = if (planEligible) {
+                    planModeStore.phaseBlocking(conversationId)
+                } else {
+                    AgentPlanPhase.NORMAL
+                }
+                val args = runCatching { JSONObject(call.argumentsJson) }.getOrNull()
+                if (AgentPlanModePolicy.isBlocked(phase, call.name, args)) {
+                    AgentModelClient.ToolResult(
+                        JSONObject()
+                            .put("ok", false)
+                            .put("code", "PLAN_MODE_READ_ONLY")
+                            .put("message", AgentPlanModePolicy.rejection(phase, call.name))
+                            .toString(),
+                    )
+                } else {
+                    runToolExecutor.execute(call)
+                }
+            }
             // 快照内容未变化时不重复写库：压缩后每轮都会发布快照，内容相同则跳过。
             var lastContextWrite: String? = null
+            // run 开始时从数据库读一次清单与计划正文：历史可能已被硬裁剪/编辑，
+            // 模型不能只靠回执记忆。读库失败一律降级为 null：计划是辅助信息，
+            // 绝不能因为它让整轮对话失败。
+            val planMarkdown = if (planEligible) {
+                runCatching { planModeStore.getBlocking(conversationId)?.markdown }.getOrNull()
+            } else {
+                null
+            }
+            /**
+             * 本轮要注入的计划/清单（null 表示不注入）。
+             *
+             * 具体范围由 [injectionScope] 决定：REVIEW/EXECUTING 注入正文+清单；
+             * NORMAL 只在清单还有未完成项时注入清单；PLANNING 不注入。
+             */
+            fun planInjection(maxPlanChars: Int = 1_200): String? = runCatching {
+                val items = planStore.loadBlocking(conversationId.orEmpty())
+                when (planPhase.injectionScope(AgentPlanItem.hasOpenWork(items))) {
+                    AgentPlanInjectionScope.NONE -> null
+                    AgentPlanInjectionScope.CHECKLIST -> AgentPlanTool.checklistText(items)
+                    AgentPlanInjectionScope.PLAN_AND_CHECKLIST ->
+                        AgentPlanTool.planContextText(planMarkdown, items, maxPlanChars)
+                }
+            }.getOrNull()
+            val planSnapshot = if (planEligible) planInjection() else null
             val completedResponse = AgentModelClient.complete(
                 config = request.config,
                 sessionId = request.effectiveModelSessionId,
@@ -265,18 +341,16 @@ internal class AgentRuntimeRunExecutor(
                 initialSupplementIndex = uiPayload?.lastSupplementIndex ?: 0,
                 roleplayContext = roleplayContext,
                 rewriteReply = request.operation == AgentRuntimeWire.OP_REWRITE_REPLY,
-                // 压缩时把任务清单概览带进摘要，避免长会话压缩后模型忘记执行到第几步。
-                // 读库失败一律降级为 null：清单是辅助信息，绝不能因为它让整轮对话失败。
+                // 压缩时把**计划正文 + 完整清单**带进摘要：只带一行概览会让模型知道进度、
+                // 却不知道剩余步骤；不带正文则会忘掉目标与验收标准。摘要本身要留预算，
+                // 所以正文在这里截得更短（800 字）。
                 planOverview = {
-                    conversationId?.let { id ->
-                        runCatching {
-                            AgentPlanTool.overviewText(
-                                AgentPlanStore(EtaDatabase.get(appContext).conversationTodoDao())
-                                    .loadBlocking(id),
-                            )
-                        }.getOrNull()
-                    }
+                    if (planEligible) planInjection(maxPlanChars = 800) else null
                 },
+                // 无持久会话 / 后台自动任务不挂载计划工具：它们不应改写用户当前的计划。
+                planToolsEnabled = planEligible,
+                planSnapshot = planSnapshot,
+                planPhase = planPhase,
                 compactOnly = request.operation == AgentRuntimeWire.OP_COMPACT,
                 onContextSnapshot = { snapshot ->
                     // 压缩会把历史里的记忆写入摘要掉，下一轮需要重新注入最新记忆。
@@ -294,9 +368,9 @@ internal class AgentRuntimeRunExecutor(
                     session.updateTranscript(transcript)
                 },
                 capabilitiesProvider = { AgentToolCapabilities.capture(appContext) },
-                prompt = request.prompt,
+                prompt = routedPrompt.prompt,
                 assistantScreenContext = request.assistantScreenContext,
-                toolExecutor = runToolExecutor,
+                toolExecutor = planGuardedToolExecutor,
                 images = request.images,
                 history = request.history,
                 runController = runController,

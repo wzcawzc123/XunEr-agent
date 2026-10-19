@@ -1102,6 +1102,16 @@
   <string name="chat_input_hint">交給 Eta 完成</string>
   <string name="chat_stop">停止</string>
   <string name="chat_send">傳送</string>
+  <string name="chat_plan_mode_enter">計劃</string>
+  <string name="chat_plan_mode_planning">規劃中</string>
+  <string name="chat_plan_mode_review">待批准</string>
+  <string name="chat_plan_mode_executing">執行中</string>
+  <string name="chat_plan_review_title">計劃已提交，等待你確認</string>
+  <string name="chat_plan_review_hint">批准後開始執行；也可以直接在下面輸入修改意見。</string>
+  <string name="chat_plan_review_footer">批准後開始執行；也可以直接在下面輸入修改意見。</string>
+  <string name="chat_plan_approve">批准並執行</string>
+  <string name="chat_plan_cancel">取消計劃</string>
+  <string name="chat_plan_input_hint">描述任務，我先只讀調研，再給你方案</string>
   <string name="chat_reasoning_effort">思考強度，目前為 %1$s</string>
   <string name="status_unsupported">不支援</string>
   <string name="attachment_image">圖片</string>

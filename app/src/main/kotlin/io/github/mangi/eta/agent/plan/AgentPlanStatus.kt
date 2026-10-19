@@ -27,5 +27,17 @@ internal enum class AgentPlanStatus(val wire: String, val label: String) {
             val normalized = value?.trim()?.lowercase() ?: return null
             return entries.firstOrNull { it.wire == normalized }
         }
+
+        /**
+         * 从界面回执里的中文标签反解状态。
+         *
+         * 只用于 [io.github.mangi.eta.agent.plan.AgentPlanUi] 解析历史回执 —— 新代码请优先用
+         * [wire] 或枚举本身。未知标签回退 [PENDING]，与旧版解析行为一致（宁可显示"待开始"，
+         * 也不让整张清单读不出来）。
+         */
+        fun fromLabel(value: String?): AgentPlanStatus {
+            val normalized = value?.trim() ?: return PENDING
+            return entries.firstOrNull { it.label == normalized } ?: PENDING
+        }
     }
 }

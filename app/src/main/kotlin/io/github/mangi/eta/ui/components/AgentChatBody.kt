@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.components
 
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.agent.plan.AgentPlanUi
 import io.github.mangi.eta.ui.voice.SpeechPlaybackHost
 import androidx.compose.animation.AnimatedVisibility
@@ -90,6 +91,7 @@ import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
 import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
+import io.github.mangi.eta.ui.model.ToolActivityStatusUi
 import io.github.mangi.eta.ui.model.ToolSummaryMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import io.github.mangi.eta.ui.model.latestContextUsage
@@ -141,6 +143,13 @@ internal fun AgentChatBody(
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
     messageEdit: MessageEditUiState?,
+    /** 当前会话的计划阶段；输入栏据此显示「计划」入口或审批条。 */
+    planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
+    /** 待批准计划的正文；审批条直接展示，用户不必翻工具卡。 */
+    planPreview: String? = null,
+    onTogglePlanMode: () -> Unit = {},
+    onApprovePlan: () -> Unit = {},
+    onCancelPlan: () -> Unit = {},
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
@@ -234,6 +243,8 @@ internal fun AgentChatBody(
             onResumeInterrupted = onResumeInterrupted,
             contextUsage = contextUsage,
             planUi = planUi,
+            planPhase = planPhase,
+            planPreview = planPreview,
             isStreaming = isStreaming,
             messagesLoaded = messagesLoaded,
             reasoningEffort = reasoningEffort,
@@ -241,6 +252,9 @@ internal fun AgentChatBody(
             pendingImages = pendingImages,
             pendingFileReferences = pendingFileReferences,
             messageEdit = messageEdit,
+            onTogglePlanMode = onTogglePlanMode,
+            onApprovePlan = onApprovePlan,
+            onCancelPlan = onCancelPlan,
             showEmptySuggestions = !isKeyboardVisible,
             characterName = characterName,
             keepBottomAnchored = keepBottomAnchored,
@@ -291,6 +305,8 @@ private fun AgentChatScaffold(
     onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
     planUi: AgentPlanUi?,
+    planPhase: AgentPlanPhase,
+    planPreview: String?,
     isStreaming: Boolean,
     messagesLoaded: Boolean,
     reasoningEffort: ReasoningEffort,
@@ -298,6 +314,9 @@ private fun AgentChatScaffold(
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
     messageEdit: MessageEditUiState?,
+    onTogglePlanMode: () -> Unit,
+    onApprovePlan: () -> Unit,
+    onCancelPlan: () -> Unit,
     showEmptySuggestions: Boolean,
     characterName: String?,
     keepBottomAnchored: Boolean,
@@ -347,35 +366,41 @@ private fun AgentChatScaffold(
             if (messagesLoaded) {
                 AgentChatBottomBar(
                     messageBackdrop = messageBackdrop.takeIf { frostEnabled },
-                input = input,
-                modelPickerState = modelPickerState,
-                isCompacting = isCompacting,
-                resumableInterrupted = resumableInterrupted,
-                onResumeInterrupted = onResumeInterrupted,
-                contextUsage = contextUsage,
-                planUi = planUi,
-                showContextUsage = hasMessages,
-                isStreaming = isStreaming,
-                reasoningEffort = reasoningEffort,
-                availableReasoningEfforts = availableReasoningEfforts,
-                pendingImages = pendingImages,
-                pendingFileReferences = pendingFileReferences,
-                messageEdit = messageEdit,
-                onSubmit = onSubmit,
-                onReasoningEffortChange = onReasoningEffortChange,
-                onCompactContext = onCompactContext,
-                canCompactContext = canCompactContext,
-                onModelSelected = onModelSelected,
-        onVisionToggled = onVisionToggled,
-                onStop = onStop,
-                onAttachImage = onAttachImage,
-                onRemoveImage = onRemoveImage,
-                onAttachFiles = onAttachFiles,
-                onAttachFolder = onAttachFolder,
-                onAttachFilePath = onAttachFilePath,
-                onRemoveFileReference = onRemoveFileReference,
-                onCancelMessageEdit = onCancelMessageEdit,
-            )
+                    input = input,
+                    modelPickerState = modelPickerState,
+                    isCompacting = isCompacting,
+                    resumableInterrupted = resumableInterrupted,
+                    onResumeInterrupted = onResumeInterrupted,
+                    contextUsage = contextUsage,
+                    planUi = planUi,
+                    planPhase = planPhase,
+                    planPreview = planPreview,
+                    planAvailable = characterName == null,
+                    showContextUsage = hasMessages,
+                    isStreaming = isStreaming,
+                    reasoningEffort = reasoningEffort,
+                    availableReasoningEfforts = availableReasoningEfforts,
+                    pendingImages = pendingImages,
+                    pendingFileReferences = pendingFileReferences,
+                    onTogglePlanMode = onTogglePlanMode,
+                    onApprovePlan = onApprovePlan,
+                    onCancelPlan = onCancelPlan,
+                    messageEdit = messageEdit,
+                    onSubmit = onSubmit,
+                    onReasoningEffortChange = onReasoningEffortChange,
+                    onCompactContext = onCompactContext,
+                    canCompactContext = canCompactContext,
+                    onModelSelected = onModelSelected,
+                    onVisionToggled = onVisionToggled,
+                    onStop = onStop,
+                    onAttachImage = onAttachImage,
+                    onRemoveImage = onRemoveImage,
+                    onAttachFiles = onAttachFiles,
+                    onAttachFolder = onAttachFolder,
+                    onAttachFilePath = onAttachFilePath,
+                    onRemoveFileReference = onRemoveFileReference,
+                    onCancelMessageEdit = onCancelMessageEdit,
+                )
             }
         },
     ) { innerPadding ->
@@ -906,12 +931,18 @@ private fun AgentChatBottomBar(
     onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
     planUi: AgentPlanUi?,
+    planPhase: AgentPlanPhase,
+    planPreview: String?,
+    planAvailable: Boolean,
     showContextUsage: Boolean,
     isStreaming: Boolean,
     reasoningEffort: ReasoningEffort,
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    onTogglePlanMode: () -> Unit,
+    onApprovePlan: () -> Unit,
+    onCancelPlan: () -> Unit,
     messageEdit: MessageEditUiState?,
     onSubmit: (String) -> Unit,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
@@ -1029,6 +1060,12 @@ private fun AgentChatBottomBar(
                 availableReasoningEfforts = availableReasoningEfforts,
                 pendingImages = pendingImages,
                 pendingFileReferences = pendingFileReferences,
+                planPhase = planPhase,
+                planPreview = planPreview,
+                planAvailable = planAvailable,
+                onTogglePlanMode = onTogglePlanMode,
+                onApprovePlan = onApprovePlan,
+                onCancelPlan = onCancelPlan,
                 isEditingMessage = messageEdit != null,
                 editHasLaterTurns = messageEdit?.hasLaterTurns == true,
                 preserveFollowingMessages = messageEdit?.preserveFollowingMessages == true,
@@ -1261,7 +1298,10 @@ private fun latestPlanUi(messages: List<AgentChatMessageUi>): AgentPlanUi? {
         if (message !is ToolActivityMessageUi) continue
         if (message.toolName != io.github.mangi.eta.agent.plan.AgentPlanTool.NAME) continue
         val text = message.resultSummary ?: continue
-        return runCatching { AgentPlanUi.parseFrom(text) }.getOrNull()
+        val parsed = runCatching { AgentPlanUi.parseFrom(text) }.getOrNull()
+        // 失败回执解析为 null：它不改变数据库里的清单，继续向前找最后一条成功回执。
+        // 旧实现直接 return null，导致一次参数错误让整张进度条消失。
+        if (parsed != null) return parsed
     }
     return null
 }

@@ -61,6 +61,7 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_25_26,
                 EtaDatabase.MIGRATION_26_27,
                 EtaDatabase.MIGRATION_27_28,
+                EtaDatabase.MIGRATION_28_29,
             )
             .build()
         try {
@@ -177,6 +178,35 @@ class EtaDatabaseMigrationTest {
                 cursor.getInt(0)
             }
             assertEquals(1, indexCount)
+
+            // ===== 计划模式表契约（v29）=====
+            // 没有 runMigrationsAndValidate 时，DDL 拼错只有在真正读写时才会炸；
+            // 这里逐列列出并插入一行，验证 Entity ↔ 列名/可空性一致。
+            val planColumns = database.openHelper.readableDatabase.query(
+                "SELECT name FROM pragma_table_info('conversation_plans')",
+            ).use { cursor ->
+                buildSet {
+                    while (cursor.moveToNext()) add(cursor.getString(0))
+                }
+            }
+            assertEquals(
+                setOf(
+                    "conversation_id", "plan_id", "phase", "version", "approved_version",
+                    "markdown", "created_at", "updated_at",
+                ),
+                planColumns,
+            )
+            database.openHelper.writableDatabase.execSQL(
+                "INSERT INTO conversation_plans " +
+                    "(conversation_id, plan_id, phase, version, approved_version, markdown, created_at, updated_at) " +
+                    "VALUES ('conv-1', 'plan-1', 'review', 2, NULL, '# 计划', 1, 2)",
+            )
+            val plan = runBlocking(Dispatchers.IO) { database.conversationPlanDao().get("conv-1") }
+            assertEquals("plan-1", plan?.planId)
+            assertEquals("review", plan?.phase)
+            assertEquals(2, plan?.version)
+            assertEquals(null, plan?.approvedVersion)
+            assertEquals("# 计划", plan?.markdown)
             assertEquals(null, provider.models.first().contextWindowOverride)
             assertEquals(null, provider.models.first().reasoningOverride)
             assertEquals(null, provider.models.first().reasoningCapabilitiesOverride)

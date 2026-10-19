@@ -4,6 +4,12 @@ import io.github.mangi.eta.data.model.ReasoningEffort
 
 sealed interface AgentHomeAction {
     data object CompactContext : AgentHomeAction
+    /** 点击输入栏的「计划」按钮：NORMAL→进入规划，规划/执行中→退出。 */
+    data object TogglePlanMode : AgentHomeAction
+    /** 审批条上的「批准」：等价于用户发出批准指令，进入执行。 */
+    data object ApprovePlan : AgentHomeAction
+    /** 审批条上的「取消」：放弃计划并回到普通对话。 */
+    data object CancelPlan : AgentHomeAction
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentHomeAction
     data class ModelSelected(val modelId: String) : AgentHomeAction
     data class VisionToggled(val providerId: String, val modelId: String, val vision: Boolean) :
@@ -37,6 +43,12 @@ sealed interface PermissionHealthAction {
 
 sealed interface AgentChatAction {
     data object CompactContext : AgentChatAction
+    /** 点击输入栏的「计划」按钮：NORMAL→进入规划，规划/执行中→退出。 */
+    data object TogglePlanMode : AgentChatAction
+    /** 审批条上的「批准」：等价于用户发出批准指令，进入执行。 */
+    data object ApprovePlan : AgentChatAction
+    /** 审批条上的「取消」：放弃计划并回到普通对话。 */
+    data object CancelPlan : AgentChatAction
     data object ResumeInterruptedRun : AgentChatAction
     data object NavigateBack : AgentChatAction
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentChatAction

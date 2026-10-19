@@ -52,6 +52,41 @@ class AgentPlanUiTest {
     }
 
     @Test
+    fun `取消项解析为取消状态并单独计数`() {
+        val text = """
+            任务清单已更新：1/1 完成，1 项已取消。所有条目均已结束，其中 1 条被取消。
+            1. [已完成] 甲
+            2. [已取消] 乙
+        """.trimIndent()
+        val ui = AgentPlanUi.parseFrom(text)!!
+        assertEquals(1, ui.done)
+        assertEquals(1, ui.total)
+        assertEquals(1, ui.cancelled)
+        assertEquals(AgentPlanStatus.CANCELLED, ui.items[1].status)
+        // 全部完成但有取消项：必须继续展示，不能以 1/1 的假象消失。
+        assertTrue(ui.isActive)
+        assertTrue(ui.isTerminalWithCancelled)
+    }
+
+    @Test
+    fun `全部取消时仍返回摘要而不是回退到旧清单`() {
+        val text = """
+            任务清单已更新：0/0 完成，2 项已取消。所有条目均已结束，其中 2 条被取消。
+            1. [已取消] 甲
+            2. [已取消] 乙
+        """.trimIndent()
+        val ui = AgentPlanUi.parseFrom(text)!!
+        assertEquals(2, ui.cancelled)
+        assertEquals(2, ui.items.size)
+        assertTrue(!ui.isActive)
+    }
+
+    @Test
+    fun `失败回执不被解析成清单`() {
+        assertNull(AgentPlanUi.parseFrom("失败：items[1].status=\"done\" 不合法"))
+    }
+
+    @Test
     fun `无关消息返回 null`() {
         assertNull(AgentPlanUi.parseFrom("这是一条普通回复"))
         assertNull(AgentPlanUi.parseFrom(""))

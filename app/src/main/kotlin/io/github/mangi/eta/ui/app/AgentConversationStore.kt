@@ -5,6 +5,8 @@ import androidx.annotation.VisibleForTesting
 import androidx.room.withTransaction
 import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanModeStore
+import io.github.mangi.eta.agent.plan.AgentPlanStore
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.agent.roleplay.RoleplayMessageState
 import io.github.mangi.eta.data.db.ConversationContextCheckpointEntity
@@ -94,7 +96,12 @@ internal object AgentConversationStore {
                     database.withTransaction {
                         val stored = dao.conversationMetadataRows().associateBy { it.id }
                         phase = "delete_conversations"
-                        (stored.keys - current.keys).forEach { dao.deleteConversation(it) }
+                        (stored.keys - current.keys).forEach { id ->
+                            dao.deleteConversation(id)
+                            // conversation_todos / conversation_plans 没有外键级联：不显式清理会永久留下孤儿行。
+                            AgentPlanStore(database.conversationTodoDao()).clear(id)
+                            AgentPlanModeStore(database.conversationPlanDao()).clear(id)
+                        }
                         for ((id, state) in current) {
                             val old = previous[id].takeIf { id in stored }
                             val oldMessages = old?.messages.orEmpty()

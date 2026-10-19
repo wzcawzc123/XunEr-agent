@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.agent.skill.SkillContext
 import io.github.mangi.eta.agent.skill.SkillIndexEntry
 import org.json.JSONArray
@@ -69,7 +70,10 @@ class AgentPromptBuilderTest {
         assertTrue(messages.systemContents().any { it.contains("通用 GUI 工具完成输入和点击发送") })
         assertTrue(messages.systemContents().any { it.contains("不追加二次确认") })
         assertTrue(messages.systemContents().any { it.contains("立即调用工具") })
-        assertTrue(messages.systemContents().any { it.contains("不要先输出计划、解释或中间进度") })
+        assertTrue(messages.systemContents().any { it.contains("不要在正文里长篇罗列计划") })
+        // 计划工具的使用规范：与「不要输出计划」区分，多步任务应先用 todo_write。
+        assertTrue(messages.systemContents().any { it.contains("先用 todo_write 建立清单") })
+        assertTrue(messages.systemContents().any { it.contains("完成并验证后再标 completed") })
         assertTrue(messages.systemContents().any { it.contains("不要为了展示思考而拆成多个回合") })
         assertTrue(messages.systemContents().any { it.contains("不要例行调用 observe_screen") })
         assertTrue(messages.systemContents().any { it.contains("读取或汇总屏幕信息") })
@@ -208,6 +212,30 @@ class AgentPromptBuilderTest {
             terminalTools = terminalTools,
             browserTools = browserTools,
         )
+
+    @Test
+    fun `计划模式阶段注入对应的只读与执行约束`() {
+        val config = modelConfig("", terminalTools = false, browserTools = false)
+        fun contents(phase: AgentPlanPhase) = AgentPromptBuilder.buildSystemMessages(
+            config = config,
+            skillContext = SkillContext.EMPTY,
+            memoryContext = AgentMemoryContext.DISABLED,
+            rootAvailable = false,
+            planPhase = phase,
+        ).systemContents()
+
+        assertFalse(contents(AgentPlanPhase.NORMAL).any { it.contains("计划模式（只读）") })
+
+        val planning = contents(AgentPlanPhase.PLANNING)
+        assertTrue(planning.any { it.contains("计划模式（只读）") })
+        assertTrue(planning.any { it.contains("exit_plan_mode") })
+
+        val review = contents(AgentPlanPhase.REVIEW)
+        assertTrue(review.any { it.contains("等待用户批准") })
+
+        val executing = contents(AgentPlanPhase.EXECUTING)
+        assertTrue(executing.any { it.contains("用户已批准计划") })
+    }
 
     private fun JSONArray.roles(): List<String> =
         (0 until length()).map { index -> getJSONObject(index).getString("role") }

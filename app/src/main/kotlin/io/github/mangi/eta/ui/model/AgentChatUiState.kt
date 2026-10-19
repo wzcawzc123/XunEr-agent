@@ -3,6 +3,7 @@ package io.github.mangi.eta.ui.model
 import androidx.compose.runtime.Immutable
 import io.github.mangi.eta.agent.model.AgentFileReference
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.agent.roleplay.RoleplayMessageState
 import io.github.mangi.eta.data.model.ReasoningEffort
@@ -35,6 +36,20 @@ internal data class AgentChatUiState(
     val roleplayMessages: RoleplayMessageState = RoleplayMessageState(),
     /** 会话最近一次发送使用的本地 Model.id；null 表示尚未绑定，跟随默认模型。 */
     val modelId: String? = null,
+    /**
+     * 计划模式阶段，仅供 UI 决定入口按钮与审批条的显示。
+     *
+     * 权威状态在 `conversation_plans` 表里：运行时每轮都会重新读库，
+     * 因此这里即使短暂滞后（例如后台刚被自动任务改过）也不会导致越权执行。
+     */
+    val planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
+    /**
+     * 待批准计划的正文预览（审批条直接用）。
+     *
+     * 之前用户要读方案得往上翻、找到 `exit_plan_mode` 的工具卡再展开，
+     * 所以审批条必须自带正文，而不是只说"计划已提交"。
+     */
+    val planPreview: String? = null,
 ) {
     val canCompactContext: Boolean get() = !isStreaming && messageEdit == null && history.any {
         !it.contextSummary && (it.role == "assistant" || it.role == "tool")

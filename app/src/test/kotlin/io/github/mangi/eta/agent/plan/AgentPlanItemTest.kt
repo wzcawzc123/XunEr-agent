@@ -142,4 +142,49 @@ class AgentPlanItemTest {
     fun `空清单进度为零`() {
         assertEquals(0 to 0, AgentPlanItem.progressOf(emptyList()))
     }
+
+    // ---------- validateTransitions ----------
+
+    @Test
+    fun `首次写入允许带已完成状态`() {
+        val items = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.COMPLETED).getOrThrow(),
+        )
+        assertTrue(AgentPlanItem.validateTransitions(emptyList(), items).isSuccess)
+    }
+
+    @Test
+    fun `已完成回退需要显式 reopen`() {
+        val previous = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.COMPLETED).getOrThrow(),
+        )
+        val regressed = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.IN_PROGRESS).getOrThrow(),
+        )
+        assertTrue(AgentPlanItem.validateTransitions(previous, regressed).isFailure)
+        assertTrue(AgentPlanItem.validateTransitions(previous, regressed, setOf("a")).isSuccess)
+    }
+
+    @Test
+    fun `已取消恢复需要显式 reopen`() {
+        val previous = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.CANCELLED).getOrThrow(),
+        )
+        val resumed = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.PENDING).getOrThrow(),
+        )
+        assertTrue(AgentPlanItem.validateTransitions(previous, resumed).isFailure)
+        assertTrue(AgentPlanItem.validateTransitions(previous, resumed, setOf("a")).isSuccess)
+    }
+
+    @Test
+    fun `待开始直接完成放行但由回执提示`() {
+        val previous = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.PENDING).getOrThrow(),
+        )
+        val completed = listOf(
+            AgentPlanItem.create(0, "a", "A", null, AgentPlanStatus.COMPLETED).getOrThrow(),
+        )
+        assertTrue(AgentPlanItem.validateTransitions(previous, completed).isSuccess)
+    }
 }

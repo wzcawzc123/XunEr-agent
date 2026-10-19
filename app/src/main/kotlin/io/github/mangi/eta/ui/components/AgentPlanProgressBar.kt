@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.mangi.eta.agent.plan.AgentPlanStatus
 import io.github.mangi.eta.agent.plan.AgentPlanUi
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -50,11 +51,17 @@ internal fun AgentPlanProgressBar(
     plan: AgentPlanUi,
     modifier: Modifier = Modifier,
 ) {
-    if (!plan.isActive || plan.total <= 0) return
+    if (plan.total <= 0) return
+    if (!plan.isActive) return
 
     var expanded by remember { mutableStateOf(false) }
     val fraction = (plan.done.toFloat() / plan.total.toFloat()).coerceIn(0f, 1f)
-    val headline = plan.running ?: "下一步待开始"
+    val headline = if (plan.isTerminalWithCancelled) {
+        // 全部结束但有取消项：不能显示成"下一步待开始"，更不能让组件直接消失。
+        "已结束 · ${plan.cancelled} 项取消"
+    } else {
+        plan.running ?: "下一步待开始"
+    }
     // 箭头旋转动画：收起 0°，展开 180°
     val arrowAngle by animateFloatAsState(if (expanded) 180f else 0f, label = "planArrow")
 
@@ -132,19 +139,25 @@ internal fun AgentPlanProgressBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        val (mark, color) = when (item.label) {
-                            "已完成" -> "✓" to MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            "进行中" -> "▸" to MiuixTheme.colorScheme.primary
-                            else -> "○" to MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        val (mark, color) = when (item.status) {
+                            AgentPlanStatus.COMPLETED -> "✓" to MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            AgentPlanStatus.IN_PROGRESS -> "▸" to MiuixTheme.colorScheme.primary
+                            AgentPlanStatus.CANCELLED -> "✕" to MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            AgentPlanStatus.PENDING -> "○" to MiuixTheme.colorScheme.onSurfaceVariantSummary
                         }
                         Text(text = mark, style = MiuixTheme.textStyles.footnote1, color = color)
                         Text(
-                            text = item.subject,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = if (item.label == "已完成") {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            // 取消项必须有独立视觉：✕ + 后缀，不能和「待开始」一样是 ○。
+                            text = if (item.status == AgentPlanStatus.CANCELLED) {
+                                "${item.subject}（已取消）"
                             } else {
+                                item.subject
+                            },
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = if (item.status == AgentPlanStatus.IN_PROGRESS) {
                                 MiuixTheme.colorScheme.onSurface
+                            } else {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
                             },
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,

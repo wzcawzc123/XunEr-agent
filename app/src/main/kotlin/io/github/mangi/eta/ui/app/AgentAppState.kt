@@ -26,6 +26,11 @@ import io.github.mangi.eta.agent.model.AgentFileReferenceKind
 import io.github.mangi.eta.agent.model.AgentFileReferencePolicy
 import io.github.mangi.eta.agent.model.AgentFileReferencePromptCodec
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.plan.AgentPlanModeEntry
+import io.github.mangi.eta.agent.plan.AgentPlanModeStore
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
+import io.github.mangi.eta.agent.plan.AgentPlanStore
+import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.agent.roleplay.CharacterMacros
 import io.github.mangi.eta.agent.roleplay.CharacterCardCodec
@@ -155,6 +160,8 @@ internal class AgentAppState(
 
     init {
         refreshConversationSummaries()
+        // 冷启动恢复上次会话时，计划阶段也要一起恢复，否则上次停在 REVIEW 的计划会没有审批入口。
+        selectedConversationId?.let(::refreshPlanPhase)
         observeRuntimeSelection()
         // 自动任务投递入口：后台到点时优先走这里（等价用户发消息），
         // 而不是绕过会话自己调 complete() —— 对齐 dsh 的 agent.followup。
@@ -771,6 +778,8 @@ internal class AgentAppState(
         }
         conversationPaneState = conversationPaneState.copy(selectedConversationId = conversationId)
         persistConversations()
+        // 计划阶段属于会话级状态，切换会话必须重读，否则会把上一个会话的「待批准」带过来。
+        refreshPlanPhase(conversationId)
     }
 
     /** 选中未载入会话时异步补载全量消息；加载期间用户再切换会取消旧任务，完成时校验仍为当前选中。 */
@@ -899,6 +908,8 @@ internal class AgentAppState(
             if (nextId != null) {
                 selectedConversationId = nextId
                 homeState = conversationsById.getValue(nextId)
+                // 切换目标可能停在待批准：阶段要跟着会话走，不能沿用被删会话的状态。
+                refreshPlanPhase(nextId)
             } else {
                 selectedConversationId = null
                 homeState = emptyChatState(defaultThinkingEnabled)
@@ -963,6 +974,93 @@ internal class AgentAppState(
             SystemNoticeCode.Interrupted -> R.string.system_notice_interrupted
         },
     )
+
+    /**
+     * 计划模式入口（输入栏按钮，用户不需要手打 `/plan`）。
+     *
+     * - NORMAL → PLANNING：进入只读规划，清空上一份清单，下一条消息按"先调研再出方案"处理；
+     * - PLANNING / EXECUTING → 取消当前计划，回到普通对话；
+     * - REVIEW：不处理 —— 此时 UI 显示「批准 / 取消」，误触不能把待审批的计划丢掉。
+     */
+    fun togglePlanMode() {
+        if (homeState.isStreaming) return
+        when (AgentPlanModeEntry.toggleAction(homeState.planPhase)) {
+            AgentPlanModeEntry.ToggleAction.ENTER_PLANNING -> enterPlanMode()
+            // 退出也走文本协议：让历史里留下「用户取消了计划」这一条，
+            // 模型下一轮不会还拿着上一份计划的上下文继续做。
+            AgentPlanModeEntry.ToggleAction.EXIT_PLANNING -> sendCurrentMessage(PLAN_CANCEL_PROMPT)
+            // REVIEW 交给审批条，误触不能把待审批的计划丢掉。
+            AgentPlanModeEntry.ToggleAction.NONE -> Unit
+        }
+    }
+
+    private fun enterPlanMode() {
+        val conversationId = selectedConversationId ?: newConversationId().also { id ->
+            selectedConversationId = id
+            conversationPaneState = conversationPaneState.copy(selectedConversationId = id)
+            updateConversation(id, homeState)
+        }
+        scope.launch(Dispatchers.IO) {
+            val database = EtaDatabase.get(appContext)
+            val modeStore = AgentPlanModeStore(database.conversationPlanDao())
+            val planStore = AgentPlanStore(database.conversationTodoDao())
+            val now = System.currentTimeMillis()
+            val next = runCatching {
+                modeStore.enterPlanningBlocking(conversationId, "plan-$now", now)
+                // 新计划不继承上一轮清单，否则模型会以为旧步骤还没做完。
+                planStore.replaceBlocking(conversationId, emptyList(), now)
+                AgentPlanPhase.PLANNING
+            }.getOrElse { homeState.planPhase }
+            withContext(Dispatchers.Main) { applyPlanPhase(conversationId, next) }
+        }
+    }
+
+    /** 审批条「批准」：与用户输入批准指令同一条协议，保证历史、版本绑定、只读解除完全一致。 */
+    fun approvePlan() {
+        if (homeState.isStreaming) return
+        if (homeState.planPhase != AgentPlanPhase.REVIEW) return
+        sendCurrentMessage(PLAN_APPROVE_PROMPT)
+    }
+
+    /** 审批条「取消」：同样走文本协议，让模型明确知道这份计划已废弃，而不是猜。 */
+    fun cancelPlan() {
+        if (homeState.isStreaming) return
+        if (homeState.planPhase == AgentPlanPhase.NORMAL) return
+        sendCurrentMessage(PLAN_CANCEL_PROMPT)
+    }
+
+    /**
+     * 从数据库同步阶段，只用于 UI 显示。
+     *
+     * 运行时每轮都会重新读库并据此挂只读策略与提示词，所以这里即使短暂滞后
+     * 也不会让模型越权执行；反过来，任何一次 UI 状态都不作为授权依据。
+     */
+    private fun refreshPlanPhase(conversationId: String) {
+        scope.launch(Dispatchers.IO) {
+            val state = runCatching {
+                AgentPlanModeStore(EtaDatabase.get(appContext).conversationPlanDao())
+                    .getBlocking(conversationId)
+            }.getOrNull()
+            withContext(Dispatchers.Main) {
+                applyPlanPhase(conversationId, state?.phase ?: AgentPlanPhase.NORMAL, state?.markdown)
+            }
+        }
+    }
+
+    private fun applyPlanPhase(conversationId: String, phase: AgentPlanPhase, preview: String? = null) {
+        val current = conversationsById[conversationId]
+            ?: homeState.takeIf { selectedConversationId == conversationId }
+            ?: return
+        // 只有待批准阶段才需要正文预览；其他阶段留着会白占内存、也可能被误当成当前计划。
+        val nextPreview = preview?.takeIf { phase == AgentPlanPhase.REVIEW }
+        if (current.planPhase == phase && current.planPreview == nextPreview) return
+        // 阶段变化不代表会话有新内容，不推进侧栏排序时间。
+        updateConversation(
+            conversationId,
+            current.copy(planPhase = phase, planPreview = nextPreview),
+            updateTimestamp = false,
+        )
+    }
 
     fun sendCurrentMessage(submittedText: String? = null) {
         if (homeState.isCompacting) return
@@ -1966,6 +2064,8 @@ internal class AgentAppState(
         acknowledgeRuntimeResult: Boolean = false,
     ) {
         flushPendingRunDelta(runId)
+        // 必须在 runConversationIds.remove 之前取：收尾流程末尾还要用它同步计划阶段。
+        val finishedConversationId = conversationIdForRun(runId)
         val rewriting = result.operation == AgentRuntimeWire.OP_REWRITE_REPLY || isReplyRewrite(runId)
         stopRequestedRunIds.remove(runId)
         if (runId == currentRunId) {
@@ -2052,6 +2152,9 @@ internal class AgentAppState(
                 null
             }
         )
+        // 本轮可能改过计划阶段（exit_plan_mode 提交 → REVIEW；执行完成 → NORMAL）。
+        // 在收尾处重读一次，UI 的审批条/入口按钮才会跟着模型的动作走。
+        finishedConversationId?.let(::refreshPlanPhase)
     }
 
     private fun updateRunTrace(
@@ -2296,6 +2399,14 @@ internal class AgentAppState(
         const val RESUME_INTERRUPTED_PROMPT =
             "上次任务被系统中断（Eta 后台服务被系统回收），中断前已完成并保存的进度见下方历史。" +
                 "请基于这些进度继续完成原任务；已完成并验证过的步骤不要重复执行，尤其不要重复已生效的 GUI 动作与写操作。"
+        /**
+         * 审批按钮发出的文本。
+         *
+         * 审批不直接改库而是复用文本协议：历史里留下"用户批准了 vN"这一条可追溯的记录，
+         * 且运行时 Router 的版本绑定、清单起步、阶段迁移只有一处实现（不会出现按钮路径绕过校验）。
+         */
+        const val PLAN_APPROVE_PROMPT = "批准"
+        const val PLAN_CANCEL_PROMPT = "取消"
         // 数据状态以较粗粒度发布，文字显现由独立的帧时钟连续推进。
         const val STREAM_UI_UPDATE_INTERVAL_MS = 80L
 

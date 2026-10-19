@@ -364,6 +364,15 @@ fun AgentAppRoot(
                                 is AgentHomeAction.ReasoningEffortChanged ->
                                     agentState.updateReasoningEffort(action.effort)
                                 AgentHomeAction.CompactContext -> agentState.compactCurrentContext()
+                                AgentHomeAction.TogglePlanMode -> agentState.togglePlanMode()
+                                AgentHomeAction.ApprovePlan -> {
+                                    requestExecutionNotifications()
+                                    agentState.approvePlan()
+                                }
+                                AgentHomeAction.CancelPlan -> {
+                                    requestExecutionNotifications()
+                                    agentState.cancelPlan()
+                                }
                                 is AgentHomeAction.ModelSelected -> agentState.selectModel(action.modelId)
                                 is AgentHomeAction.VisionToggled ->
                                     agentState.setModelVision(action.providerId, action.modelId, action.vision)
@@ -419,6 +428,15 @@ fun AgentAppRoot(
                                 is AgentChatAction.ReasoningEffortChanged ->
                                     agentState.updateReasoningEffort(action.effort)
                                 AgentChatAction.CompactContext -> agentState.compactCurrentContext()
+                                AgentChatAction.TogglePlanMode -> agentState.togglePlanMode()
+                                AgentChatAction.ApprovePlan -> {
+                                    requestExecutionNotifications()
+                                    agentState.approvePlan()
+                                }
+                                AgentChatAction.CancelPlan -> {
+                                    requestExecutionNotifications()
+                                    agentState.cancelPlan()
+                                }
                                 AgentChatAction.ResumeInterruptedRun -> agentState.resumeInterruptedRun()
                                 is AgentChatAction.ModelSelected -> agentState.selectModel(action.modelId)
                                 is AgentChatAction.VisionToggled ->

@@ -159,6 +159,9 @@ internal object EtaBackupRepository {
                         phase = "clear_conversations"
                         dao.deleteMessages()
                         dao.deleteContextCheckpoints()
+                        // 备份里没有清单/计划模式表；恢复时一并清掉，避免旧计划挂到被重映射的会话上。
+                        dao.deleteAllConversationTodos()
+                        dao.deleteAllConversationPlans()
                         dao.deleteConversations()
                         dao.deleteState()
                         phase = "restore_conversations"

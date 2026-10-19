@@ -8,6 +8,8 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import io.github.mangi.eta.data.db.autotask.AgentTaskDao
 import io.github.mangi.eta.data.db.autotask.AgentTaskEntity
+import io.github.mangi.eta.data.db.plan.ConversationPlanDao
+import io.github.mangi.eta.data.db.plan.ConversationPlanEntity
 import io.github.mangi.eta.data.db.plan.ConversationTodoDao
 import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 
@@ -30,9 +32,10 @@ import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
         CharacterEntity::class,
         UserPersonaEntity::class,
         ConversationTodoEntity::class,
+        ConversationPlanEntity::class,
         AgentTaskEntity::class,
     ],
-    version = 28,
+    version = 29,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -43,6 +46,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun mcpServerDao(): McpServerDao
     abstract fun characterDao(): CharacterDao
     abstract fun conversationTodoDao(): ConversationTodoDao
+    abstract fun conversationPlanDao(): ConversationPlanDao
     abstract fun agentTaskDao(): AgentTaskDao
 
     companion object {
@@ -79,6 +83,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_25_26,
                         MIGRATION_26_27,
                         MIGRATION_27_28,
+                        MIGRATION_28_29,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -183,6 +188,26 @@ internal abstract class EtaDatabase : RoomDatabase() {
         internal val MIGRATION_27_28 = Migration(27, 28) { database ->
             database.execSQL("ALTER TABLE agent_tasks ADD COLUMN max_runs INTEGER NOT NULL DEFAULT 6")
             database.execSQL("ALTER TABLE agent_tasks ADD COLUMN run_count INTEGER NOT NULL DEFAULT 0")
+        }
+
+        /**
+         * 计划模式（v29）：会话级阶段、版本、批准版本与计划正文。
+         *
+         * 与 conversation_todos 分开：todos 是执行清单，本表是"计划这个交互姿态"的状态；
+         * 两者生命周期不同（计划可以被取消但正文仍要能回看）。
+         */
+        internal val MIGRATION_28_29 = Migration(28, 29) { database ->
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS conversation_plans (" +
+                    "conversation_id TEXT NOT NULL PRIMARY KEY, " +
+                    "plan_id TEXT NOT NULL, " +
+                    "phase TEXT NOT NULL, " +
+                    "version INTEGER NOT NULL, " +
+                    "approved_version INTEGER, " +
+                    "markdown TEXT NOT NULL, " +
+                    "created_at INTEGER NOT NULL, " +
+                    "updated_at INTEGER NOT NULL)",
+            )
         }
 
         /** 自动任务时间语义（v27）：此前 schedule 只在域模型里，Entity 缺列导致时间语义全失效。 */

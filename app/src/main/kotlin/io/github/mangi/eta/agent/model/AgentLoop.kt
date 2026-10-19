@@ -131,6 +131,9 @@ internal class AgentLoop(
             var requestMessages = AssistantScreenContextProjection.project(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
+            // 任务清单快照：run 开始时从数据库读入，附在本次用户消息上。
+            // 只投影到 Provider 请求，不写入持久历史 —— 避免每轮把清单复制进 transcript。
+            requestMessages = AgentPlanContextProjection.project(requestMessages)
             // 出站请求前先做零模型的工具结果修剪（确定性、幂等，只改本次请求副本）。
             // 修剪后内容落在预算内，重复执行不再变化，因此每轮前缀一致，不牺牲缓存命中。
             requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
@@ -191,6 +194,7 @@ internal class AgentLoop(
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )
+                requestMessages = AgentPlanContextProjection.project(requestMessages)
                 // C2（v3.11.24）：裁剪后必须重放 prune 与 strip——它们只改出站副本且幂等，
                 // 否则纯文本模型（supportsVision=false）在裁剪轮会把图片块发出去（必然 400），
                 // 超大工具结果也以未修剪原文发出。重放后预算估算口径与真实请求一致。
@@ -534,7 +538,7 @@ internal class AgentLoop(
                 resultSummary = traceFormatter.summarizeResult(toolCall.name, result),
                 imageCount = result.images.size,
                 imageBytes = result.images.sumOf { it.bytes },
-                success = traceFormatter.isSuccessResult(result),
+                success = traceFormatter.isSuccessResult(toolCall.name, result),
             )
         )
     }

@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.agent.skill.SkillContext
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import org.json.JSONArray
@@ -17,8 +18,9 @@ internal object AgentPromptBuilder {
         memoryContext: AgentMemoryContext = AgentMemoryContext.DISABLED,
         rootAvailable: Boolean = false,
         roleplayContext: RoleplayRunContext? = null,
+        planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
     ): JSONArray {
-        val messages = buildSystemMessages(config, skillContext, memoryContext, rootAvailable, roleplayContext)
+        val messages = buildSystemMessages(config, skillContext, memoryContext, rootAvailable, roleplayContext, planPhase)
         history.forEach { item ->
             runCatching { AgentConversationCodec.toJsonObject(item) }.getOrNull()?.let(messages::put)
         }
@@ -32,6 +34,7 @@ internal object AgentPromptBuilder {
         memoryContext: AgentMemoryContext,
         rootAvailable: Boolean,
         roleplayContext: RoleplayRunContext? = null,
+        planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
     ): JSONArray {
         val messages = JSONArray()
         if (roleplayContext == null && config.systemPrompt.isNotBlank()) {
@@ -67,11 +70,17 @@ internal object AgentPromptBuilder {
                     "**不要只口头答应「我会盯着」「有结果告诉你」**——那一轮结束之后你不会再记得。" +
                     "建完后明确告知：任务名、触发条件、结果会出现在本会话、可随时用 list_auto_tasks 查看或 delete_auto_task 取消。" +
                     "只有在用户明确要求「现在就看结果」且能当场等到时，才不必建任务。\n" +
+                    // 计划工具的使用规范。工具描述只讲协议；这里讲「什么时候用、怎么算完成」。
+                    // 注意与下一段「不要在正文里长篇罗列计划」的区别：禁止的是正文里的长篇计划，不是清单工具。
+                    "多步任务（预计 3 步以上、步骤之间有依赖，或用户明确要求列计划）先用 todo_write 建立清单：" +
+                    "步骤写成可验收的动作，同时只保留一条 in_progress；完成并验证后再标 completed；" +
+                    "做不了或被用户取消的步骤标 cancelled，并在最终答复里说明，不要用 completed 掩盖未完成。" +
+                    "简单问答、一两步就能完成的事不要建清单。\n" +
                     "你可以回答日常问题，也可以操作当前 Android 手机。不需要设备上下文的问答直接回答。" +
                     "涉及当前时间、相对时间或所在位置时先调用 get_current_context。" +
                     "用户要求执行任务时，主动推进到完成。只要用户目标会因手机中的真实上下文而明显受益，" +
                     "就主动调用当前已公开的只读工具获取证据，不要先凭常识猜测、给出模板答案、要求用户逐项指定数据源或重复询问授权；" +
-                    "用户目标明确且已经具备可靠执行参数时，立即调用工具，不要先输出计划、解释或中间进度；" +
+                    "用户目标明确且已经具备可靠执行参数时，立即调用工具；不要在正文里长篇罗列计划、解释或中间进度，需要多步时用 todo_write 记录清单；" +
                     "可以根据上下文合理确定的细节自行处理；缺少会影响执行结果的关键信息时，再简短询问，不猜测关键参数；" +
                     "不依赖中间界面变化的连续操作可以在同一轮一并调用，不要为了展示思考而拆成多个回合；" +
                     "工具已向你公开表示对应能力已由用户开启。用户要求‘了解我’、分析最近状态或活动、总结习惯与偏好、判断工作生活情况，" +
@@ -200,10 +209,36 @@ internal object AgentPromptBuilder {
                 )
             )
         }
+        planModeMessage(planPhase)?.let(messages::put)
         roleplayContext?.personaMessage()?.let(messages::put)
         buildMemorySystemMessage(memoryContext, writable = roleplayContext == null)?.let(messages::put)
         buildSkillSystemMessage(skillContext)?.let(messages::put)
         return messages
+    }
+
+    /**
+     * 计划模式的阶段提示。
+     *
+     * 放在系统提示（静态段）而不是逐轮尾部：阶段在一次 run 内基本不变；变化时（批准/提交）
+     * 本来就会开新一轮 run，缓存按阶段各存一份，代价可接受。真正逐轮变化的清单进度仍走尾部注入。
+     */
+    private fun planModeMessage(phase: AgentPlanPhase): JSONObject? {
+        val body = when (phase) {
+            AgentPlanPhase.NORMAL -> return null
+            AgentPlanPhase.PLANNING ->
+                "当前处于**计划模式（只读）**：你只能调研、阅读和观察，不能修改文件/设备/记忆，也不能发送消息或点击操作。" +
+                    "请先探索并验证关键事实，再调用 exit_plan_mode 提交 plan（给用户看的完整方案）与 steps（全部 pending）。" +
+                    "提交后立即停止，等待用户批准；不要在提交前边做边改。"
+            AgentPlanPhase.REVIEW ->
+                "计划已提交，正在等待用户批准。不要执行任何修改或设备操作；" +
+                    "如果用户提出修改意见，更新计划并再次调用 exit_plan_mode。用户回复「取消」则放弃计划。"
+            AgentPlanPhase.EXECUTING ->
+                "用户已批准计划。请按当前任务清单执行：从 in_progress 项继续，不要重复已完成步骤；" +
+                    "每完成并验证一项就更新 todo_write（过程只改 status）。" +
+                    "如果你新增、删除或改写步骤，系统会判定为超出已批准范围并自动退回待批准：" +
+                    "此时应向用户说明变更原因并等待重新批准，不要假装仍在执行，也不要绕过清单直接做。"
+        }
+        return systemMessage(body)
     }
 
     private fun buildMemorySystemMessage(context: AgentMemoryContext, writable: Boolean): JSONObject? {

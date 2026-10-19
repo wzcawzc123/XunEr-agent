@@ -15,6 +15,8 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        /** 是否挂载任务清单工具；无持久会话的入口（语音/外部助手）为 false。 */
+        planTools: Boolean = true,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
         localWebSearch: Boolean = true,
     ): JSONArray =
@@ -38,7 +40,7 @@ internal object AgentToolCatalog {
                 githubInstall = skillGitHubInstall,
             )
             if (memoryTools) AgentMemoryToolCatalog.appendTo(tools, writable = memoryWritable)
-            AgentPlanToolCatalog.appendTo(tools)
+            AgentPlanToolCatalog.appendTo(tools, writable = planTools)
             if (terminalTools) {
                 AgentFileVisionToolCatalog.appendTo(tools)
                 AgentTerminalToolCatalog.appendTo(tools)

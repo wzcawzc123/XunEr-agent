@@ -26,11 +26,11 @@ internal class AgentContextCompactor(
          */
         observedInputTokens: Int? = null,
         /**
-         * 当前任务清单的一行概览（见 AgentPlanTool.overviewText）。
+         * 当前任务清单的注入文本（见 AgentPlanTool.checklistText；兼容旧的一行概览）。
          *
          * 清单本身存在独立表里、不会被压缩丢掉；但**模型只能看到历史，看不到库表**。
          * 压缩会把此前所有 todo_write 的回执摘要掉，模型便失去「我在第几步」的记忆。
-         * 把概览写进摘要正文，让它在每一代摘要里延续。
+         * 把清单写进摘要正文，让它在每一代摘要里延续。
          */
         planOverview: String? = null,
     ): JSONArray {
@@ -115,10 +115,16 @@ internal class AgentContextCompactor(
                             "后续请以此为准，不要凭对话长度推测用量。]",
                     )
                 }
-                // 任务清单概览：随每一代摘要延续，避免压缩后模型忘记执行到第几步。
+                // 任务清单与计划正文：随每一代摘要延续，避免压缩后模型忘记执行到第几步、
+                // 也忘掉目标与验收标准。这里传入的是完整清单（可能带计划正文），
+                // 只给概览会让模型知道进度、却不知道剩余步骤。
+                // 前缀只补给"旧格式的一行概览"（不以 [ 开头），否则会出现
+                // "[当前任务清单] [已批准计划 · …]" 这种双层标题。
                 // 位置在占用说明之后、需求锚点之前 —— 锚点是原始需求，永远压轴。
                 if (!planOverview.isNullOrBlank()) {
-                    append("\n\n[当前任务清单] $planOverview")
+                    append("\n\n")
+                    if (!planOverview.startsWith("[")) append("[当前任务清单] ")
+                    append(planOverview)
                 }
             },
             contextSummary = true,

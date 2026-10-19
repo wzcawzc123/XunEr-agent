@@ -23,6 +23,20 @@ internal data class AgentPlanItem(
             val counted = items.filterNot { it.status == AgentPlanStatus.CANCELLED }
             return counted.count { it.status == AgentPlanStatus.COMPLETED } to counted.size
         }
+
+        /**
+         * 已取消条数。
+         *
+         * 单独计数而不是并进 [progressOf]：取消**不能**算完成，但也不能当作不存在。
+         * 回执、摘要概览与 UI 终态都要明确告诉用户"有几步被放弃了"，
+         * 否则模型可以通过取消难做的步骤把进度刷到 100%。
+         */
+        fun cancelledCount(items: List<AgentPlanItem>): Int =
+            items.count { it.status == AgentPlanStatus.CANCELLED }
+
+        /** 是否还有未结束的工作（待开始或进行中）。 */
+        fun hasOpenWork(items: List<AgentPlanItem>): Boolean =
+            items.any { it.status == AgentPlanStatus.PENDING || it.status == AgentPlanStatus.IN_PROGRESS }
         /** 单条标题上限：够写清楚一件事，又不至于把清单变成文档。 */
         const val MAX_TEXT_CHARS = 120
 
@@ -106,6 +120,46 @@ internal data class AgentPlanItem(
             }
 
             return Result.success(items)
+        }
+
+        /**
+         * 相对上一版的状态转移校验。
+         *
+         * 首次写入（previous 为空）完全放行：模型可以一次性把"已经做完的步骤"带进来。
+         * 后续更新只拦两类最容易造成"进度账本失真"的转移：
+         * - 已完成/已取消 → 未完成：必须显式 `reopen=true`，否则视为静默复活；
+         * - 已完成 → 已取消：同样需要 `reopen=true`，避免用取消把完成项从分母里抹掉。
+         *
+         * `pending → completed` 不拦（模型常在一次调用里补记多个已完成步骤），
+         * 但回执会给出"跳过 in_progress"的提示，由模型自行纠正。
+         */
+        fun validateTransitions(
+            previous: List<AgentPlanItem>,
+            current: List<AgentPlanItem>,
+            reopenIds: Set<String> = emptySet(),
+        ): Result<Unit> {
+            if (previous.isEmpty()) return Result.success(Unit)
+            val before = previous.associateBy { it.id }
+            current.forEachIndexed { index, item ->
+                val old = before[item.id] ?: return@forEachIndexed
+                val reopened = item.id in reopenIds
+                val regressed = when (old.status) {
+                    AgentPlanStatus.COMPLETED ->
+                        item.status != AgentPlanStatus.COMPLETED
+                    AgentPlanStatus.CANCELLED ->
+                        item.status == AgentPlanStatus.PENDING || item.status == AgentPlanStatus.IN_PROGRESS
+                    else -> false
+                }
+                if (regressed && !reopened) {
+                    return Result.failure(
+                        PlanValidationException(
+                            "第 ${index + 1} 条（${item.subject}）从 ${old.status.label} 变为 ${item.status.label}，" +
+                                "若要重新打开请在该条传 reopen=true",
+                        ),
+                    )
+                }
+            }
+            return Result.success(Unit)
         }
     }
 }

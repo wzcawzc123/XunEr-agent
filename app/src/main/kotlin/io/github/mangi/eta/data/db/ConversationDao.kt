@@ -288,6 +288,14 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("DELETE FROM conversation_context_checkpoints")
     suspend fun deleteContextCheckpoints()
 
+    /** 清单表不属于会话实体，删会话时必须显式清理，否则会留下孤儿行。 */
+    @Query("DELETE FROM conversation_todos")
+    suspend fun deleteAllConversationTodos()
+
+    /** 计划模式状态表同上：没有外键级联，删会话时一并清掉。 */
+    @Query("DELETE FROM conversation_plans")
+    suspend fun deleteAllConversationPlans()
+
     @Query("DELETE FROM conversation_state")
     suspend fun deleteState()
 
@@ -300,6 +308,8 @@ internal interface ConversationDao : ChunkedTextDao {
     ) {
         deleteMessages()
         deleteContextCheckpoints()
+        deleteAllConversationTodos()
+        deleteAllConversationPlans()
         deleteConversations()
         deleteState()
         insertConversations(conversations)
