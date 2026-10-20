@@ -76,4 +76,19 @@ class AndroguardCommandTest {
         assertEquals("", AndroguardCommand.sanitizeExtraArgs(""))
         assertEquals("", AndroguardCommand.sanitizeExtraArgs("   "))
     }
+
+    @Test
+    fun `写文件类参数会被整段丢弃`() {
+        // 回归点：只做字符过滤时，`-o /sdcard/out.xml` 全是合法字符，
+        // 计划阶段「只读」会被这条路径绕过。
+        assertEquals("", AndroguardCommand.sanitizeExtraArgs("-o /sdcard/out.xml"))
+        assertEquals("", AndroguardCommand.sanitizeExtraArgs("--output /data/local/tmp/x"))
+        assertEquals("", AndroguardCommand.sanitizeExtraArgs("-d --dump /sdcard/y"))
+    }
+
+    @Test
+    fun `白名单内的只读开关仍然可用`() {
+        assertEquals(" -a --simple", AndroguardCommand.sanitizeExtraArgs("-a --simple"))
+    }
+
 }

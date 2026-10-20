@@ -160,12 +160,13 @@ internal object AgentPlanModeTool {
         planStore.replaceBlocking(conversationId, validated, nowMillis)
         val state = modeStore.submitBlocking(conversationId, markdown, nowMillis)
 
-        return buildString {
-            append("计划 v${state.version} 已提交，共 ${validated.size} 步，等待用户批准。")
-            append("\n回复「批准」开始执行；回复「取消」放弃；其他内容将作为修改意见。")
-            append("\n在用户批准前，不要执行任何修改或设备操作。")
-            append("\n\n--- 计划正文 ---\n")
-            append(markdown)
-        }
+        return AgentPlanReceipt.build(
+            header = buildString {
+                append("计划 v${state.version} 已提交，共 ${validated.size} 步，等待用户批准。")
+                append("\n回复「批准」开始执行；回复「取消」放弃；其他内容将作为修改意见。")
+                append("\n在用户批准前，不要执行任何修改或设备操作。")
+            },
+            markdown = markdown,
+        )
     }
 }

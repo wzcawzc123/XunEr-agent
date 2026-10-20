@@ -1142,11 +1142,14 @@
   <string name="chat_stop">Stop</string>
   <string name="chat_send">Send</string>
   <string name="chat_plan_mode_enter">Plan</string>
+  <string name="chat_plan_mode_exit">Exit plan</string>
+  <string name="chat_plan_mode_pending">Plan awaiting approval</string>
   <string name="chat_plan_mode_planning">Planning</string>
   <string name="chat_plan_mode_review">Review</string>
   <string name="chat_plan_mode_executing">Running</string>
   <string name="chat_plan_review_title">Plan submitted. Waiting for your approval.</string>
-  <string name="chat_plan_review_hint">Approve to start, or type changes below.</string>
+  <string name="chat_plan_suggestion_title">Suggested: plan before acting</string>
+  <string name="chat_plan_review_hint">Full plan is in the message above; approve to start, or type changes below.</string>
   <string name="chat_plan_review_footer">Approve to start, or type changes below.</string>
   <string name="chat_plan_approve">Approve &amp; run</string>
   <string name="chat_plan_cancel">Discard plan</string>

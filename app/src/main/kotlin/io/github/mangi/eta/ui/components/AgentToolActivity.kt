@@ -50,6 +50,9 @@ import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.browser.AgentBrowserSession
 import io.github.mangi.eta.agent.browser.BrowserSessionSnapshot
 import io.github.mangi.eta.agent.overlay.toolDisplayName
+import io.github.mangi.eta.agent.plan.AgentPlanReceipt
+import io.github.mangi.eta.ui.markdown.MarkdownTone
+import io.github.mangi.eta.ui.markdown.StaticMarkdown
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityStatusUi
 import kotlinx.coroutines.Dispatchers
@@ -307,7 +310,30 @@ private fun ToolActivityDetail(
             ToolCommandBlock(command = message.command, context = message.argumentsSummary)
         }
         val result = message.resultSummary?.takeIf(String::isNotBlank)
-        if (result != null) {
+        // 计划回执拆成两块：回执头用普通文本，正文走与聊天气泡同款的 Markdown 渲染，
+        // 且**不受 MAX_RESULT_LINES 截断** —— 计划是给用户读的，不是日志尾巴。
+        val planReceipt = result?.let { AgentPlanReceipt.parse(it) }
+        if (planReceipt != null) {
+            if (planReceipt.header.isNotEmpty()) {
+                Text(
+                    text = planReceipt.header,
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .squircleSurface(
+                            color = MiuixTheme.colorScheme.surfaceContainer,
+                            cornerRadius = 10.dp,
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+            StaticMarkdown(
+                content = planReceipt.markdown,
+                tone = MarkdownTone.Answer,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else if (result != null) {
             SelectionContainer {
                 Text(
                     text = result,

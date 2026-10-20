@@ -26,6 +26,7 @@ class AgentPlanToolTest {
         override fun listBlocking(conversationId: String) = store[conversationId].orEmpty()
         override suspend fun upsert(items: List<ConversationTodoEntity>) = Unit
         override suspend fun deleteAll(conversationId: String) = Unit
+    override suspend fun listAll(): List<ConversationTodoEntity> = emptyList()
         override fun deleteAllBlocking(conversationId: String) = Unit
         override fun upsertBlocking(items: List<ConversationTodoEntity>) = Unit
         override suspend fun replaceAll(conversationId: String, items: List<ConversationTodoEntity>) {

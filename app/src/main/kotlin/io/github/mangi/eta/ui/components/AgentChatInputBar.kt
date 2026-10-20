@@ -17,7 +17,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -45,7 +44,6 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.runtime.Composable
@@ -74,7 +72,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,8 +101,6 @@ private val SendButtonVisualSize = ChatInputActionIconSize
 private val SendIconSize = 16.dp
 private val StopIconSize = 10.dp
 private val ThinkingIconSize = 21.dp
-private val PlanChipHeight = 26.dp
-private val PlanChipIconSize = 14.dp
 private val ApprovalBarCorner = 14.dp
 private val InputContainerShape = RoundedCornerShape(20.dp)
 
@@ -125,7 +120,6 @@ internal fun AgentChatInputBar(
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
     planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
-    planPreview: String? = null,
     /** 角色扮演会话没有"只读规划→批准执行"这回事，入口直接隐藏。 */
     planAvailable: Boolean = true,
     onTogglePlanMode: () -> Unit = {},
@@ -199,8 +193,28 @@ internal fun AgentChatInputBar(
     ) {
         SpeechInputFeedback(dictation)
 
-        // 审批条放在输入区最上方：计划已提交时，这里是用户唯一需要做的决定。
-        // 用常驻条而不是弹窗 —— 用户可能中途离开再回来，弹窗会丢失且有打断感。
+        // 计划状态 chip：与附件 chip 同款形态，点 × 即退出计划模式。
+        // 放在附件 chip 之前，因为它是"当前会话处于什么模式"的状态，优先级高于附件。
+        // 用 showsToggle 而不是 phase != NORMAL：REVIEW 阶段退出语义由审批条的
+        // 「取消计划」承担，这里再放一个点了没反应的 × 只会让人困惑。
+        AnimatedVisibility(
+            visible = planAvailable &&
+                AgentPlanModeEntry.showsToggle(planPhase) &&
+                !isEditingMessage,
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(100)) + shrinkVertically(tween(160)),
+        ) {
+            PlanModeStrip(
+                phase = planPhase,
+                onRemove = onTogglePlanMode,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+
+        // 审批条放在计划 chip 之下：计划已提交时，这里是用户唯一需要做的决定。
+        // 用常驻条而不是弹窗 —— 用户可能中途离开再回来，弹窗会消失且有打断感。
+        // 条里**不放计划正文**：正文在对话流的计划消息里（Markdown 全渲染、可滚动），
+        // 这里只放操作，避免"展开看不全 + 不能滚动"（v3.13.8 真机反馈）。
         AnimatedVisibility(
             visible = planAvailable &&
                 AgentPlanModeEntry.showsApproval(planPhase) &&
@@ -210,7 +224,6 @@ internal fun AgentChatInputBar(
         ) {
             PlanApprovalBar(
                 enabled = !isStreaming,
-                preview = planPreview,
                 onApprove = onApprovePlan,
                 onCancel = onCancelPlan,
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -353,20 +366,15 @@ internal fun AgentChatInputBar(
                                 onAttachFiles = onAttachFiles,
                                 onAttachFolder = onAttachFolder,
                                 onAttachFilePath = onAttachFilePath,
+                                // 计划入口藏在加号菜单里：这一排全是同尺寸图标按钮，
+                                // 在这里放带文字的 pill 会挤占空间且高度不齐（真机反馈）。
+                                planActive = planPhase != AgentPlanPhase.NORMAL,
+                                planActionable = AgentPlanModeEntry.showsToggle(planPhase),
+                                onEnterPlanMode = onTogglePlanMode,
+                                onExitPlanMode = onTogglePlanMode,
                             )
 
                             Spacer(modifier = Modifier.width(2.dp))
-
-                            // 计划模式入口：不再要求用户手打 /plan。
-                            // REVIEW 阶段由上方审批条接管，这里隐藏，避免出现两个"取消"。
-                            if (planAvailable && AgentPlanModeEntry.showsToggle(planPhase)) {
-                                PlanModeChip(
-                                    phase = planPhase,
-                                    enabled = !isStreaming,
-                                    onClick = onTogglePlanMode,
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                            }
 
                             if (availableReasoningEfforts.isNotEmpty()) {
                                 ThinkingEffortChip(
@@ -476,92 +484,24 @@ internal fun AgentChatInputBar(
 
 }
 
-/**
- * 计划模式开关。
- *
- * 形态是 pill 而不是纯图标：计划模式是一个「会持续影响后续行为」的状态，
- * 只用颜色表达容易让用户不知道自己还在计划模式里。
- */
-@Composable
-private fun PlanModeChip(
-    phase: AgentPlanPhase,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val active = phase != AgentPlanPhase.NORMAL
-    val containerColor by animateColorAsState(
-        targetValue = if (active) MiuixTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(durationMillis = 160),
-        label = "plan_chip_container",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (active) {
-            MiuixTheme.colorScheme.onPrimary
-        } else {
-            MiuixTheme.colorScheme.onSurfaceVariantSummary
-        },
-        animationSpec = tween(durationMillis = 160),
-        label = "plan_chip_content",
-    )
-    val label = when (phase) {
-        AgentPlanPhase.NORMAL -> stringResource(R.string.chat_plan_mode_enter)
-        AgentPlanPhase.PLANNING -> stringResource(R.string.chat_plan_mode_planning)
-        AgentPlanPhase.REVIEW -> stringResource(R.string.chat_plan_mode_review)
-        AgentPlanPhase.EXECUTING -> stringResource(R.string.chat_plan_mode_executing)
-    }
-    Row(
-        modifier = modifier
-            .height(PlanChipHeight)
-            .clip(RoundedCornerShape(PlanChipHeight / 2))
-            .background(containerColor)
-            .then(
-                if (active) {
-                    Modifier
-                } else {
-                    Modifier.border(
-                        width = 0.5.dp,
-                        color = MiuixTheme.colorScheme.outline.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(PlanChipHeight / 2),
-                    )
-                },
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.Checklist,
-            contentDescription = null,
-            modifier = Modifier.size(PlanChipIconSize),
-            tint = contentColor,
-        )
-        Spacer(modifier = Modifier.width(3.dp))
-        Text(
-            text = label,
-            style = MiuixTheme.textStyles.footnote1,
-            color = contentColor,
-        )
-    }
-}
 
 /**
  * 计划审批条：计划提交后常驻在输入框上方。
  *
  * 不用弹窗的原因：移动端用户可能中途切走再回来，弹窗会消失且带走上下文；
  * 常驻条把「批准 / 取消 / 直接写修改意见」三件事都放在同一个位置。
+ *
+ * v3.13.9：条里**不再展示计划正文**。正文在对话流的计划消息里（Markdown 全渲染、
+ * 随消息区滚动），这里只放操作 —— 之前在这里做"三行截断 + 点击展开"，
+ * 展开后没有滚动容器，长计划直接被裁剪（真机反馈）。
  */
 @Composable
 private fun PlanApprovalBar(
     enabled: Boolean,
-    preview: String?,
     onApprove: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 默认只显示三行：计划正文可能很长，审批条不能把聊天区顶满。
-    // 想看全文就点一下正文展开 —— 比"往上翻找工具卡"省事得多。
-    var expanded by remember(preview) { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -581,28 +521,12 @@ private fun PlanApprovalBar(
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurface,
         )
-        if (preview.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(
-                text = stringResource(R.string.chat_plan_review_hint),
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = preview,
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurface,
-                maxLines = if (expanded) Int.MAX_VALUE else 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { expanded = !expanded }
-                    .padding(vertical = 2.dp),
-            )
-        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = stringResource(R.string.chat_plan_review_hint),
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
         Spacer(modifier = Modifier.height(9.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlanApprovalButton(

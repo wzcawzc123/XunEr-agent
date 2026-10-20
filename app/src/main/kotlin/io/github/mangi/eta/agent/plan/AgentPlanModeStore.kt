@@ -113,12 +113,23 @@ internal class AgentPlanModeStore(private val dao: ConversationPlanDao) {
         return state
     }
 
-    /** 用户取消计划：回到普通对话；保留正文与版本号，便于回看但不再可执行。 */
-    suspend fun cancel(conversationId: String, nowMillis: Long): AgentPlanModeState? {
+    /**
+     * 用户取消计划：回到普通对话。
+     *
+     * @param clearMarkdown 是否一并清空正文。文本协议（用户手打「取消」）传 false ——
+     *   历史里还留着那份计划，清掉会让工具卡里的引用对不上；UI 按钮的主动放弃传 true ——
+     *   那是"这个计划不算数了"，留着旧正文只会成为下一份计划的干扰项。
+     */
+    suspend fun cancel(
+        conversationId: String,
+        nowMillis: Long,
+        clearMarkdown: Boolean = false,
+    ): AgentPlanModeState? {
         val previous = dao.get(conversationId) ?: return null
         val state = previous.toState().copy(
             phase = AgentPlanPhase.NORMAL,
             approvedVersion = null,
+            markdown = if (clearMarkdown) "" else previous.markdown,
             updatedAt = nowMillis,
         )
         dao.upsert(state.toEntity(conversationId))
@@ -202,11 +213,16 @@ internal class AgentPlanModeStore(private val dao: ConversationPlanDao) {
         return state
     }
 
-    fun cancelBlocking(conversationId: String, nowMillis: Long): AgentPlanModeState? {
+    fun cancelBlocking(
+        conversationId: String,
+        nowMillis: Long,
+        clearMarkdown: Boolean = false,
+    ): AgentPlanModeState? {
         val previous = dao.getBlocking(conversationId) ?: return null
         val state = previous.toState().copy(
             phase = AgentPlanPhase.NORMAL,
             approvedVersion = null,
+            markdown = if (clearMarkdown) "" else previous.markdown,
             updatedAt = nowMillis,
         )
         dao.upsertBlocking(state.toEntity(conversationId))

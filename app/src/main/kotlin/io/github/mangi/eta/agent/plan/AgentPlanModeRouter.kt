@@ -19,12 +19,24 @@ internal object AgentPlanModeRouter {
         val phase: AgentPlanPhase,
     )
 
-    private val APPROVAL_PREFIXES = listOf(
-        "批准", "同意", "通过", "开始执行", "执行", "approve", "approved", "go", "start",
+    /**
+     * 批准/取消一律**整句精确匹配**，不做前缀匹配。
+     *
+     * 前缀匹配曾把「执行前先确认备份」判成批准（`startsWith("执行")` + 长度 ≤12），
+     * 直接把会话推进 EXECUTING 并开始改设备；「取消按钮的颜色改成红色」同理会被判成
+     * 放弃计划。用户的修改意见被当成命令执行，是这个模块最危险的一类误判。
+     *
+     * 代价：「批准，顺便加一步测试」这类"命令 + 意见"会退化为修改意见（重新规划）。
+     * 这个方向的失败是安全的——多问一次，而不是多改一次。
+     */
+    private val APPROVAL_EXACT = setOf(
+        "批准", "批准并执行", "同意", "通过", "确认", "可以", "好", "好的", "行", "开始", "开始执行",
+        "执行", "干吧", "开工", "approve", "approved", "ok", "okay", "yes", "go", "start", "y",
     )
-    private val APPROVAL_EXACT = setOf("可以", "好", "好的", "ok", "okay", "yes")
-    private val CANCEL_PREFIXES = listOf("取消", "放弃", "不做了", "cancel", "reject")
-    private val CANCEL_EXACT = setOf("算了", "no", "stop", "停止")
+    private val CANCEL_EXACT = setOf(
+        "取消", "取消计划", "放弃", "放弃计划", "不做了", "不用了", "算了", "停止",
+        "cancel", "reject", "no", "stop",
+    )
 
     fun route(
         rawPrompt: String,
@@ -142,9 +154,7 @@ internal object AgentPlanModeRouter {
         .lowercase()
         .trimEnd('。', '，', '！', '!', '.', ',', '~', '～')
 
-    private fun isApproval(text: String): Boolean =
-        text.length <= 12 && (text in APPROVAL_EXACT || APPROVAL_PREFIXES.any { text.startsWith(it) })
+    private fun isApproval(text: String): Boolean = text in APPROVAL_EXACT
 
-    private fun isCancel(text: String): Boolean =
-        text.length <= 12 && (text in CANCEL_EXACT || CANCEL_PREFIXES.any { text.startsWith(it) })
+    private fun isCancel(text: String): Boolean = text in CANCEL_EXACT
 }

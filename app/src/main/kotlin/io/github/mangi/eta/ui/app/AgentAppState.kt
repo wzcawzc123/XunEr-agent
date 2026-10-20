@@ -986,9 +986,11 @@ internal class AgentAppState(
         if (homeState.isStreaming) return
         when (AgentPlanModeEntry.toggleAction(homeState.planPhase)) {
             AgentPlanModeEntry.ToggleAction.ENTER_PLANNING -> enterPlanMode()
-            // 退出也走文本协议：让历史里留下「用户取消了计划」这一条，
-            // 模型下一轮不会还拿着上一份计划的上下文继续做。
-            AgentPlanModeEntry.ToggleAction.EXIT_PLANNING -> sendCurrentMessage(PLAN_CANCEL_PROMPT)
+            // 退出是**纯本地状态操作**，不发消息、不起 run：
+            // 规划阶段根本没提交过计划，执行阶段也没有"必须让模型知道"的中间态 ——
+            // 走文本协议只会平白多一条「取消」用户消息、多一次模型调用，
+            // 并把会话标题改成「取消」（真机反馈）。
+            AgentPlanModeEntry.ToggleAction.EXIT_PLANNING -> exitPlanMode()
             // REVIEW 交给审批条，误触不能把待审批的计划丢掉。
             AgentPlanModeEntry.ToggleAction.NONE -> Unit
         }
@@ -1022,11 +1024,38 @@ internal class AgentAppState(
         sendCurrentMessage(PLAN_APPROVE_PROMPT)
     }
 
-    /** 审批条「取消」：同样走文本协议，让模型明确知道这份计划已废弃，而不是猜。 */
+    /**
+     * 审批条「取消计划」：纯本地放弃，不发消息。
+     *
+     * 与「批准」不同，取消不需要模型参与（没有版本要绑定、没有步骤要起步），
+     * 发一条「取消」只会污染历史并把标题改成「取消」。
+     */
     fun cancelPlan() {
         if (homeState.isStreaming) return
         if (homeState.planPhase == AgentPlanPhase.NORMAL) return
-        sendCurrentMessage(PLAN_CANCEL_PROMPT)
+        exitPlanMode()
+    }
+
+    /**
+     * 放弃当前计划，回到普通对话（纯本地，无消息、无 run）。
+     *
+     * 清三样：阶段、清单、计划正文。正文必须一起清 —— 否则下一次进入计划模式时
+     * [AgentPlanModeStore.enterPlanning] 虽然会归零版本，但旧正文会一直躺在库里。
+     */
+    private fun exitPlanMode() {
+        val conversationId = selectedConversationId ?: return
+        scope.launch(Dispatchers.IO) {
+            val database = EtaDatabase.get(appContext)
+            val modeStore = AgentPlanModeStore(database.conversationPlanDao())
+            val planStore = AgentPlanStore(database.conversationTodoDao())
+            val now = System.currentTimeMillis()
+            val next = runCatching {
+                modeStore.cancelBlocking(conversationId, now, clearMarkdown = true)
+                planStore.replaceBlocking(conversationId, emptyList(), now)
+                AgentPlanPhase.NORMAL
+            }.getOrElse { homeState.planPhase }
+            withContext(Dispatchers.Main) { applyPlanPhase(conversationId, next) }
+        }
     }
 
     /**
@@ -1037,27 +1066,25 @@ internal class AgentAppState(
      */
     private fun refreshPlanPhase(conversationId: String) {
         scope.launch(Dispatchers.IO) {
-            val state = runCatching {
+            val phase = runCatching {
                 AgentPlanModeStore(EtaDatabase.get(appContext).conversationPlanDao())
-                    .getBlocking(conversationId)
-            }.getOrNull()
-            withContext(Dispatchers.Main) {
-                applyPlanPhase(conversationId, state?.phase ?: AgentPlanPhase.NORMAL, state?.markdown)
-            }
+                    .phaseBlocking(conversationId)
+            }.getOrDefault(AgentPlanPhase.NORMAL)
+            withContext(Dispatchers.Main) { applyPlanPhase(conversationId, phase) }
         }
     }
 
-    private fun applyPlanPhase(conversationId: String, phase: AgentPlanPhase, preview: String? = null) {
+    private fun applyPlanPhase(conversationId: String, phase: AgentPlanPhase) {
         val current = conversationsById[conversationId]
             ?: homeState.takeIf { selectedConversationId == conversationId }
             ?: return
-        // 只有待批准阶段才需要正文预览；其他阶段留着会白占内存、也可能被误当成当前计划。
-        val nextPreview = preview?.takeIf { phase == AgentPlanPhase.REVIEW }
-        if (current.planPhase == phase && current.planPreview == nextPreview) return
+        if (current.planPhase == phase) return
         // 阶段变化不代表会话有新内容，不推进侧栏排序时间。
+        // 注意：这里只同步阶段，不带计划正文 —— 正文由对话流里的计划消息呈现
+        // （v3.13.9 起审批条不再展示正文，避免"展开看不全 + 不能滚动"）。
         updateConversation(
             conversationId,
-            current.copy(planPhase = phase, planPreview = nextPreview),
+            current.copy(planPhase = phase),
             updateTimestamp = false,
         )
     }
@@ -2402,11 +2429,12 @@ internal class AgentAppState(
         /**
          * 审批按钮发出的文本。
          *
-         * 审批不直接改库而是复用文本协议：历史里留下"用户批准了 vN"这一条可追溯的记录，
+         * 批准不直接改库而是复用文本协议：历史里留下"用户批准了 vN"这一条可追溯的记录，
          * 且运行时 Router 的版本绑定、清单起步、阶段迁移只有一处实现（不会出现按钮路径绕过校验）。
+         *
+         * 取消**不**走这条路：纯本地放弃即可，发消息只会污染历史、把标题改成「取消」。
          */
         const val PLAN_APPROVE_PROMPT = "批准"
-        const val PLAN_CANCEL_PROMPT = "取消"
         // 数据状态以较粗粒度发布，文字显现由独立的帧时钟连续推进。
         const val STREAM_UI_UPDATE_INTERVAL_MS = 80L
 

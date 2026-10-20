@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.plan
 
+import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -129,6 +130,7 @@ class AgentPlanUiTest {
         override fun listBlocking(conversationId: String) = emptyList<io.github.mangi.eta.data.db.plan.ConversationTodoEntity>()
         override suspend fun upsert(items: List<io.github.mangi.eta.data.db.plan.ConversationTodoEntity>) = Unit
         override suspend fun deleteAll(conversationId: String) = Unit
+    override suspend fun listAll(): List<ConversationTodoEntity> = emptyList()
         override fun deleteAllBlocking(conversationId: String) = Unit
         override fun upsertBlocking(items: List<io.github.mangi.eta.data.db.plan.ConversationTodoEntity>) = Unit
         override suspend fun replaceAll(conversationId: String, items: List<io.github.mangi.eta.data.db.plan.ConversationTodoEntity>) = Unit

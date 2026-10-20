@@ -110,6 +110,4 @@ sealed interface AgentMemoryAction {
     data class SearchChanged(val query: String) : AgentMemoryAction
     /** 手动触发短期→长期 rollup 整理。 */
     data object Rollup : AgentMemoryAction
-    /** 完成 rollup 后刷新（重新加载两个仓库的最新内容）。 */
-    data object Refresh : AgentMemoryAction
 }

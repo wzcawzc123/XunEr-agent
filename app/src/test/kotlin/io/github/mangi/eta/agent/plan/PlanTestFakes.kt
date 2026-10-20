@@ -26,6 +26,7 @@ internal class FakePlanDao : ConversationPlanDao {
     override suspend fun deleteAll() {
         store.clear()
     }
+    override suspend fun listAll(): List<ConversationPlanEntity> = store.values.toList()
 }
 
 internal class FakeTodoDao : ConversationTodoDao {
@@ -47,4 +48,5 @@ internal class FakeTodoDao : ConversationTodoDao {
     override fun replaceAllBlocking(conversationId: String, items: List<ConversationTodoEntity>) {
         store[conversationId] = items
     }
+    override suspend fun listAll(): List<ConversationTodoEntity> = store.values.flatten()
 }

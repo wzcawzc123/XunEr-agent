@@ -378,6 +378,12 @@ internal object AgentBrowserSession {
     private fun navigate(args: JSONObject): BrowserToolResult {
         val rawUrl = args.optString("url").trim()
         if (rawUrl.isBlank()) throw BrowserFailure("INVALID_ARGUMENT", "navigate 缺少 url")
+        // 只允许 http/https：计划模式把 navigate 当只读操作放行，而 file:// 能读本地文件、
+        // content:// 能读应用数据、javascript:/data: 能执行脚本 —— 这些都不该由「导航」触发。
+        val scheme = rawUrl.substringBefore(':', missingDelimiterValue = "").lowercase()
+        if (scheme.isNotEmpty() && scheme != "http" && scheme != "https") {
+            throw BrowserFailure("INVALID_ARGUMENT", "navigate 只支持 http/https，拒绝 scheme=$scheme")
+        }
         val view = ensureWebView()
         val epoch = activeOperationEpoch
         val waiter = LoadWaiter()

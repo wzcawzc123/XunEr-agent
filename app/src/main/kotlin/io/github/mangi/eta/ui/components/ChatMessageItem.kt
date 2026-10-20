@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.components
 
+import io.github.mangi.eta.agent.plan.AgentPlanSuggestion
 import io.github.mangi.eta.ui.voice.SpeechReadAloudButton
 import android.graphics.BitmapFactory
 import android.util.Base64
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -97,12 +99,14 @@ import io.github.mangi.eta.ui.model.ToolActivityMessageUi
 import io.github.mangi.eta.ui.model.ToolSummaryMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.RichTooltip
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipAnchorPosition
 import top.yukonga.miuix.kmp.basic.TooltipBox
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TooltipDefaults
 import top.yukonga.miuix.kmp.basic.rememberTooltipState
 import top.yukonga.miuix.kmp.squircle.squircleBorder
@@ -197,6 +201,10 @@ internal fun ChatMessageItem(
     onDeleteMessage: (String) -> Unit = {},
     onRegenerateMessage: (String) -> Unit = {},
     onSelectReplyCandidate: (String, Int) -> Unit = { _, _ -> },
+    /** 模型建议进入计划模式时，用户点了建议条上的按钮。 */
+    onEnterPlanMode: () -> Unit = {},
+    /** 是否展示计划建议条（角色会话等不展示）。 */
+    planSuggestionAvailable: Boolean = true,
 ) {
     // 角色会话里所有 agent 回复都带署名头（语音浮层除外）；普通会话为 null 不加。
     val character = LocalRoleplayChat.current.takeUnless { assistantOverlay }
@@ -229,6 +237,8 @@ internal fun ChatMessageItem(
                         onRegenerate = { onRegenerateMessage(message.id) },
                         onEdit = { onEditMessage(message.id) },
                         onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
+                        onEnterPlanMode = onEnterPlanMode,
+                        planSuggestionAvailable = planSuggestionAvailable,
                         modifier = Modifier,
                     )
                 }
@@ -245,6 +255,8 @@ internal fun ChatMessageItem(
                     onRegenerate = { onRegenerateMessage(message.id) },
                     onEdit = { onEditMessage(message.id) },
                     onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
+                    onEnterPlanMode = onEnterPlanMode,
+                    planSuggestionAvailable = planSuggestionAvailable,
                     modifier = modifier,
                 )
             }
@@ -558,10 +570,22 @@ private fun AgentMessageBlock(
     onRegenerate: () -> Unit,
     onEdit: () -> Unit = {},
     onSelectCandidate: (Int) -> Unit = {},
+    onEnterPlanMode: () -> Unit = {},
+    planSuggestionAvailable: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
+    // 模型建议（只在回复完成后出现；流式中内容还在变，拆了会闪）。
+    val planSuggestion = remember(message.content, message.isStreaming) {
+        if (planSuggestionAvailable && !message.isStreaming) {
+            AgentPlanSuggestion.parse(message.content)
+        } else {
+            null
+        }
+    }
+    // 展示与复制都用去掉标记后的正文，用户不该看到 [[PLAN_SUGGESTION]]。
+    val displayContent = planSuggestion?.body ?: message.content
     var copied by remember(message.id) { mutableStateOf(false) }
     val keepStreamingMarkdown = remember(message.id) { message.isStreaming }
     var streamingRevealComplete by remember(message.id) {
@@ -615,22 +639,32 @@ private fun AgentMessageBlock(
             message.renderMarkdown -> {
                 SelectionContainer {
                     StaticMarkdown(
-                        content = message.content,
+                        content = displayContent,
                         tone = MarkdownTone.Answer,
                         parsed = completedDocument,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
-            message.content.isNotBlank() -> {
+            displayContent.isNotBlank() -> {
                 SelectionContainer {
                     Text(
-                        text = message.content,
+                        text = displayContent,
                         style = MiuixTheme.textStyles.body1,
                         color = MiuixTheme.colorScheme.onSurface,
                     )
                 }
             }
+        }
+
+        // 计划建议条：模型说"这个任务建议先出方案"，用户点一下才进入。
+        if (planSuggestion != null && revealComplete) {
+            PlanSuggestionBar(
+                reason = planSuggestion.reason,
+                enabled = messageActionsEnabled,
+                onEnterPlanMode = onEnterPlanMode,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
 
         if (
@@ -650,7 +684,7 @@ private fun AgentMessageBlock(
                 IconButton(
                     onClick = {
                         @Suppress("DEPRECATION")
-                        clipboardManager.setText(AnnotatedString(message.content))
+                        clipboardManager.setText(AnnotatedString(displayContent))
                         copied = true
                     },
                     minWidth = 30.dp,
@@ -1058,7 +1092,62 @@ private fun ToolSummaryInline(
 
 // ── 建议语 ────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 计划建议条：模型判断任务复杂时在回复末尾挂的建议，用户点一下才进入计划模式。
+ *
+ * 为什么不放工具栏：那一排全是同尺寸图标按钮，插入口会挤占空间且高度不齐
+ * （v3.13.8 真机反馈）；而建议天然出现在用户正在读的位置，转化路径最短。
+ */
+@Composable
+private fun PlanSuggestionBar(
+    reason: String?,
+    enabled: Boolean,
+    onEnterPlanMode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Checklist,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MiuixTheme.colorScheme.primary,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.chat_plan_suggestion_title),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            if (!reason.isNullOrBlank()) {
+                Text(
+                    text = reason,
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        TextButton(
+            text = stringResource(R.string.chat_plan_mode_enter),
+            onClick = onEnterPlanMode,
+            enabled = enabled,
+            colors = ButtonDefaults.textButtonColorsPrimary(),
+            minHeight = 32.dp,
+            textStyle = MiuixTheme.textStyles.footnote1,
+        )
+    }
+}
+
 @Composable
 private fun SuggestionChipsRow(
     message: SuggestionChipsMessageUi,

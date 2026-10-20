@@ -131,6 +131,26 @@ class AgentPlanModeStoreTest {
     }
 
     @Test
+    fun `主动放弃清空正文而文本取消保留`() = runBlocking {
+        val store = AgentPlanModeStore(FakePlanDao())
+        store.enterPlanning(conversationId, "plan-1", 100L)
+        store.submit(conversationId, "# 计划正文", 200L)
+
+        // 用户手打「取消」：历史里还留着那份计划，正文要保留供回看。
+        val kept = store.cancel(conversationId, 300L)!!
+        assertEquals(AgentPlanPhase.NORMAL, kept.phase)
+        assertEquals("# 计划正文", kept.markdown)
+
+        // UI 按钮主动放弃：这个计划不算数了，正文一起清，别变成下一份计划的干扰项。
+        store.enterPlanning(conversationId, "plan-2", 400L)
+        store.submit(conversationId, "# 新正文", 500L)
+        val dropped = store.cancel(conversationId, 600L, clearMarkdown = true)!!
+        assertEquals(AgentPlanPhase.NORMAL, dropped.phase)
+        assertNull("UI 主动放弃必须清空正文", dropped.approvedVersion)
+        assertEquals("", dropped.markdown)
+    }
+
+    @Test
     fun `注入范围随阶段与未完成项变化`() {
         // 计划结束后 markdown 与清单会保留供回看。若按"非 PLANNING 就注入"判断，
         // 之后的每一轮普通对话都会白背几千字旧计划 —— 这条锁住注入边界。

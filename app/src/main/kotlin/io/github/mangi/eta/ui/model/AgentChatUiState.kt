@@ -43,13 +43,6 @@ internal data class AgentChatUiState(
      * 因此这里即使短暂滞后（例如后台刚被自动任务改过）也不会导致越权执行。
      */
     val planPhase: AgentPlanPhase = AgentPlanPhase.NORMAL,
-    /**
-     * 待批准计划的正文预览（审批条直接用）。
-     *
-     * 之前用户要读方案得往上翻、找到 `exit_plan_mode` 的工具卡再展开，
-     * 所以审批条必须自带正文，而不是只说"计划已提交"。
-     */
-    val planPreview: String? = null,
 ) {
     val canCompactContext: Boolean get() = !isStreaming && messageEdit == null && history.any {
         !it.contextSummary && (it.role == "assistant" || it.role == "tool")

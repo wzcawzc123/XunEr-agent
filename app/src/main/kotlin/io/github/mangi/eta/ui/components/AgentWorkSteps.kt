@@ -1,6 +1,7 @@
 package io.github.mangi.eta.ui.components
 
 import androidx.compose.runtime.Immutable
+import io.github.mangi.eta.agent.plan.AgentPlanReceipt
 import io.github.mangi.eta.ui.model.AgentChatMessageUi
 import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
@@ -74,10 +75,16 @@ internal fun List<AgentChatMessageUi>.workSummary(): AgentWorkSummary = AgentWor
 /**
  * 折叠行下方的一行结果。成功的常态结果（如“完成”）不占行；终端输出取最后一行，
  * 因为命令的结论通常在末尾；失败去掉重复的“失败”前缀与日志用的 code= 尾巴。
+ *
+ * 计划回执特殊处理：只取回执头（"计划 vN 已提交…"），绝不取正文片段 ——
+ * 否则折叠行下面会出现一行计划正文的尾巴，甚至把结束标记漏出来。
  */
 internal fun ToolActivityMessageUi.outcomeLine(): String? {
     val summary = resultSummary?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    val lines = summary.lines().map(String::trim).filter(String::isNotEmpty)
+    // 计划回执：只用回执头参与后续计算。
+    val planHeader = AgentPlanReceipt.parse(summary)?.header
+    val effective = planHeader ?: summary
+    val lines = effective.lines().map(String::trim).filter(String::isNotEmpty)
     val head = lines.firstOrNull() ?: return null
     return when (status) {
         ToolActivityStatusUi.Running -> null
@@ -91,6 +98,8 @@ internal fun ToolActivityMessageUi.outcomeLine(): String? {
         ToolActivityStatusUi.Success -> {
             val output = lines.drop(1).lastOrNull { it != TRUNCATION_MARK }
             when {
+                // 计划回执的头两行是"已提交/等待批准"与操作说明，后者才是要展示的那一行。
+                planHeader != null && output != null -> output
                 output != null -> output
                 head in TRIVIAL_SUCCESS -> null
                 else -> head.removePrefix(SUCCESS_PREFIX).takeIf { it.isNotBlank() }

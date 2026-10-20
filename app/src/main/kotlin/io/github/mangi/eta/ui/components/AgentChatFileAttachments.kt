@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -47,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.model.AgentFileReference
 import io.github.mangi.eta.agent.model.AgentFileReferenceKind
+import io.github.mangi.eta.agent.plan.AgentPlanPhase
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.Icon
@@ -80,6 +82,19 @@ internal fun AgentAttachmentPickerButton(
     onAttachFiles: (List<String>) -> Unit,
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
+    /** 是否已处于计划模式：决定菜单项显示「计划」还是「退出计划」。 */
+    planActive: Boolean = false,
+    /**
+     * 当前阶段能否由用户主动退出。
+     *
+     * REVIEW（待批准）为 false：此时放弃计划必须走审批条的「取消计划」，
+     * 菜单项改成「计划待批准」并禁用点击，而不是给一个点了没反应的入口。
+     */
+    planActionable: Boolean = true,
+    /** 进入计划模式（只切换阶段，不发消息）。 */
+    onEnterPlanMode: () -> Unit = {},
+    /** 退出计划模式（纯本地放弃，不发消息）。 */
+    onExitPlanMode: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -140,12 +155,20 @@ internal fun AgentAttachmentPickerButton(
             maxHeight = popupMaxHeight,
         ) {
             val dismiss = LocalDismissState.current
+            // 「计划」放在附件项之后：它是模式开关而非附件，但入口藏在加号里，
+            // 避免在输入栏那一排固定占位（那一排全是同尺寸图标按钮，插一个带文字的
+            // pill 会挤占空间且高度不齐 —— 真机反馈）。
             val options = listOf(
                 stringResource(R.string.attachment_camera),
                 stringResource(R.string.attachment_image),
                 stringResource(R.string.attachment_file),
                 stringResource(R.string.attachment_folder),
                 stringResource(R.string.attachment_enter_path),
+                when {
+                    !planActionable -> stringResource(R.string.chat_plan_mode_pending)
+                    planActive -> stringResource(R.string.chat_plan_mode_exit)
+                    else -> stringResource(R.string.chat_plan_mode_enter)
+                },
             )
             ListPopupColumn {
                 options.forEachIndexed { index, option ->
@@ -174,6 +197,9 @@ internal fun AgentAttachmentPickerButton(
                                 4 -> {
                                     pathInput = ""
                                     showPathDialog = true
+                                }
+                                5 -> if (planActionable) {
+                                    if (planActive) onExitPlanMode() else onEnterPlanMode()
                                 }
                             }
                         },
@@ -280,6 +306,78 @@ internal fun PendingFileReferenceStrip(
                         tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 计划模式状态条：输入区里一个**可删除**的 chip，形态与 [PendingFileReferenceStrip] 完全同款。
+ *
+ * 为什么放在输入区而不是输入栏那一排：那一排全是同尺寸图标按钮，插一个带文字的 pill
+ * 会挤占空间且高度不齐（v3.13.8 真机反馈）；而输入区早有"附件 chip"这个先例，
+ * 复用它的形态用户零学习成本 —— 点 `×` 即退出计划模式，与删除附件同一个语义。
+ *
+ * @param phase 非 NORMAL 才显示；NORMAL 时调用方不应渲染（这里直接 return 兜底）。
+ * @param onRemove 退出计划模式（纯本地放弃：不发消息、不起 run）。
+ */
+@Composable
+internal fun PlanModeStrip(
+    phase: AgentPlanPhase,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = when (phase) {
+        AgentPlanPhase.PLANNING -> stringResource(R.string.chat_plan_mode_planning)
+        AgentPlanPhase.REVIEW -> stringResource(R.string.chat_plan_mode_review)
+        AgentPlanPhase.EXECUTING -> stringResource(R.string.chat_plan_mode_executing)
+        AgentPlanPhase.NORMAL -> return
+    }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .height(42.dp)
+                .squircleSurface(
+                    color = MiuixTheme.colorScheme.surfaceContainerHigh,
+                    cornerRadius = 14.dp,
+                )
+                .squircleBorder(
+                    width = 0.5.dp,
+                    color = MiuixTheme.colorScheme.outline.copy(alpha = 0.5f),
+                    cornerRadius = 14.dp,
+                )
+                .padding(start = 12.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Checklist,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MiuixTheme.colorScheme.primary,
+            )
+            Text(
+                text = label,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.chat_plan_mode_exit),
+                    modifier = Modifier.size(15.dp),
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                )
             }
         }
     }

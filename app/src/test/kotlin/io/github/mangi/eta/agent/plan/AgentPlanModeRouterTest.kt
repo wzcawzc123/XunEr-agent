@@ -141,6 +141,41 @@ class AgentPlanModeRouterTest {
     }
 
     @Test
+    fun `以执行开头的修改意见不会被当成批准`() {
+        // 回归点：前缀匹配时代，`startsWith("执行")` + 长度 ≤12 会把这句话判成批准，
+        // 直接进入 EXECUTING 并开始改设备。
+        val f = Fixture()
+        f.toReview()
+        val routed = AgentPlanModeRouter.route("执行前先确认备份", conversationId, f.modeStore, f.planStore, 3L)
+        assertEquals(
+            "修改意见必须留在 PLANNING，不能被当成批准",
+            AgentPlanPhase.PLANNING,
+            routed.phase,
+        )
+    }
+
+    @Test
+    fun `以取消开头的修改意见不会被当成取消计划`() {
+        val f = Fixture()
+        f.toReview()
+        val routed = AgentPlanModeRouter.route("取消按钮的颜色改成红色", conversationId, f.modeStore, f.planStore, 3L)
+        assertEquals(
+            "这是修改意见，不是放弃计划",
+            AgentPlanPhase.PLANNING,
+            routed.phase,
+        )
+        assertTrue(routed.prompt.contains("修改意见"))
+    }
+
+    @Test
+    fun `批准并执行这类明确整句仍然生效`() {
+        val f = Fixture()
+        f.toReview()
+        val routed = AgentPlanModeRouter.route("批准并执行", conversationId, f.modeStore, f.planStore, 3L)
+        assertEquals(AgentPlanPhase.EXECUTING, routed.phase)
+    }
+
+    @Test
     fun `执行中 plan 不会静默丢弃已批准计划`() {
         val f = Fixture()
         f.toReview()

@@ -27,6 +27,20 @@ internal object AndroguardCommand {
         return "$ANDROGUARD_PYTHON -c ${shellQuote(DEX_SCRIPT)} $apk $lim"
     }
 
+    private val ARG_SEPARATOR = Regex("\\s+")
+
+    /**
+     * 只读开关白名单。
+     *
+     * 包含分析选项（`-a`/`-s`/`-r`…）与**纯输出控制**（verbose/quiet/no-progress 之类，
+     * 只影响打印不影响写盘）；`-o` / `--output` / `--dump` 这类会写文件的选项故意不在其中。
+     */
+    private val ALLOWED_ARG_TOKENS = setOf(
+        "-a", "--all", "-s", "--simple", "-r", "--recursive", "-d", "--debug",
+        "-f", "--file-type", "--version",
+        "-v", "--verbose", "-q", "--quiet", "--no-progress",
+    )
+
     fun normalizeOperation(operation: String?): String =
         (operation ?: "").trim().lowercase().let { op ->
             if (op in ALLOWED_OPERATIONS) op else DEFAULT_OPERATION
@@ -36,16 +50,17 @@ internal object AndroguardCommand {
         (operation ?: "").trim().lowercase() == DEX_SCAN_OPERATION
 
     /**
-     * 对透传给 androguard CLI 的额外参数做白名单校验：仅允许常规 CLI 字符
-     * （字母/数字/=._:/-/空格/逗号）。一旦出现 shell 元字符（;|&$()<> 引号等），
-     * 整个参数段丢弃，防止命令注入。
+     * 透传给 androguard CLI 的额外参数：**逐 token 白名单**。
+     *
+     * 只做字符过滤是不够的：`-o /sdcard/out.xml` 全是合法字符，却能写文件 ——
+     * 计划模式把 `androguard_analyze` 当只读工具放行，这条路径直接绕过只读约束。
+     * 现在只接受明确列举的只读分析开关，出现任何不在名单里的 token 就整段丢弃。
      */
     internal fun sanitizeExtraArgs(raw: String): String {
         if (raw.isBlank()) return ""
-        val allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789=._:/- ,"
-        val safe = raw.all { it in allowed }
-        if (!safe) return ""
-        return " " + raw.trim()
+        val tokens = raw.trim().split(ARG_SEPARATOR).filter { it.isNotEmpty() }
+        if (tokens.isEmpty() || tokens.any { it !in ALLOWED_ARG_TOKENS }) return ""
+        return " " + tokens.joinToString(" ")
     }
 
     /** POSIX 单引号转义：单引号内无法直接出现单引号，用 '\'' 表示。 */

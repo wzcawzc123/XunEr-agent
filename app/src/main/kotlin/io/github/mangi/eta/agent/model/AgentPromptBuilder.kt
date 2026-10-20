@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
 import io.github.mangi.eta.agent.plan.AgentPlanPhase
+import io.github.mangi.eta.agent.plan.AgentPlanSuggestion
 import io.github.mangi.eta.agent.skill.SkillContext
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import org.json.JSONArray
@@ -210,6 +211,11 @@ internal object AgentPromptBuilder {
             )
         }
         planModeMessage(planPhase)?.let(messages::put)
+        // 普通阶段才提示"可以建议进入计划模式"：已在计划模式时这句没有意义，
+        // 且会与 planModeMessage 的只读约束重复。
+        if (planPhase == AgentPlanPhase.NORMAL) {
+            messages.put(systemMessage(AgentPlanSuggestion.promptInstruction()))
+        }
         roleplayContext?.personaMessage()?.let(messages::put)
         buildMemorySystemMessage(memoryContext, writable = roleplayContext == null)?.let(messages::put)
         buildSkillSystemMessage(skillContext)?.let(messages::put)
