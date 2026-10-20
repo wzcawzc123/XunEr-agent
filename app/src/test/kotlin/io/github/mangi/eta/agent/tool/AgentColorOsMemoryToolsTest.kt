@@ -9,6 +9,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentColorOsMemoryToolsTest {
+    @org.junit.Before
+    fun requirePosixSidecarSemantics() {
+        io.github.mangi.eta.testutil.PlatformAssumptions.requirePosixFileSemantics()
+    }
+
     @Test
     fun snapshotCopiesAllSqliteSidecars() {
         val command = buildColorOsMemorySnapshotCommand(

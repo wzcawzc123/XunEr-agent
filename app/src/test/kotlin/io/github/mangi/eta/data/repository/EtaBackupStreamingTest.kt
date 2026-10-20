@@ -31,6 +31,19 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class EtaBackupStreamingTest {
+    @org.junit.Before
+    fun requireRenameOverwriteSemantics() {
+        // 用例依赖 replaceAll 覆盖写入既有记忆文件；Windows 上 rename 不能覆盖，会静默失败。
+        io.github.mangi.eta.testutil.PlatformAssumptions.requireRenameOverwrite()
+    }
+
+    @org.junit.Before
+    fun bindCurrentApplication() {
+        // 与 EtaBackupRepositoryTest 同理：Robolectric 换测试类后要重绑记忆目录，
+        // 否则读到的是上一个类的文件，断言里会出现「原现实记忆」这种脏数据。
+        AgentMemoryRepository.rebindForTests(RuntimeEnvironment.getApplication())
+    }
+
     private lateinit var context: Context
 
     @Before

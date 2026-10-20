@@ -18,6 +18,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class CharacterMemoryRepositoryTest {
+    @org.junit.Before
+    fun requireRenameOverwriteSemantics() {
+        // AtomicFile 靠 rename 覆盖目标文件，Windows 上会静默失败（Android 设备不受影响）。
+        io.github.mangi.eta.testutil.PlatformAssumptions.requireRenameOverwrite()
+    }
+
     @get:Rule val temporaryFolder = TemporaryFolder()
 
     @Test
