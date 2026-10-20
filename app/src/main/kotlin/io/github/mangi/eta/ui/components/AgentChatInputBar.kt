@@ -216,9 +216,13 @@ internal fun AgentChatInputBar(
         // 条里**不放计划正文**：正文在对话流的计划消息里（Markdown 全渲染、可滚动），
         // 这里只放操作，避免"展开看不全 + 不能滚动"（v3.13.8 真机反馈）。
         AnimatedVisibility(
+            // isStreaming 必须参与可见性：批准后阶段会在运行时转为 EXECUTING，但 UI 的
+            // planPhase 要等事件/收尾才追上；执行期间若继续显示"等待你确认"+ 可点的批准按钮，
+            // 用户会以为批准没生效（真机实测：整个执行期审批条都挂着）。
             visible = planAvailable &&
                 AgentPlanModeEntry.showsApproval(planPhase) &&
-                !isEditingMessage,
+                !isEditingMessage &&
+                !isStreaming,
             enter = fadeIn(tween(160)) + expandVertically(tween(180)),
             exit = fadeOut(tween(100)) + shrinkVertically(tween(160)),
         ) {
@@ -542,12 +546,6 @@ private fun PlanApprovalBar(
                 onClick = onCancel,
             )
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = stringResource(R.string.chat_plan_review_footer),
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
     }
 }
 

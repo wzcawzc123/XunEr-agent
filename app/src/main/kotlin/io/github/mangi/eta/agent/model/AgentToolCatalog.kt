@@ -19,6 +19,12 @@ internal object AgentToolCatalog {
         planTools: Boolean = true,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
         localWebSearch: Boolean = true,
+        /**
+         * 当前计划阶段。只读阶段（PLANNING/REVIEW）只暴露只读工具，
+         * 见 [io.github.mangi.eta.agent.plan.AgentPlanModePolicy.exposes]。
+         */
+        planPhase: io.github.mangi.eta.agent.plan.AgentPlanPhase =
+            io.github.mangi.eta.agent.plan.AgentPlanPhase.NORMAL,
     ): JSONArray =
         capabilities.project(JSONArray().also { tools ->
             AgentContextAppToolCatalog.appendTo(tools)
@@ -47,5 +53,29 @@ internal object AgentToolCatalog {
                 AgentAndroguardToolCatalog.appendTo(tools)
                 AgentFileToolCatalog.appendTo(tools)
             }
-        })
+        }).let { projected -> filterForPhase(projected, planPhase) }
+
+    /**
+     * 只读阶段把写工具从**模型可见的目录**里整个去掉。
+     *
+     * 运行时拦截（`AgentPlanModePolicy.isBlocked`）是兜底；这里做的是更靠前的一层：
+     * 小模型看到 `todo_write` 就会选它，列表里根本没有就不会误用。
+     * 任何不在只读白名单里的工具（含 MCP 扩展工具）在只读阶段一律不暴露，
+     * 与运行时的白名单判定保持同一口径。
+     */
+    private fun filterForPhase(
+        tools: JSONArray,
+        planPhase: io.github.mangi.eta.agent.plan.AgentPlanPhase,
+    ): JSONArray {
+        if (!planPhase.isReadOnly) return tools
+        val kept = JSONArray()
+        for (index in 0 until tools.length()) {
+            val tool = tools.optJSONObject(index) ?: continue
+            val name = tool.optJSONObject("function")?.optString("name").orEmpty()
+            if (name.isNotEmpty() && io.github.mangi.eta.agent.plan.AgentPlanModePolicy.exposes(planPhase, name)) {
+                kept.put(tool)
+            }
+        }
+        return kept
+    }
 }

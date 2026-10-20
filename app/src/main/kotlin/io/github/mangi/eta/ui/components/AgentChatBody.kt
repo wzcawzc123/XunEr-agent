@@ -1025,11 +1025,15 @@ private fun AgentChatBottomBar(
         ) {
             // 进度条放在**输入区内部、最顶部**：父 Column 已有 surface 实体背景，
             // 这样它到输入框之间没有任何透明间隙（真机反馈「有留空、透字」）。
-            planUi?.let {
-                AgentPlanProgressBar(
-                    plan = it,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+            // 阶段为 NORMAL 时不显示：清单回执仍留在历史里，只按消息解析会把
+            // 「已取消/已完成」的计划继续显示成 0/N（真机实测：取消计划后进度条残留 0/3）。
+            if (planPhase != AgentPlanPhase.NORMAL) {
+                planUi?.let {
+                    AgentPlanProgressBar(
+                        plan = it,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
             }
             if (resumableInterrupted) {
                 Row(
@@ -1297,7 +1301,11 @@ private fun latestPlanUi(messages: List<AgentChatMessageUi>): AgentPlanUi? {
     for (index in messages.indices.reversed()) {
         val message = messages[index]
         if (message !is ToolActivityMessageUi) continue
-        if (message.toolName != io.github.mangi.eta.agent.plan.AgentPlanTool.NAME) continue
+        // 计划提交（exit_plan_mode）也会替换清单并带上清单回执，
+        // 只认 todo_write 的话，新计划提交后进度条会停在上一版（真机实测）。
+        val isChecklistSource = message.toolName == io.github.mangi.eta.agent.plan.AgentPlanTool.NAME ||
+            message.toolName == io.github.mangi.eta.agent.plan.AgentPlanModeTool.EXIT_NAME
+        if (!isChecklistSource) continue
         val text = message.resultSummary ?: continue
         val parsed = runCatching { AgentPlanUi.parseFrom(text) }.getOrNull()
         // 失败回执解析为 null：它不改变数据库里的清单，继续向前找最后一条成功回执。

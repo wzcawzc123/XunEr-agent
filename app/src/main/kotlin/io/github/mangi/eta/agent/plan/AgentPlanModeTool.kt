@@ -160,13 +160,34 @@ internal object AgentPlanModeTool {
         planStore.replaceBlocking(conversationId, validated, nowMillis)
         val state = modeStore.submitBlocking(conversationId, markdown, nowMillis)
 
-        return AgentPlanReceipt.build(
+        val receipt = AgentPlanReceipt.build(
             header = buildString {
                 append("计划 v${state.version} 已提交，共 ${validated.size} 步，等待用户批准。")
                 append("\n回复「批准」开始执行；回复「取消」放弃；其他内容将作为修改意见。")
                 append("\n在用户批准前，不要执行任何修改或设备操作。")
+                // 真机实测：模型看到本轮只有只读工具，就向用户断言"我没有能力执行这个计划"，
+                // 吓得用户以为批准没用。批准后是**新一轮**运行并解锁完整工具，这里说清楚。
+                append("\n注意：当前轮次只读是计划模式的约束；用户批准后会以完整工具执行，" +
+                    "不要因为本轮工具受限就断言计划无法执行。")
             },
             markdown = markdown,
         )
+        // 提交计划会**替换**清单，但进度条读的是「消息流里最后一条清单回执」。
+        // 只落库不写回执的话，界面会继续显示上一版计划的进度
+        // （真机实测：新计划 2 步，进度条却停在旧计划的 4/5）。
+        return receipt + "\n\n" + todoReceiptText(validated)
+    }
+
+    /**
+     * 把清单渲染成与 `todo_write` 同格式的回执文本。
+     *
+     * 进度条（`AgentPlanUi.parseFrom`）按这个格式解析，文案不能随手改：
+     * 「任务清单已更新：done/total 完成」+ 每行 `N. [状态] 标题`。
+     */
+    private fun todoReceiptText(items: List<AgentPlanItem>): String = buildString {
+        append("任务清单已更新：0/${items.size} 完成。本次变更：提交计划。")
+        items.forEachIndexed { index, item ->
+            append("\n\n${index + 1}. [${item.status.label}] ${item.subject}")
+        }
     }
 }

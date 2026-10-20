@@ -1074,6 +1074,20 @@ internal class AgentAppState(
         }
     }
 
+    /**
+     * run 进行中的计划阶段刷新（带节流）。
+     *
+     * 阶段由运行时在每轮开头路由（批准 → EXECUTING、exit_plan_mode → REVIEW），
+     * 只在收尾刷新会让 UI 在整个执行期都停在旧阶段。工具事件频次不高，节流到 ~1s 足够。
+     */
+    private var lastPlanPhaseRefreshAt = 0L
+    private fun refreshPlanPhaseThrottled(conversationId: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastPlanPhaseRefreshAt < 1_000) return
+        lastPlanPhaseRefreshAt = now
+        refreshPlanPhase(conversationId)
+    }
+
     private fun applyPlanPhase(conversationId: String, phase: AgentPlanPhase) {
         val current = conversationsById[conversationId]
             ?: homeState.takeIf { selectedConversationId == conversationId }
@@ -1986,8 +2000,12 @@ internal class AgentAppState(
         when (event) {
             is AgentEvent.UserSupplementReceived ->
                 insertSupplementMessage(runId, event.index, event.text, persist = persistSupplement)
-            is AgentEvent.RunStarted -> if (runId in stopRequestedRunIds) scope.launch(Dispatchers.IO) {
-                AgentRuntimeClient(appContext, AndroidAgentLogger).cancelRun(runId)
+            is AgentEvent.RunStarted -> {
+                // 运行时已在此前完成计划路由（批准/修改意见），这里让 UI 阶段立刻跟上。
+                conversationIdForRun(runId)?.let(::refreshPlanPhaseThrottled)
+                if (runId in stopRequestedRunIds) scope.launch(Dispatchers.IO) {
+                    AgentRuntimeClient(appContext, AndroidAgentLogger).cancelRun(runId)
+                }
             }
             // 流式增量只刷新消息，不推进会话时间戳，也不重算侧栏摘要；其余可见变化两者都更新。
             is AgentEvent.AssistantBlockDelta -> updateMessages(runId, updateTimestamp = false) { messages ->
@@ -1998,6 +2016,8 @@ internal class AgentAppState(
                 updateRunTrace(runId) { messages ->
                     runMessageProjector.finishTool(runId, event, messages)
                 }
+                // exit_plan_mode 会把阶段推到 REVIEW，工具完成时刷新才能马上出审批条。
+                conversationIdForRun(runId)?.let(::refreshPlanPhaseThrottled)
             }
 
             is AgentEvent.HostedToolStarted -> {

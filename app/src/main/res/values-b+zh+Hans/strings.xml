@@ -1132,7 +1132,6 @@
   <string name="chat_plan_review_title">计划已提交，等待你确认</string>
   <string name="chat_plan_suggestion_title">建议先出方案再动手</string>
   <string name="chat_plan_review_hint">完整计划见上方消息；批准后开始执行，也可以直接在下面输入修改意见。</string>
-  <string name="chat_plan_review_footer">批准后开始执行；也可以直接在下面输入修改意见。</string>
   <string name="chat_plan_approve">批准并执行</string>
   <string name="chat_plan_cancel">取消计划</string>
   <string name="chat_plan_input_hint">描述任务，我先只读调研，再给你方案</string>

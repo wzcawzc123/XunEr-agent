@@ -1111,7 +1111,6 @@
   <string name="chat_plan_review_title">計劃已提交，等待你確認</string>
   <string name="chat_plan_suggestion_title">建議先出方案再動手</string>
   <string name="chat_plan_review_hint">完整計劃見上方訊息；批准後開始執行，也可以直接在下面輸入修改意見。</string>
-  <string name="chat_plan_review_footer">批准後開始執行；也可以直接在下面輸入修改意見。</string>
   <string name="chat_plan_approve">批准並執行</string>
   <string name="chat_plan_cancel">取消計劃</string>
   <string name="chat_plan_input_hint">描述任務，我先只讀調研，再給你方案</string>

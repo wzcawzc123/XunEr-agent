@@ -83,6 +83,16 @@ class PlanModeUiContractTest {
     }
 
     @Test
+    fun `执行期间不再显示审批条`() {
+        // 回归点：批准后阶段在运行时转 EXECUTING，但 UI 的 planPhase 要等收尾才追上；
+        // 整个执行期审批条都挂着"等待你确认"，用户会以为批准没生效（真机实测）。
+        assertTrue(
+            "审批条可见性必须排除 isStreaming",
+            inputBar.contains("showsApproval(planPhase)") && inputBar.contains("!isStreaming"),
+        )
+    }
+
+    @Test
     fun `审批条不再承载计划正文`() {
         assertFalse(
             "审批条不能再用三行截断展示正文（展开后无滚动容器会裁剪）",

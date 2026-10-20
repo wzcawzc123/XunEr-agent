@@ -168,6 +168,7 @@ internal object AgentModelClient {
                 planTools = planToolsEnabled,
                 capabilities = capabilities,
                 localWebSearch = !config.usesHostedWebSearch,
+                planPhase = planPhase,
             )
             for (index in 0 until additionalTools.length()) {
                 tools.put(additionalTools.opt(index))

@@ -58,6 +58,26 @@ internal object AgentPlanModePolicy {
         "navigate", "get_readable", "find_elements", "screenshot", "get_text", "read", "wait",
     )
 
+    /**
+     * 目录级过滤：这个阶段该不该**把工具展示给模型**。
+     *
+     * 与 [isBlocked] 的分工：这里是「不给模型看」，那里是「看到了也拦住」。
+     * 真机实测发现小模型（sensenova-flash-lite）看到 `todo_write` 就会去选它，
+     * 即使提示词写明"只读调研、用 exit_plan_mode 提交"——工具列表里没有写工具，
+     * 它就无从选错。运行时拦截仍然保留作为兜底（防止提示词注入或历史消息里带出旧工具名）。
+     */
+    fun exposes(phase: AgentPlanPhase, toolName: String): Boolean {
+        if (!phase.isReadOnly) return true
+        // 两个闸门只在「计划中」可见；待批准阶段再提交/重进会在 [isBlocked] 被拦，
+        // 目录里也一并撤掉，保证"模型能看到的"与"运行时允许的"是同一个集合。
+        if (toolName == AgentPlanModeTool.EXIT_NAME || toolName == AgentPlanModeTool.ENTER_NAME) {
+            return phase == AgentPlanPhase.PLANNING
+        }
+        // browser_use 是复合工具，动作级约束在 [isBlocked] 里按 action 判定。
+        if (toolName == "browser_use") return true
+        return toolName in READ_ONLY
+    }
+
     fun isBlocked(phase: AgentPlanPhase, toolName: String, args: JSONObject? = null): Boolean {
         if (!phase.isReadOnly) return false
         // 计划阶段唯一的写操作：提交计划本身。

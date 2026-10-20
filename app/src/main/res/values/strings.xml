@@ -1150,7 +1150,6 @@
   <string name="chat_plan_review_title">Plan submitted. Waiting for your approval.</string>
   <string name="chat_plan_suggestion_title">Suggested: plan before acting</string>
   <string name="chat_plan_review_hint">Full plan is in the message above; approve to start, or type changes below.</string>
-  <string name="chat_plan_review_footer">Approve to start, or type changes below.</string>
   <string name="chat_plan_approve">Approve &amp; run</string>
   <string name="chat_plan_cancel">Discard plan</string>
   <string name="chat_plan_input_hint">Describe the task. I\'ll research first, then propose a plan.</string>

@@ -48,6 +48,13 @@ internal class AgentTraceFormatter {
             "wait_for_text" -> "等待文本出现"
             "wait_for_package" -> "等待应用就绪"
             "open_system_panel" -> "打开系统面板"
+            // 计划模式三件套：此前走 else 分支落到「准备执行」，工具卡标题与实际动作完全对不上。
+            "enter_plan_mode" -> "进入计划模式"
+            "exit_plan_mode" -> "提交计划"
+            "todo_write" -> "更新任务清单"
+            "create_auto_task" -> "创建自动任务"
+            "list_auto_tasks" -> "查看自动任务"
+            "delete_auto_task" -> "删除自动任务"
             "read_image" -> "查看图片"
             AgentConversationToolCatalog.READ_HISTORY -> "读取当前会话历史"
             "memory_get", "character_memory_get" -> summarizeMemoryGetArguments(toolCall.argumentsJson)
