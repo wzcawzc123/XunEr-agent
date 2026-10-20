@@ -92,6 +92,9 @@ internal fun AgentMemoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
     var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
+    // 「整理」会重新加载记忆文件并覆盖草稿（见 AgentMemoryStore.rollupMemory → refreshMemory），
+    // 与「切换目标」同理：有未保存修改时必须先确认，否则一次误触就丢了编辑。
+    var pendingRollup by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -152,7 +155,10 @@ internal fun AgentMemoryScreen(
                             onAction(AgentMemoryAction.SwitchTarget(target))
                         }
                     },
-                    onRollup = { onAction(AgentMemoryAction.Rollup) },
+                    onRollup = {
+                        if (state.hasUnsavedChanges) pendingRollup = true
+                        else onAction(AgentMemoryAction.Rollup)
+                    },
                 )
                 // v3.13.3：不再折叠（去掉 OverviewHeader 展开/收起交互），
                 // 设置区直接平铺；热力图已移除（无人使用）。
@@ -214,6 +220,24 @@ internal fun AgentMemoryScreen(
                 onConfirm = {
                     pendingTargetSwitch = null
                     onAction(AgentMemoryAction.SwitchTarget(pending))
+                },
+            )
+        }
+
+        EtaWindowDialog(
+            show = true,
+            title = "整理短期记忆？",
+            summary = "整理会重新读取记忆文件并覆盖当前编辑，未保存的修改将丢失。",
+            onDismissRequest = { pendingRollup = false },
+        ) {
+            MiuixDialogActions(
+                confirmText = "丢弃并整理",
+                destructive = true,
+                confirmEnabled = !state.isSaving,
+                onCancel = { pendingRollup = false },
+                onConfirm = {
+                    pendingRollup = false
+                    onAction(AgentMemoryAction.Rollup)
                 },
             )
         }

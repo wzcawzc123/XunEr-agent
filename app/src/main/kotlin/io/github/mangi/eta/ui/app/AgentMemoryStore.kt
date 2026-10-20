@@ -112,7 +112,9 @@ internal class AgentMemoryStore(
 
     /** 更新搜索关键词（仅过滤 draft 展示，不落盘）。 */
     fun updateSearchQuery(query: String) {
-        memoryState = memoryState.copy(searchQuery = query.trim())
+        // 不 trim：输入框是受控的，这里 trim 会把刚敲的空格吃掉，
+        // 导致「long term」无法输入（真机反馈）。空白只在过滤时忽略。
+        memoryState = memoryState.copy(searchQuery = query)
     }
 
     /**

@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,33 +28,40 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.cost.AgentCostRepository
 import io.github.mangi.eta.agent.cost.AgentCostSummary
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.ui.components.EtaCard
 import io.github.mangi.eta.ui.components.EtaPreferenceGroupItem
 import io.github.mangi.eta.ui.components.EtaPreferenceRow
+import io.github.mangi.eta.ui.components.MiuixScaffold
+import io.github.mangi.eta.ui.layout.horizontalCutoutPadding
 import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 用量统计页。
+/** 用量统计页。
  *
- * v3.13.8 重排：原来三张卡各带一份标题+副标题，六个数字撑一整屏、信息密度极低。
+ * v3.13.8 重排内容：原来三张卡各带一份标题+副标题，六个数字撑一整屏、信息密度极低。
  * 现在按「结论 → 明细」两层组织：
  * 1. **Hero 卡**：真正按全价付钱的「计费输入」放大展示，缓存命中率与"省了多少"作为
  *    它的解释 —— 用户扫一眼就能回答"这次为什么没超预算"；
  * 2. **明细卡**：全部原始数字收进一张卡的分行里，去掉重复的卡片外壳开销；
  * 3. **按模型**：保留（v3.13.4），钱花在哪个模型上一目了然。
  *
+ * v3.13.9 统一页面骨架：标题改走 [MiuixScaffold] 的 TopAppBar（与其他页同款居中标题、
+ * 高度与返回键）。此前这页是唯一自己写左对齐 `Text` 的页面，观感与记忆/角色页割裂
+ * （真机反馈）。这条约定由 `AgentUsageScreenLayoutTest` 锁死。
+ *
  * 刻意只读、无副作用、无网络：这一页不产生任何费用。
  * 数据在进入页面时读一次，支持下拉刷新（U4，v3.13.4）。
  */
 @Composable
-internal fun AgentUsageScreen() {
+internal fun AgentUsageScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var all by remember { mutableStateOf<AgentCostSummary?>(null) }
     var refreshing by remember { mutableStateOf(false) }
@@ -78,43 +87,46 @@ internal fun AgentUsageScreen() {
 
     LaunchedEffect(Unit) { load() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            // 不透明底色：否则会透出下层被覆盖的设置页（真机反馈「页面成了这样」）。
-            .background(MiuixTheme.colorScheme.surface),
-    ) {
-        PullToRefresh(
-            isRefreshing = refreshing,
-            onRefresh = { refreshing = true },
+    MiuixScaffold(
+        title = stringResource(R.string.route_usage_stats),
+        onBack = onBack,
+    ) { paddingValues, scrollBehavior, sidePadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalCutoutPadding()
+                .padding(top = paddingValues.calculateTopPadding())
+                .padding(horizontal = sidePadding)
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .navigationBarsPadding(),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            PullToRefresh(
+                isRefreshing = refreshing,
+                onRefresh = { refreshing = true },
             ) {
-                Text(
-                    text = "用量统计",
-                    style = MiuixTheme.textStyles.title2,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                // 副标题只留一句；轮次放 hero/明细里，不再单独占一行解释。
-                Text(
-                    text = "统计所有会话已发出的请求；本地提示与占位不计入。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    // 副标题只留一句；轮次放 hero/明细里，不再单独占一行解释。
+                    Text(
+                        text = "统计所有会话已发出的请求；本地提示与占位不计入。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
 
-                val summary = all
-                when {
-                    summary == null -> LoadingCard()
-                    summary.isEmpty -> EmptyCard()
-                    else -> {
-                        HeroCard(summary)
-                        DetailCard(summary)
-                        if (summary.byModel.isNotEmpty()) ByModelCard(summary)
+                    val summary = all
+                    when {
+                        summary == null -> LoadingCard()
+                        summary.isEmpty -> EmptyCard()
+                        else -> {
+                            HeroCard(summary)
+                            DetailCard(summary)
+                            if (summary.byModel.isNotEmpty()) ByModelCard(summary)
+                        }
                     }
                 }
             }

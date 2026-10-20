@@ -88,5 +88,31 @@ internal data class AgentCostSummary(
             )
         }
 
+        /**
+         * 由「按模型分组」汇总出总账。
+         *
+         * 抽成纯函数的原因：总账与分组必须是同一份数据的两种视角。此前两者分别走
+         * `tokenUsageAll()` 与 `tokenUsageByModel()`，UI 又只读总账，导致分组卡片
+         * 永远为空且测试测不到（v3.13.9 修复）。现在总账由分组求和而来，口径天然一致。
+         */
+        fun fromModels(models: List<ByModel>): AgentCostSummary {
+            val summed = fromRows(
+                models.map { model ->
+                    Row(
+                        inputTokens = model.inputTokens,
+                        cachedTokens = model.cachedTokens,
+                        outputTokens = model.outputTokens,
+                        reasoningTokens = model.reasoningTokens,
+                    )
+                },
+            )
+            // 轮次必须用各模型的真实值累加：fromRows 是按"行"计数的（一个模型一行），
+            // 直接沿用会把总轮次算成模型个数，与分组之和不等。
+            return summed.copy(
+                turns = models.sumOf { it.turns },
+                byModel = models.sortedByDescending { it.inputTokens },
+            )
+        }
+
     }
 }

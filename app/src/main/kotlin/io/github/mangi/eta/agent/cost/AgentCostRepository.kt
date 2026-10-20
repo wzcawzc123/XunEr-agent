@@ -21,12 +21,14 @@ internal class AgentCostRepository(private val dao: ConversationDao) {
         return projection.toSummary()
     }
 
-    /** 全部会话的累计用量（「总账」）。 */
-    fun all(): AgentCostSummary {
-        val projection = runCatching { dao.tokenUsageAll() }.getOrNull()
-            ?: return AgentCostSummary.EMPTY
-        return projection.toSummary()
-    }
+    /**
+     * 全部会话的累计用量（「总账」）。
+     *
+     * 直接复用 [byModel]：总账与按模型分组是同一份数据的两种视角，
+     * 分两次查询会出现「总账有数、分组为空」这种自相矛盾的状态
+     * （v3.13.4 的按模型卡片因此从未显示过，见 v3.13.9 修复）。
+     */
+    fun all(): AgentCostSummary = byModel()
 
     /** 按模型分组的总账（U3，v3.13.4）：总账 + 各模型小结。 */
     fun byModel(): AgentCostSummary {
@@ -43,18 +45,8 @@ internal class AgentCostRepository(private val dao: ConversationDao) {
                 reasoningTokens = row.reasoningTokens.coerceAtLeast(0L),
             )
         }
-        // 总账 = 各模型之和（与 tokenUsageAll 同口径）。
-        val total = AgentCostSummary.fromRows(
-            byModel.map { model ->
-                AgentCostSummary.Row(
-                    inputTokens = model.inputTokens,
-                    cachedTokens = model.cachedTokens,
-                    outputTokens = model.outputTokens,
-                    reasoningTokens = model.reasoningTokens,
-                )
-            },
-        )
-        return total.copy(byModel = byModel.sortedByDescending { it.inputTokens })
+        // 总账 = 各模型之和（与 tokenUsageAll 同口径）；统一走纯函数，避免两处各算一遍。
+        return AgentCostSummary.fromModels(byModel)
     }
 
     /**

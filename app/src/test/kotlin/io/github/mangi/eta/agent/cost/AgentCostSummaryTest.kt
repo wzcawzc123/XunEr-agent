@@ -118,3 +118,51 @@ class AgentCostSummaryTest {
         assertEquals(60L, total.cachedTokens)
     }
 }
+
+/** v3.13.9：总账与「按模型」必须是同一份数据的两种视角，分组不许为空。 */
+class AgentCostSummaryFromModelsTest {
+    private fun model(id: String, input: Long, cached: Long, out: Long) =
+        AgentCostSummary.ByModel(
+            modelId = id,
+            turns = 2,
+            inputTokens = input,
+            cachedTokens = cached,
+            outputTokens = out,
+            reasoningTokens = 0,
+        )
+
+    @Test
+    fun `总账等于各模型之和`() {
+        val summary = AgentCostSummary.fromModels(
+            listOf(
+                model("a", input = 1_000, cached = 900, out = 10),
+                model("b", input = 500, cached = 0, out = 5),
+            ),
+        )
+        assertEquals(4, summary.turns)
+        assertEquals(1_500, summary.inputTokens)
+        assertEquals(900, summary.cachedTokens)
+        assertEquals(15, summary.outputTokens)
+    }
+
+    @Test
+    fun `分组按输入 token 降序且不为空`() {
+        // 这条断言直接守住「按模型卡片永远不显示」那个回归：
+        // 只要 fromModels 没把 byModel 填上，渲染条件 isNotEmpty() 就恒假。
+        val summary = AgentCostSummary.fromModels(
+            listOf(
+                model("small", input = 100, cached = 0, out = 1),
+                model("large", input = 9_000, cached = 8_000, out = 20),
+            ),
+        )
+        assertEquals(listOf("large", "small"), summary.byModel.map { it.modelId })
+        assertEquals(1_000L, summary.byModel.first().billableInputTokens)
+    }
+
+    @Test
+    fun `空分组得到空总结而不报错`() {
+        val summary = AgentCostSummary.fromModels(emptyList())
+        assertTrue(summary.isEmpty)
+        assertTrue(summary.byModel.isEmpty())
+    }
+}
