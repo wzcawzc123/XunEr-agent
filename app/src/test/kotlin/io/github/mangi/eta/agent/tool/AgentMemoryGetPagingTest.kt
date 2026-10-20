@@ -26,6 +26,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class AgentMemoryGetPagingTest {
+    @org.junit.Before
+    fun bindCurrentApplication() {
+        // Robolectric 每个测试类换一个 Application，单例需要重绑到当前 filesDir。
+        AgentMemoryRepository.rebindForTests(RuntimeEnvironment.getApplication())
+    }
+
     @Test
     fun pagedReadTellsWhereToContinue() {
         writeLongMemory()

@@ -1,5 +1,6 @@
 package io.github.mangi.eta.data.db.plan
 
+import kotlinx.serialization.Serializable
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
@@ -23,6 +24,7 @@ import androidx.room.Upsert
     primaryKeys = ["conversation_id", "item_id"],
     indices = [Index(value = ["conversation_id", "position"])],
 )
+@Serializable
 internal data class ConversationTodoEntity(
     @ColumnInfo(name = "conversation_id") val conversationId: String,
     @ColumnInfo(name = "item_id") val itemId: String,
@@ -49,6 +51,10 @@ internal interface ConversationTodoDao {
         "SELECT * FROM conversation_todos WHERE conversation_id = :conversationId ORDER BY position ASC",
     )
     fun listBlocking(conversationId: String): List<ConversationTodoEntity>
+
+    /** 全量导出用：备份要把所有会话的清单一起带走。 */
+    @Query("SELECT * FROM conversation_todos ORDER BY conversation_id ASC, position ASC")
+    suspend fun listAll(): List<ConversationTodoEntity>
 
     @Upsert
     suspend fun upsert(items: List<ConversationTodoEntity>)

@@ -8,6 +8,9 @@ import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.data.db.ConversationContextCheckpointEntity
 import io.github.mangi.eta.data.db.ConversationEntity
 import io.github.mangi.eta.data.db.ConversationMessageEntity
+import io.github.mangi.eta.data.db.autotask.AgentTaskEntity
+import io.github.mangi.eta.data.db.plan.ConversationPlanEntity
+import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 import java.io.File
 import java.io.FilterInputStream
 import java.io.FilterOutputStream
@@ -35,7 +38,11 @@ internal object EtaBackupJsonStreams {
     const val CONVERSATIONS = "conversations"
     const val MESSAGES = "messages"
     const val CHECKPOINTS = "contextCheckpoints"
-    private val recordFields = setOf(CONVERSATIONS, MESSAGES, CHECKPOINTS)
+    /** v4 起随备份携带的用户资产：任务清单、计划正文、自动任务。 */
+    const val TODOS = "conversationTodos"
+    const val PLANS = "conversationPlans"
+    const val TASKS = "agentTasks"
+    private val recordFields = setOf(CONVERSATIONS, MESSAGES, CHECKPOINTS, TODOS, PLANS, TASKS)
     private val knownFields = EtaBackupDocument.serializer().descriptor.let { descriptor ->
         (0 until descriptor.elementsCount).mapTo(mutableSetOf(), descriptor::getElementName)
     }
@@ -129,6 +136,9 @@ internal object EtaBackupJsonStreams {
         suspend fun conversations(action: suspend (ConversationEntity) -> Unit) = records(CONVERSATIONS, action)
         suspend fun messages(action: suspend (ConversationMessageEntity) -> Unit) = records(MESSAGES, action)
         suspend fun checkpoints(action: suspend (ConversationContextCheckpointEntity) -> Unit) = records(CHECKPOINTS, action)
+        suspend fun todos(action: suspend (ConversationTodoEntity) -> Unit) = records(TODOS, action)
+        suspend fun plans(action: suspend (ConversationPlanEntity) -> Unit) = records(PLANS, action)
+        suspend fun tasks(action: suspend (AgentTaskEntity) -> Unit) = records(TASKS, action)
 
         private suspend inline fun <reified T> records(field: String, noinline action: suspend (T) -> Unit) {
             val file = File(directory, "$field.json")

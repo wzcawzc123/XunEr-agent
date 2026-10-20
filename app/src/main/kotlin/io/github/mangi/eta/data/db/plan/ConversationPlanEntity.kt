@@ -1,5 +1,6 @@
 package io.github.mangi.eta.data.db.plan
 
+import kotlinx.serialization.Serializable
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
@@ -19,6 +20,7 @@ import androidx.room.Upsert
  * 历史版本不做表内保留（后续如需审计，再加 `plan_events`）。
  */
 @Entity(tableName = "conversation_plans")
+@Serializable
 internal data class ConversationPlanEntity(
     @PrimaryKey
     @ColumnInfo(name = "conversation_id") val conversationId: String,
@@ -40,6 +42,10 @@ internal interface ConversationPlanDao {
     /** 工具与运行时在后台线程同步读取，理由同 ConversationTodoDao.listBlocking。 */
     @Query("SELECT * FROM conversation_plans WHERE conversation_id = :conversationId")
     fun getBlocking(conversationId: String): ConversationPlanEntity?
+
+    /** 全量导出用：计划正文是用户资产，必须随备份走。 */
+    @Query("SELECT * FROM conversation_plans ORDER BY conversation_id ASC")
+    suspend fun listAll(): List<ConversationPlanEntity>
 
     @Upsert
     suspend fun upsert(plan: ConversationPlanEntity)

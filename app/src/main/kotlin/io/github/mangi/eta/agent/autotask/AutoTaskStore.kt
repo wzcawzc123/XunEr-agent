@@ -32,7 +32,6 @@ internal class AutoTaskStore(private val dao: AgentTaskDao) {
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 
     /** 标记执行结果。第一版语义：跑过即完成，之后不再被选中。 */
-    suspend fun markRan(id: String, at: Long, result: String?) = dao.markRan(id, at, result)
 
     suspend fun delete(id: String) = dao.delete(id)
 

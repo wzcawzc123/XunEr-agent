@@ -526,6 +526,18 @@ internal object AgentMemoryRepository : MemoryRepository {
         }
     }
 
+    /**
+     * 仅供测试：把单例重新绑到当前 Application 的目录。
+     *
+     * [init] 只在首次调用时生效，而 Robolectric 每个测试类都会新建 Application
+     * （`filesDir` 不同）。不重绑的话，后续测试类的读写全部落到上一个类的目录，
+     * 表现为「写入成功但读出来是空的」这类顺序依赖——只在跑全量时复现，单跑必过。
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun rebindForTests(context: Context) {
+        store = AgentMemoryStore(context.applicationContext.filesDir)
+    }
+
     override fun snapshot(): AgentMemorySnapshot {
         ensureInitialized()
         return store.snapshot()

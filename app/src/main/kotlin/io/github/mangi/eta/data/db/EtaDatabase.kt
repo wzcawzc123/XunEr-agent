@@ -35,7 +35,7 @@ import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
         ConversationPlanEntity::class,
         AgentTaskEntity::class,
     ],
-    version = 29,
+    version = EtaDatabase.SCHEMA_VERSION,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -50,6 +50,16 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun agentTaskDao(): AgentTaskDao
 
     companion object {
+        /**
+         * 当前 schema 版本。
+         *
+         * 单一来源：`@Database(version = ...)` 与 [MIGRATIONS] 的末尾版本都以它为准，
+         * `EtaDatabaseMigrationTest` 会断言两者首尾相接 —— 加版本号却漏写迁移会立刻变红，
+         * 而不是等到线上 `fallbackToDestructiveMigration` 把用户数据清空。
+         */
+        internal const val SCHEMA_VERSION = 29
+
+
         @Volatile
         private var instance: EtaDatabase? = null
 
@@ -60,31 +70,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                     EtaDatabase::class.java,
                     "eta.db",
                 )
-                    .addMigrations(
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13,
-                        MIGRATION_13_14,
-                        MIGRATION_14_15,
-                        MIGRATION_15_16,
-                        MIGRATION_16_17,
-                        MIGRATION_17_18,
-                        MIGRATION_18_19,
-                        MIGRATION_19_20,
-                        MIGRATION_20_21,
-                        MIGRATION_21_22,
-                        MIGRATION_22_23,
-                        MIGRATION_23_24,
-                        MIGRATION_24_25,
-                        MIGRATION_25_26,
-                        MIGRATION_26_27,
-                        MIGRATION_27_28,
-                        MIGRATION_28_29,
-                    )
+                    .addMigrations(*DATABASE_MIGRATIONS)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
                         override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -409,3 +395,40 @@ internal abstract class EtaDatabase : RoomDatabase() {
         }
     }
 }
+
+
+/**
+ * 完整迁移链（生产与测试共用同一份）。
+ *
+ * 定义在文件末尾而不是 companion 里：`companion object` 的初始化早于文件级 val，
+ * 在里面直接引用 MIGRATION_x 会触发 "must be initialized"。
+ *
+ * 以前测试里手抄了一份列表，新增迁移时两边可以不一致而测试全绿；现在唯一来源在这里 ——
+ * 加了 `SCHEMA_VERSION` 却漏加迁移，`EtaDatabaseMigrationTest` 的「迁移链连续」用例会立刻变红，
+ * 而不是等线上 `fallbackToDestructiveMigration` 把用户数据清空。
+ */
+internal val DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
+    EtaDatabase.MIGRATION_6_7,
+    EtaDatabase.MIGRATION_7_8,
+    EtaDatabase.MIGRATION_8_9,
+    EtaDatabase.MIGRATION_9_10,
+    EtaDatabase.MIGRATION_10_11,
+    EtaDatabase.MIGRATION_11_12,
+    EtaDatabase.MIGRATION_12_13,
+    EtaDatabase.MIGRATION_13_14,
+    EtaDatabase.MIGRATION_14_15,
+    EtaDatabase.MIGRATION_15_16,
+    EtaDatabase.MIGRATION_16_17,
+    EtaDatabase.MIGRATION_17_18,
+    EtaDatabase.MIGRATION_18_19,
+    EtaDatabase.MIGRATION_19_20,
+    EtaDatabase.MIGRATION_20_21,
+    EtaDatabase.MIGRATION_21_22,
+    EtaDatabase.MIGRATION_22_23,
+    EtaDatabase.MIGRATION_23_24,
+    EtaDatabase.MIGRATION_24_25,
+    EtaDatabase.MIGRATION_25_26,
+    EtaDatabase.MIGRATION_26_27,
+    EtaDatabase.MIGRATION_27_28,
+    EtaDatabase.MIGRATION_28_29,
+)

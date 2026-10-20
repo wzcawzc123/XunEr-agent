@@ -85,10 +85,6 @@ internal object AutoTaskDispatcher {
         pending.removeIf { it.taskId == taskId }
     }
 
-    /** 清空全部排队项（例如会话被删除）。 */
-    fun clearAll() {
-        pending.clear()
-    }
 
     /**
      * 轮次结束时调用：把排队中的任务投递出去。

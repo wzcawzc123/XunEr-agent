@@ -101,6 +101,9 @@ internal object AgentConversationStore {
                             // conversation_todos / conversation_plans 没有外键级联：不显式清理会永久留下孤儿行。
                             AgentPlanStore(database.conversationTodoDao()).clear(id)
                             AgentPlanModeStore(database.conversationPlanDao()).clear(id)
+                            // agent_tasks 同理：不清掉的话任务会继续到点触发，
+                            // 往一个已删除的会话投递并持续计费（结果写不进去，只留 FK 异常日志）。
+                            database.agentTaskDao().deleteByConversation(id)
                         }
                         for ((id, state) in current) {
                             val old = previous[id].takeIf { id in stored }

@@ -3,6 +3,9 @@ package io.github.mangi.eta.data.repository
 import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.data.db.ConversationContextCheckpointEntity
 import io.github.mangi.eta.data.db.ConversationEntity
+import io.github.mangi.eta.data.db.autotask.AgentTaskEntity
+import io.github.mangi.eta.data.db.plan.ConversationPlanEntity
+import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 import io.github.mangi.eta.data.db.ConversationMessageEntity
 import io.github.mangi.eta.data.db.ConversationStateEntity
 import io.github.mangi.eta.data.db.EtaDatabase
@@ -34,6 +37,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class EtaBackupRepositoryTest {
+    @org.junit.Before
+    fun bindCurrentApplication() {
+        // Robolectric 每个测试类换一个 Application，记忆单例需要重绑到当前 filesDir。
+        AgentMemoryRepository.rebindForTests(RuntimeEnvironment.getApplication())
+    }
+
     private val context = RuntimeEnvironment.getApplication()
 
     @Before
@@ -269,4 +278,94 @@ class EtaBackupRepositoryTest {
             assertEquals(listOf("original"), dao.conversationEntities().map { it.id })
         }
     }
+
+    /**
+     * v4：清单 / 计划正文 / 自动任务必须随备份走。
+     *
+     * 回归点：这三张表以前既不在备份里、恢复时还被无条件清空 ——
+     * 用户导出一次再导入，所有任务清单、计划正文、自动任务全部消失，且没有任何提示。
+     */
+    @Test
+    fun exportAndImportRestoresPlanAssetsAndAutoTasks() = runBlocking {
+        val dao = EtaDatabase.get(context).conversationDao()
+        val conversation = ConversationEntity(
+            id = "conversation-assets",
+            title = "带清单的会话",
+            thinkingEnabled = false,
+            createdAt = 1L,
+            updatedAt = 2L,
+        )
+        dao.replaceAll(
+            conversations = listOf(conversation),
+            messages = emptyList(),
+            contextCheckpoints = emptyList(),
+            state = ConversationStateEntity(selectedConversationId = conversation.id),
+        )
+        EtaDatabase.get(context).conversationTodoDao().upsert(
+            listOf(
+                ConversationTodoEntity(
+                    conversationId = conversation.id,
+                    itemId = "step-1",
+                    subject = "读取权限状态",
+                    activeForm = "正在读取",
+                    status = "completed",
+                    position = 0,
+                    updatedAt = 10L,
+                ),
+            ),
+        )
+        EtaDatabase.get(context).conversationPlanDao().upsert(
+            ConversationPlanEntity(
+                conversationId = conversation.id,
+                planId = "plan-1",
+                phase = "normal",
+                version = 1,
+                approvedVersion = 1,
+                markdown = "# 目标\n把通知权限打开",
+                createdAt = 10L,
+                updatedAt = 20L,
+            ),
+        )
+        EtaDatabase.get(context).agentTaskDao().upsert(
+            AgentTaskEntity(
+                id = "task-1",
+                title = "盯 CI",
+                prompt = "检查构建结果",
+                conditionMask = 0,
+                maxRounds = 5,
+                enabled = true,
+                readOnly = true,
+                conversationId = conversation.id,
+                lastRunAt = null,
+                lastResult = null,
+                createdAt = 30L,
+            ),
+        )
+
+        val output = ByteArrayOutputStream()
+        EtaBackupRepository.export(context, output)
+
+        // 清空设备数据，模拟换机 / 重装后导入
+        EtaDatabase.get(context).conversationTodoDao().deleteAll(conversation.id)
+        EtaDatabase.get(context).conversationPlanDao().delete(conversation.id)
+        EtaDatabase.get(context).agentTaskDao().delete("task-1")
+        dao.replaceAll(emptyList(), emptyList(), emptyList(), null)
+
+        EtaBackupRepository.import(context, ByteArrayInputStream(output.toByteArray()))
+
+        val restoredDatabase = EtaDatabase.get(context)
+        val todo = restoredDatabase.conversationTodoDao().list(conversation.id).single()
+        assertEquals("读取权限状态", todo.subject)
+        assertEquals("completed", todo.status)
+
+        val plan = restoredDatabase.conversationPlanDao().get(conversation.id)!!
+        assertEquals("# 目标\n把通知权限打开", plan.markdown)
+        assertEquals(1, plan.approvedVersion)
+
+        val task = restoredDatabase.agentTaskDao().byId("task-1")!!
+        assertEquals("盯 CI", task.title)
+        assertEquals(conversation.id, task.conversationId)
+        assertTrue("自动任务必须保持启用，否则导入后永远不跑", task.enabled)
+    }
+
 }

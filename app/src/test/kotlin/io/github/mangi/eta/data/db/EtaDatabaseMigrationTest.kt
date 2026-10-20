@@ -11,6 +11,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -38,30 +39,12 @@ class EtaDatabaseMigrationTest {
         }
 
         val database = Room.databaseBuilder(context, EtaDatabase::class.java, databaseName)
+            // 直接复用生产迁移链：新增迁移时测试自动跟上。
+            // 唯一例外是 16→17 —— 用一个带 MCP 数据的变体，验证迁移不会丢数据。
             .addMigrations(
-                EtaDatabase.MIGRATION_6_7,
-                EtaDatabase.MIGRATION_7_8,
-                EtaDatabase.MIGRATION_8_9,
-                EtaDatabase.MIGRATION_9_10,
-                EtaDatabase.MIGRATION_10_11,
-                EtaDatabase.MIGRATION_11_12,
-                EtaDatabase.MIGRATION_12_13,
-                EtaDatabase.MIGRATION_13_14,
-                EtaDatabase.MIGRATION_14_15,
-                EtaDatabase.MIGRATION_15_16,
-                migration16To17WithMcpData,
-                EtaDatabase.MIGRATION_17_18,
-                EtaDatabase.MIGRATION_18_19,
-                EtaDatabase.MIGRATION_19_20,
-                EtaDatabase.MIGRATION_20_21,
-                EtaDatabase.MIGRATION_21_22,
-                EtaDatabase.MIGRATION_22_23,
-                EtaDatabase.MIGRATION_23_24,
-                EtaDatabase.MIGRATION_24_25,
-                EtaDatabase.MIGRATION_25_26,
-                EtaDatabase.MIGRATION_26_27,
-                EtaDatabase.MIGRATION_27_28,
-                EtaDatabase.MIGRATION_28_29,
+                *DATABASE_MIGRATIONS.map { migration ->
+                    if (migration.startVersion == 16) migration16To17WithMcpData else migration
+                }.toTypedArray()
             )
             .build()
         try {
@@ -344,4 +327,27 @@ class EtaDatabaseMigrationTest {
             "INSERT OR REPLACE INTO room_master_table (id, identity_hash) VALUES (42, 'bd87dd0053b011246cba304c35316f07')",
         )
     }
+
+
+    /**
+     * 迁移链必须首尾相接且覆盖到当前 schema 版本。
+     *
+     * 这是「漏写迁移 → fallbackToDestructiveMigration 清库」唯一的前置守门：
+     * 只要加了 SCHEMA_VERSION 却忘了 MIGRATIONS，这条断言立刻失败。
+     */
+    @Test
+    fun `迁移链连续且覆盖到当前版本`() {
+        val pairs = DATABASE_MIGRATIONS.map { it.startVersion to it.endVersion }
+        assertTrue("迁移链不能为空", pairs.isNotEmpty())
+        assertEquals("必须从最低支持版本 6 开始", 6, pairs.first().first)
+        assertEquals("必须结束于当前 schema 版本", EtaDatabase.SCHEMA_VERSION, pairs.last().second)
+        pairs.zipWithNext().forEach { (prev, next) ->
+            assertEquals(
+                "迁移链出现缺口：${prev.second} 之后应接 ${prev.second}_${prev.second + 1}，实际是 ${next.first}_${next.second}",
+                prev.second,
+                next.first,
+            )
+        }
+    }
+
 }

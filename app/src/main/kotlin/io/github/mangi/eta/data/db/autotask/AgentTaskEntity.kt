@@ -1,5 +1,6 @@
 package io.github.mangi.eta.data.db.autotask
 
+import kotlinx.serialization.Serializable
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
@@ -18,6 +19,7 @@ import androidx.room.Upsert
     tableName = "agent_tasks",
     indices = [Index(value = ["enabled", "last_run_at"])],
 )
+@Serializable
 internal data class AgentTaskEntity(
     @PrimaryKey val id: String,
     val title: String,
@@ -86,4 +88,13 @@ internal interface AgentTaskDao {
 
     @Query("DELETE FROM agent_tasks WHERE id = :id")
     suspend fun delete(id: String)
+
+    /**
+     * 删除会话时清理绑定它的自动任务。
+     *
+     * 任务表没有外键（`conversation_id` 是裸列），会话删掉后任务仍会到点触发，
+     * 往一个已不存在的会话投递/写回 —— 结果是持续计费却什么都写不进去。
+     */
+    @Query("DELETE FROM agent_tasks WHERE conversation_id = :conversationId")
+    suspend fun deleteByConversation(conversationId: String)
 }

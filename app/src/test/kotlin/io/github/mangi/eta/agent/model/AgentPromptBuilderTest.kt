@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
 import io.github.mangi.eta.agent.plan.AgentPlanPhase
+import io.github.mangi.eta.agent.plan.AgentPlanSuggestion
 import io.github.mangi.eta.agent.skill.SkillContext
 import io.github.mangi.eta.agent.skill.SkillIndexEntry
 import org.json.JSONArray
@@ -60,9 +61,14 @@ class AgentPromptBuilderTest {
             rootAvailable = true,
         )
 
+        // v3.13.9 起普通阶段多一条「可建议进入计划模式」的系统提示。
         assertEquals(
-            listOf("system", "system", "system", "user", "assistant", "user"),
+            listOf("system", "system", "system", "system", "user", "assistant", "user"),
             messages.roles(),
+        )
+        assertTrue(
+            "普通阶段必须携带计划建议协议，否则模型不会输出建议标记",
+            messages.systemContents().any { it.contains(AgentPlanSuggestion.MARKER) },
         )
         assertEquals("自定义系统约束", messages.getJSONObject(0).getString("content"))
         assertTrue(messages.systemContents().any { it.contains("只有系统保护后端可用时才会请求有限重绑") })
@@ -105,10 +111,12 @@ class AgentPromptBuilderTest {
         assertFalse("M1.1：个案缩放数字与 PIL SOP 已删除，禁止回潮",
             messages.systemContents().any { it.contains("缩小 6%") || it.contains("python PIL") })
         assertFalse(messages.systemContents().any { it.contains("网页浏览、读取") })
-        assertEquals("旧问题", messages.getJSONObject(3).getString("content"))
-        assertEquals("旧回答", messages.getJSONObject(4).getString("content"))
+        // 从尾部取：历史与当前输入永远在末尾，系统提示条数变化不会把索引带偏。
+        val tail = messages.length()
+        assertEquals("旧问题", messages.getJSONObject(tail - 3).getString("content"))
+        assertEquals("旧回答", messages.getJSONObject(tail - 2).getString("content"))
 
-        val currentContent = messages.getJSONObject(5).getJSONArray("content")
+        val currentContent = messages.getJSONObject(tail - 1).getJSONArray("content")
         assertEquals("当前问题", currentContent.getJSONObject(0).getString("text"))
         assertEquals(
             image.reference,
@@ -141,7 +149,8 @@ class AgentPromptBuilderTest {
             skillContext = SkillContext(installedSkills = listOf(skill)),
         )
 
-        assertEquals(listOf("system", "system", "system", "user"), messages.roles())
+        // v3.13.9：多一条计划建议协议。
+        assertEquals(listOf("system", "system", "system", "system", "user"), messages.roles())
         val systemContents = messages.systemContents()
         assertTrue(systemContents.any { it.contains("browser_use") })
         assertFalse(systemContents.any { it.contains("action=exec") })
@@ -150,7 +159,7 @@ class AgentPromptBuilderTest {
         assertTrue(skillMessage.contains("capabilities=scripts, assets"))
         assertTrue(skillMessage.contains("description=检查屏幕 并输出 结论"))
         assertTrue(skillMessage.contains("先调用 skills_read"))
-        assertEquals("读取网页", messages.getJSONObject(3).getString("content"))
+        assertEquals("读取网页", messages.getJSONObject(messages.length() - 1).getString("content"))
     }
 
     @Test

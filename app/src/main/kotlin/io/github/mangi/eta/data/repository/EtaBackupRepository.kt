@@ -5,6 +5,9 @@ import androidx.room.withTransaction
 import io.github.mangi.eta.data.db.ConversationContextCheckpointEntity
 import io.github.mangi.eta.data.db.ConversationEntity
 import io.github.mangi.eta.data.db.ConversationMessageEntity
+import io.github.mangi.eta.data.db.autotask.AgentTaskEntity
+import io.github.mangi.eta.data.db.plan.ConversationPlanEntity
+import io.github.mangi.eta.data.db.plan.ConversationTodoEntity
 import io.github.mangi.eta.data.db.ConversationStateEntity
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.db.ProviderEntity
@@ -42,11 +45,26 @@ internal data class EtaBackupDocument(
     val conversationState: ConversationStateEntity? = null,
     val memoryMd: String = "",
     val roleplay: CharacterBackupData? = null,
+    /**
+     * v4：任务清单 / 计划正文 / 自动任务。
+     *
+     * 与 conversations/messages 一样：字段声明在这里是为了让序列化器认识这些 key
+     * （读的时候它们由 [EtaBackupJsonStreams] 拆成独立文件，不会真进 header）。
+     * 少了这三个字段，旧代码解析新备份会因 unknown key 直接失败。
+     */
+    val conversationTodos: List<ConversationTodoEntity> = emptyList(),
+    val conversationPlans: List<ConversationPlanEntity> = emptyList(),
+    val agentTasks: List<AgentTaskEntity> = emptyList(),
 ) {
     companion object {
         const val FORMAT = "eta-backup"
         // 3：会话记录携带最近使用的模型；旧版本备份缺省该字段，导入后跟随默认模型。
-        const val SCHEMA_VERSION = 3
+        // 4：新增任务清单 / 计划正文 / 自动任务三段。旧备份（<4）没有这些段，
+        //    导入时**保留设备现有数据**而不是清空 —— 缺数据不等于要删数据。
+        const val SCHEMA_VERSION = 4
+
+        /** 从这一版起备份包含清单/计划/自动任务；更早的备份不含这些段。 */
+        const val SCHEMA_VERSION_PLAN_ASSETS = 4
     }
 }
 
@@ -120,6 +138,26 @@ internal object EtaBackupRepository {
                         writer.record(ConversationContextCheckpointEntity.serializer(), dao.restoreCheckpoint(raw))
                     }
                     writer.endArray()
+                    // v4：用户资产（清单 / 计划正文 / 自动任务）也纳入备份。
+                    // 量级很小（一个会话一条计划、几十条清单），一次性读取即可。
+                    phase = "export_todos"
+                    writer.beginArray(EtaBackupJsonStreams.TODOS)
+                    database.conversationTodoDao().listAll().forEach {
+                        writer.record(ConversationTodoEntity.serializer(), it)
+                    }
+                    writer.endArray()
+                    phase = "export_plans"
+                    writer.beginArray(EtaBackupJsonStreams.PLANS)
+                    database.conversationPlanDao().listAll().forEach {
+                        writer.record(ConversationPlanEntity.serializer(), it)
+                    }
+                    writer.endArray()
+                    phase = "export_tasks"
+                    writer.beginArray(EtaBackupJsonStreams.TASKS)
+                    database.agentTaskDao().all().forEach {
+                        writer.record(AgentTaskEntity.serializer(), it)
+                    }
+                    writer.endArray()
                     phase = "export_roleplay"
                     val roleplay = CharacterBackupTransfer.snapshot(appContext, boundAvatars)
                     writer.value("roleplay", CharacterBackupData.serializer().nullable, roleplay)
@@ -159,9 +197,15 @@ internal object EtaBackupRepository {
                         phase = "clear_conversations"
                         dao.deleteMessages()
                         dao.deleteContextCheckpoints()
-                        // 备份里没有清单/计划模式表；恢复时一并清掉，避免旧计划挂到被重映射的会话上。
-                        dao.deleteAllConversationTodos()
-                        dao.deleteAllConversationPlans()
+                        // v4 起清单/计划随备份走，恢复前清空以保证与备份一致；
+                        // 旧备份（<4）根本没有这些数据，此时**保留设备现有**——
+                        // 之前无条件清空，等于"导入旧备份就把所有计划删了"。
+                        val restoresPlanAssets =
+                            document.schemaVersion >= EtaBackupDocument.SCHEMA_VERSION_PLAN_ASSETS
+                        if (restoresPlanAssets) {
+                            dao.deleteAllConversationTodos()
+                            dao.deleteAllConversationPlans()
+                        }
                         dao.deleteConversations()
                         dao.deleteState()
                         phase = "restore_conversations"
@@ -172,6 +216,12 @@ internal object EtaBackupRepository {
                         staged.messages { dao.insertMessages(listOf(it)) }
                         phase = "restore_checkpoints"
                         staged.checkpoints { dao.insertContextCheckpoints(listOf(it)) }
+                        if (restoresPlanAssets) {
+                            phase = "restore_plan_assets"
+                            staged.todos { database.conversationTodoDao().upsert(listOf(it)) }
+                            staged.plans { database.conversationPlanDao().upsert(it) }
+                            staged.tasks { database.agentTaskDao().upsert(it) }
+                        }
                         document.conversationState?.let { dao.insertState(it) }
                         phase = "restore_roleplay"
                         document.roleplay?.let { roleplay ->

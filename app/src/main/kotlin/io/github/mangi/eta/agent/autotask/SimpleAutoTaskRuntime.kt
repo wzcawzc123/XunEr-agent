@@ -395,3 +395,19 @@ internal class SimpleAutoTaskRuntime(
         )
     }
 }
+
+/**
+ * 自动任务执行入口。
+ *
+ * 原本和已删除的广播触发器放在同一个文件；触发器（`AutoTaskTrigger`）从未注册进
+ * manifest、也没有任何调用方，属于死代码，已移除。接口本身由 [SimpleAutoTaskRuntime]
+ * 实现、被 `AutoTaskService` 调用，因此留在这里。
+ */
+internal interface AutoTaskRuntime {
+    /**
+     * 读任务 → 读状态 → 决策 → 若有任务则执行。
+     *
+     * 实现必须保证：**并发调用安全**（多个唤醒可能同时到达），且一次只执行一条任务。
+     */
+    fun tryRunOnce(context: Context)
+}
