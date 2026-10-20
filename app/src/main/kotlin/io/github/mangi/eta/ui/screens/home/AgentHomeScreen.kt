@@ -42,7 +42,6 @@ internal fun AgentHomeScreen(
             pendingFileReferences = state.pendingFileReferences,
             messageEdit = state.messageEdit,
             planPhase = state.planPhase,
-            planPreview = state.planPreview,
             onTogglePlanMode = { onAction(AgentHomeAction.TogglePlanMode) },
             onApprovePlan = { onAction(AgentHomeAction.ApprovePlan) },
             onCancelPlan = { onAction(AgentHomeAction.CancelPlan) },

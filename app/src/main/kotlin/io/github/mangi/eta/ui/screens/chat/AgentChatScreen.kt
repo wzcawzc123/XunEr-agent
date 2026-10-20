@@ -39,7 +39,6 @@ internal fun AgentChatScreen(
             pendingFileReferences = state.pendingFileReferences,
             messageEdit = state.messageEdit,
             planPhase = state.planPhase,
-            planPreview = state.planPreview,
             onTogglePlanMode = { onAction(AgentChatAction.TogglePlanMode) },
             onApprovePlan = { onAction(AgentChatAction.ApprovePlan) },
             onCancelPlan = { onAction(AgentChatAction.CancelPlan) },

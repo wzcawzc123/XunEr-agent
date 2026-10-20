@@ -723,7 +723,7 @@ fun AgentAppRoot(
                 )
             }
             entry<AppRoute.UsageStats>(swipeDismiss = swipeDismiss) {
-                AgentUsageScreen()
+                AgentUsageScreen(onBack = ::popRoute)
             }
             entry<AppRoute.Memory>(swipeDismiss = swipeDismiss) {
                 LaunchedEffect(Unit) {
@@ -743,8 +743,7 @@ fun AgentAppRoot(
                             is AgentMemoryAction.SwitchTarget -> memory.switchTarget(action.target)
                             is AgentMemoryAction.SearchChanged -> memory.updateSearchQuery(action.query)
                             AgentMemoryAction.Rollup -> memory.rollupMemory()
-                            AgentMemoryAction.Refresh -> memory.refreshMemory()
-                        }
+                            }
                     },
                 )
             }
