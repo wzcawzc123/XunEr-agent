@@ -433,7 +433,7 @@ private fun UserMessageBubble(
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap,
-                                    contentDescription = null,
+                                    contentDescription = stringResource(R.string.chat_image_attachment),
                                     modifier = Modifier
                                         .size(100.dp)
                                         .clip(RoundedCornerShape(12.dp)),
@@ -710,7 +710,7 @@ private fun AgentMessageBlock(
                         IconButton(onClick = onEdit, enabled = messageActionsEnabled, minWidth = 30.dp, minHeight = 30.dp) {
                             Icon(
                                 imageVector = Icons.Rounded.Edit,
-                                contentDescription = "编辑角色回复",
+                                contentDescription = stringResource(R.string.chat_edit_character_reply),
                                 modifier = Modifier.size(15.dp),
                                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
                             )
@@ -762,7 +762,7 @@ private fun AgentMessageBlock(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.ChevronLeft,
-                                    contentDescription = "上一条候选回复",
+                                    contentDescription = stringResource(R.string.chat_previous_candidate),
                                     modifier = Modifier.size(16.dp),
                                     tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -781,7 +781,7 @@ private fun AgentMessageBlock(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.ChevronRight,
-                                    contentDescription = "下一条候选回复",
+                                    contentDescription = stringResource(R.string.chat_next_candidate),
                                     modifier = Modifier.size(16.dp),
                                     tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )

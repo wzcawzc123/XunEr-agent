@@ -437,7 +437,8 @@ internal fun ShimmerText(
 @Composable
 internal fun ExpandChevron(
     expanded: Boolean,
-    contentDescription: String?,
+    // 不接受可空：这颗箭头是唯一的展开/收起入口，标签空掉就等于读屏软件念不出它是干什么的
+    contentDescription: String,
     modifier: Modifier = Modifier,
 ) {
     val rotation by animateFloatAsState(

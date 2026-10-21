@@ -186,7 +186,9 @@ internal fun ToolActivityRow(
             if (hasDetail) {
                 ExpandChevron(
                     expanded = expanded,
-                    contentDescription = null,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.tool_details_collapse else R.string.tool_details_expand,
+                    ),
                     modifier = Modifier.padding(start = 6.dp, end = 8.dp),
                 )
             }
@@ -265,7 +267,9 @@ internal fun ToolGroupRow(
             }
             ExpandChevron(
                 expanded = expanded,
-                contentDescription = null,
+                contentDescription = stringResource(
+                    if (expanded) R.string.tool_details_collapse else R.string.tool_details_expand,
+                ),
                 modifier = Modifier.padding(start = 6.dp, end = 8.dp),
             )
         }

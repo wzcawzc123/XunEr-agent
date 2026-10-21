@@ -446,6 +446,8 @@
   </plurals>
   <string name="work_completed">分析完成</string>
   <string name="tool_elapsed_seconds">%1$d 秒</string>
+  <string name="tool_details_expand">展開工具詳情</string>
+  <string name="tool_details_collapse">收合工具詳情</string>
   <plurals name="tool_group_calls">
     <item quantity="other">%d 次</item>
   </plurals>
@@ -468,6 +470,10 @@
   <string name="markdown_alert_caution">注意</string>
   <string name="copy_copied">已複製</string>
   <string name="copy_answer">複製回答</string>
+  <string name="chat_image_attachment">圖片附件</string>
+  <string name="chat_edit_character_reply">編輯角色回覆</string>
+  <string name="chat_previous_candidate">上一則候選回覆</string>
+  <string name="chat_next_candidate">下一則候選回覆</string>
   <string name="copy_code">複製程式碼</string>
   <string name="copy_command">複製指令</string>
   <string name="shell_command">Shell 指令</string>
