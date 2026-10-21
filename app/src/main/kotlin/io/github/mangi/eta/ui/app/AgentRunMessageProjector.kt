@@ -29,6 +29,9 @@ internal class AgentRunMessageProjector(
         messages: List<AgentChatMessageUi>,
     ): List<AgentChatMessageUi> = when (event) {
         is AgentEvent.GuiControlChanged -> messages
+        is AgentEvent.HistoryTrimmed -> messages
+        // 遥测事件：不产生聊天消息，仅日志可观测
+        is AgentEvent.CompactionUnavailable -> messages
         is AgentEvent.AssistantBlockStart -> startAssistantBlock(runId, event, messages)
         is AgentEvent.AssistantBlockDelta -> when (event.kind) {
             AgentEvent.AssistantBlockKind.TEXT ->
