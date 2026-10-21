@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   check:
-    # 名称会作为 main 分支规则集的必需检查，修改时同步更新仓库规则集
+    # 名称是 main 分支规则集 main-protection 的必需检查（required_status_checks 上下文）。
+    # 改名会让门禁对不上号，必须同步更新仓库规则集。
     name: Lint / Test / Debug Build
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -39,13 +40,18 @@ jobs:
           "-Peta.buildMetadata=${HEAD_SHA::7}"
           :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 
+      # 绿的时候也要留下用例数：Gradle 默认只在失败时打印
+      - name: 汇总单元测试结果
+        if: always()
+        run: python3 .github/scripts/test-summary.py app/build/test-results/testDebugUnitTest
+
       - name: 上传检查报告
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: pr-check-reports
           path: |
-            app/build/reports/
+            app/build/reports/lint-results-*
             app/build/test-results/
           if-no-files-found: ignore
           retention-days: 7
