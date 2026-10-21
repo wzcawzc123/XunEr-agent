@@ -67,4 +67,12 @@ sealed interface AgentMemoryAction {
     data object Save : AgentMemoryAction
     data object Clear : AgentMemoryAction
     data object DismissNotice : AgentMemoryAction
+    /** 丢弃未保存草稿，恢复为已保存内容（不能复用 DraftChanged：它永远置脏）。 */
+    data object DiscardDraft : AgentMemoryAction
+    /** 切换 long/short 记忆目标（丢弃未保存草稿并重新加载）。 */
+    data class SwitchTarget(val target: MemoryTargetUi) : AgentMemoryAction
+    /** 更新搜索关键词（仅过滤当前 draft 展示，不落盘）。 */
+    data class SearchChanged(val query: String) : AgentMemoryAction
+    /** 手动触发短期→长期 rollup 整理。 */
+    data object Rollup : AgentMemoryAction
 }
