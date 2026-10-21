@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.tool
 
 import io.github.mangi.eta.agent.model.AgentAndroguardToolCatalog
+import io.github.mangi.eta.agent.model.AgentToolCatalog
 import io.github.mangi.eta.agent.terminal.InstallerShellRunner
 import io.github.mangi.eta.agent.terminal.AlpineEnvironmentPaths
 import android.content.Context
@@ -122,6 +123,27 @@ internal class AgentLocalTools(
     private val browserSessionRef = lazy { browserSession ?: AgentBrowserSession() }
     /** schema 无关的参数体检器：见 [AgentToolCallValidator.validateArguments]。 */
     private val argumentGuard = AgentToolCallValidator(JSONArray())
+
+    /**
+     * schema 级参数校验器：目录约束（minLength、互斥、枚举、additionalProperties）的运行时执行。
+     * schema 用全量能力目录构建——参数形状与能力开关无关；能力门控由各工具入口单独把守。
+     */
+    private val schemaGuard: AgentToolCallValidator by lazy {
+        AgentToolCallValidator(
+            AgentToolCatalog.build(
+                terminalTools = true,
+                browserTools = true,
+                deviceDirectTools = true,
+                deviceSensitiveReadTools = true,
+                deviceSensitiveActionTools = true,
+                skillGitHubDiscovery = true,
+                skillGitHubInstall = true,
+                memoryTools = true,
+                memoryWritable = true,
+                localWebSearch = true,
+            ),
+        )
+    }
     private val deviceController = RootShellDeviceController(logger, screenshotExcludedPackages, rootAvailable)
     private val rootCommandExecutor = BoundedRootCommandExecutor(logger, rootAvailable = rootAvailable)
     private val structuredDeviceTools = AgentStructuredDeviceTools(
@@ -207,8 +229,18 @@ internal class AgentLocalTools(
             argumentGuard.validateArguments(toolCall)?.let { guidance ->
                 return@runCatching textResult(errorResult("INVALID_ARGUMENT", guidance))
             }
+            // 权限门禁先于 schema 校验：「工具未启用」比「参数不合法」更可执行，
+            // 测试契约（*PermissionIsRecheckedImmediatelyBeforeExecution）也钉死了这个顺序。
             deviceToolPermissionError(toolCall.name)?.let { return@runCatching it }
             memoryToolPermissionError(toolCall.name)?.let { return@runCatching it }
+            familyToolPermissionError(toolCall.name)?.let { return@runCatching it }
+            // schema 级校验同样在执行器内做（上游契约只禁 Loop 预检，执行器内合规）：
+            // 恢复 minLength=1 / 参数互斥等目录约束的运行时执行——它们只声明不执行时，
+            // 空 path 这类旧病灶会漏到 shell 层才报错（旧 fork 在 Loop 预检挡住）。
+            // 只校验已声明工具：legacy 兼容名（input_text 系列）与未知名交给下面的派发处理。
+            schemaGuard.validateDeclared(toolCall)?.let { guidance ->
+                return@runCatching textResult(errorResult("INVALID_ARGUMENT", guidance))
+            }
             if (guiGeneration != null && publishedObservation.get().generation != guiGeneration) {
                 publishedObservation.set(PublishedObservation())
                 if (AgentToolRequirements.requiresFreshObservation(toolCall.name)) {
@@ -364,6 +396,25 @@ internal class AgentLocalTools(
             return errorResult("TERMINAL_TOOLS_DISABLED", "请先启用终端/文件工具")
         }
         return block()
+    }
+
+    /**
+     * 终端/浏览器工具族的门禁预检（与派发分支内的检查同源）：
+     * 让「未启用」优先于 schema 参数校验报错，派发分支内的检查继续兜底。
+     */
+    private fun familyToolPermissionError(toolName: String): AgentModelClient.ToolResult? = when {
+        toolName == "read_image" ||
+            toolName == "androguard_analyze" ||
+            toolName in AgentTerminalToolCatalog.names ||
+            toolName in AgentFileToolCatalog.names ->
+            if (!terminalToolsEnabled()) {
+                textResult(errorResult("TERMINAL_TOOLS_DISABLED", "请先启用终端/文件工具"))
+            } else null
+        toolName == "web_search" || toolName == "fetch_url" ->
+            if (!browserToolsEnabled()) {
+                textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页搜索、读取与浏览器工具"))
+            } else null
+        else -> null
     }
 
     private fun fileVisionTool(block: () -> AgentModelClient.ToolResult): AgentModelClient.ToolResult {
