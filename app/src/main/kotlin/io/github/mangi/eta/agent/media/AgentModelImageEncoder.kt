@@ -19,6 +19,12 @@ import kotlin.math.sqrt
 
 internal const val MAX_AGENT_IMAGE_BYTES = 12 * 1024 * 1024
 
+/**
+ * 用户附件（相机/相册）的输入上限：40MiB。发送前经 userAttachmentProfile 降到 ≤12MiB，
+ * 所以输入可以放宽——否则「一张 15MiB 的照片」在进入编码器前就被整张拒绝。
+ */
+internal const val MAX_USER_ATTACHMENT_INPUT_BYTES = 40 * 1024 * 1024
+
 /** 仅负责为工具截图和聊天预览生成独立的图片副本。 */
 internal object AgentModelImageEncoder {
     private const val MODEL_JPEG_QUALITY = 95
@@ -45,7 +51,27 @@ internal object AgentModelImageEncoder {
         mimeType = "image/png",
         quality = 100,
     )
+    /**
+     * 用户附件的视觉发送档：长边 ≤1600px、总像素 ≤150 万（超过就按需采样降级）。
+     *
+     * ★ 不能复用 attachmentProfile / toolVisionProfile：那些档要求保持原尺寸
+     * （有回归测试断言 3200×2400 不被缩放），而这里必须降级。历史 bug 就是复用导致的：
+     * scale 恒为 1.0、采样比恒为 1，文档写着「按需采样解码到 1600px」实际从不降级，
+     * 超大附件整张原样发出，到 Provider 那里被拒/静默丢。
+     */
+    /**
+     * 保持原始像素尺寸的附件档（工具图片路径用）：有回归测试断言 3200×2400 不被缩放。
+     * 用户附件不要走这里，见 [userAttachmentProfile]。
+     */
     private val attachmentProfile = EncodingProfile(
+        format = Bitmap.CompressFormat.JPEG,
+        mimeType = "image/jpeg",
+        quality = MODEL_JPEG_QUALITY,
+    )
+
+    private val userAttachmentProfile = EncodingProfile(
+        maxLongEdge = 1_600,
+        maxPixels = 1_500_000L,
         format = Bitmap.CompressFormat.JPEG,
         mimeType = "image/jpeg",
         quality = MODEL_JPEG_QUALITY,
@@ -99,6 +125,25 @@ internal object AgentModelImageEncoder {
             source = source,
             bounds = inspectBounds(bytes, mimeHint),
             profile = toolVisionProfile,
+        )
+    }.getOrNull()
+
+    /**
+     * 用户附件（相机/相册）统一走视觉尺寸发送档：输入可能超过 12MiB，按需采样解码到 1600px，
+     * 避免超大原图撑大请求体，也避免因单张超过 12MiB 而整张失败。
+     */
+    fun userAttachment(
+        bytes: ByteArray,
+        source: String,
+        mimeHint: String = "image/jpeg",
+    ): AgentModelClient.ModelImage? = runCatching {
+        if (bytes.isEmpty()) return@runCatching null
+        if (!bytes.hasSupportedImageMagic()) return@runCatching null
+        transcodeBytes(
+            bytes = bytes,
+            source = source,
+            bounds = inspectBoundsLoose(bytes, mimeHint),
+            profile = userAttachmentProfile,
         )
     }.getOrNull()
 
@@ -213,6 +258,21 @@ internal object AgentModelImageEncoder {
             )
             output.setHasAlpha(false)
         }
+    }
+
+    /** 用户附件的边界探测：输入上限放宽到 [MAX_USER_ATTACHMENT_INPUT_BYTES]。 */
+    private fun inspectBoundsLoose(bytes: ByteArray, mimeHint: String): ImageBounds {
+        require(bytes.isNotEmpty()) { "图片内容为空" }
+        require(bytes.size <= MAX_USER_ATTACHMENT_INPUT_BYTES) { "图片数据过大：${bytes.size}" }
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return ImageBounds(
+            width = options.outWidth,
+            height = options.outHeight,
+            mimeType = options.outMimeType
+                ?.takeIf { it.isNotBlank() }
+                ?: mimeHint.normalizedAgentImageMimeType(),
+        )
     }
 
     private fun inspectBounds(bytes: ByteArray, mimeHint: String): ImageBounds {
