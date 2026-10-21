@@ -52,6 +52,22 @@
   <string name="action_launch_kimi_web">启动 Kimi Web</string>
   <string name="route_browser">Agent 浏览器</string>
   <string name="route_usage_stats">用量统计</string>
+  <string name="usage_scope_hint">统计所有会话已发出的请求；本地提示与占位不计入。</string>
+  <string name="usage_loading">正在统计…</string>
+  <string name="usage_empty">还没有用量记录。发出第一条消息后，这里会出现统计。</string>
+  <string name="usage_billable_input">实际计费输入</string>
+  <string name="usage_cache_hit_rate">缓存命中率</string>
+  <string name="usage_cache_explain">输入的 %1$d%% 走了缓存价；只有未命中的部分按全价计费。</string>
+  <string name="usage_detail">明细</string>
+  <string name="usage_input_tokens">输入 token</string>
+  <string name="usage_cached_tokens">其中缓存命中</string>
+  <string name="usage_output_tokens">输出 token</string>
+  <string name="usage_reasoning_tokens">推理 token</string>
+  <string name="usage_turns">请求轮次</string>
+  <string name="usage_by_model">按模型</string>
+  <string name="usage_turns_input_format">%1$s 轮 · %2$s 输入</string>
+  <string name="usage_unit_hundred_million">%1$.2f 亿</string>
+  <string name="usage_unit_ten_thousand">%1$.1f 万</string>
   <string name="model_supports_vision">支持图片输入</string>  <string name="model_text_only">纯文本</string>
   <string name="route_tools">工具能力</string>
   <string name="route_permissions">权限</string>
