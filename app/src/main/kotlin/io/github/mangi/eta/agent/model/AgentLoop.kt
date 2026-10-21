@@ -32,8 +32,6 @@ internal class AgentLoop(
     private val onTranscript: (List<AgentModelClient.ConversationMessage>) -> Unit = {},
     private val purpose: ProviderRequestPurpose = ProviderRequestPurpose.CHAT,
     private val roleplayContext: RoleplayRunContext? = null,
-    /** 压缩时读取任务清单概览；由运行时层注入（它持有会话标识与数据库）。 */
-    private val planOverview: () -> String? = { null },
     initialSupplementIndex: Int = 0,
 ) {
     data class Result(
@@ -47,7 +45,7 @@ internal class AgentLoop(
         val result: AgentModelClient.ToolResult,
     )
 
-    private var toolCallValidator = AgentToolCallValidator(tools)
+    private var availableToolNames = emptySet<String>()
     private val accumulatedReasoning = StringBuilder()
     private val sensitiveToolCallIds = linkedSetOf<String>()
     private var pendingToolImageMessage: JSONObject? = null
@@ -55,24 +53,8 @@ internal class AgentLoop(
         config, messages, systemCount, operationId, provider, runController,
         { sensitiveToolCallIds }, onEvent, onContextSnapshot, { transcript.length() },
         roleplay = roleplayContext != null,
-        planOverview = planOverview,
     )
     private var supplementIndex = initialSupplementIndex
-    /** 连续空回合的纠偏计数；出现工具进展会复位。 */
-    private var emptyRoundStreak = 0
-    private var pendingEmptyRoundNudge: String? = null
-
-    /**
-     * 重复调用检测：连续用**完全相同的参数**调同一个工具，通常意味着模型在原地打转
-     * （改了没生效、看错了输出、或忘了已经试过）。真机数据里 scroll / locate_on_screen
-     * 的低成功率多伴随这种情形，白烧若干轮。
-     *
-     * 只提醒、不拦截：有些工具确实需要幂等重试（等页面加载完再点），
-     * 硬阻断会误伤。提醒让模型自己判断「是重试还是换思路」。
-     */
-    private var lastToolSignature: String? = null
-    private var repeatToolStreak = 0
-    private var pendingRepeatNudge: String? = null
 
     fun contextSnapshot(): AgentContextSnapshot? = context.snapshot()
 
@@ -115,34 +97,31 @@ internal class AgentLoop(
                 JSONArray()
             }
             precedingTools = roundTools
-            toolCallValidator = AgentToolCallValidator(roundTools)
+            availableToolNames = (0 until roundTools.length()).mapNotNullTo(mutableSetOf()) { index ->
+                roundTools.optJSONObject(index)?.optJSONObject("function")?.optString("name")
+            }
             publishTranscript()
             if (purpose.allowsTools) {
                 try {
                     context.compact()
                 } catch (failure: AgentModelFailure) {
-                    // M1.2 可恢复性：摘要压缩失败(如 CONTEXT_NO_REDUCTION)不再整 run 毙命，
-                    // 降级交给下方窗口级硬裁剪；只有裁剪后仍装不下才以 CONTEXT_EXHAUSTED
-                    // 可恢复错误收束。取消走 AgentRunCancelledException(RuntimeException)，
-                    // 不在本捕获范围；session 已发 ContextCompaction failed 事件，此处不重复。
+                    // M1.2 可恢复性：摘要压缩失败（如 CONTEXT_NO_REDUCTION）不再整 run 毙命，
+                    // 降级交给下方窗口级硬裁剪；只有裁剪后仍装不下才以 CONTEXT_EXHAUSTED 收束。
+                    // 取消走 AgentRunCancelledException(RuntimeException)，不在本捕获范围；
+                    // session 已发 ContextCompaction failed 事件，此处不重复。
                     runController.throwIfCancelled()
                 }
             }
             var requestMessages = AssistantScreenContextProjection.project(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
-            // 任务清单快照：run 开始时从数据库读入，附在本次用户消息上。
-            // 只投影到 Provider 请求，不写入持久历史 —— 避免每轮把清单复制进 transcript。
-            // 出站请求前先做零模型的工具结果修剪（确定性、幂等，只改本次请求副本）。
-            // 修剪后内容落在预算内，重复执行不再变化，因此每轮前缀一致，不牺牲缓存命中。
+            // 零模型的工具结果修剪（确定性、幂等，只改本次请求副本）。
+            // 修剪后内容落在预算内，重复执行不再变化，每轮前缀一致，不牺牲缓存命中。
             requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
-            // TODO(block10): 纯文本模型的图片剥离在图片 I/O 块接入
-            // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的请求发出。
-            // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的
-            // round1（尚无用量回执）巨型历史原样发出、trim 与 M1.2 降级同轮被挡。
-            // 估量口径 round1/round2 一致，trim 只影响出站请求不改持久历史，故去前置。
-            // R6（spec context-cost-guard）：摘要已熔断时不能再指望压缩降规模，
-            // 否则只是把「重复压缩」换成「重复超线请求」；此时把裁剪线从窗口降到触发线。
+            // 兜底：摘要压缩后仍超窗时，硬裁剪非系统历史，避免带着必然失败的重型请求发出。
+            // 审查 C1（v3.4.0-audit 探针实证）：原门要求 usageObserved，导致新鲜 run 的 round1
+            //（尚无用量回执）巨型历史原样发出、trim 与降级同轮被挡；估量口径与轮次无关，故去前置。
+            // R6：摘要已熔断时不能再指望压缩降规模，把裁剪线从窗口降到触发线。
             val window = config.contextWindow
             val trimWindow = if (context.compactionBlockedForRun) {
                 AgentContextBudget.triggerTokens(window) ?: window
@@ -151,18 +130,12 @@ internal class AgentLoop(
             }
             val expectedTokens = context.budgetEstimate(requestMessages, roundTools)
             if (trimWindow != null && trimWindow > 0 && expectedTokens >= trimWindow &&
-                // H1 守卫（v3.11.24）：签名回合内禁止裁剪——与压缩路径
-                //（AgentContextSession.compact 与 AgentContextCompactor 的
-                // ANTHROPIC_THINKING_CONTEXT_LOCKED）对等：硬裁剪会把消息重建为无签名形态，
-                // 上游判定"改动了 thinking 块"，同一会话后续每轮 400。
-                // 工具结果提交后 pending 即解除，下一轮再按需裁剪，因此这里直接延后。
+                // H1 守卫：签名回合内禁止裁剪——硬裁剪会把消息重建成无签名形态，
+                // 上游判定"改动了 thinking 块"，后续每轮 400。工具结果提交后 pending 解除。
                 !AnthropicEphemeralState.hasPendingToolResponse(messages)
             ) {
-                // C4（v3.11.24）：roleplay 固定开销（persona/worldbook/depth/postHistory 注入
-                // 可达数万 token）必须计入 systemEstimate，否则 limit 偏大 → 保留过多 →
-                // afterTrimTokens（投影后）仍超线 → CONTEXT_EXHAUSTED 死角。
-                // 用"投影后请求 − 投影后历史"的净固定开销；非 roleplay 时投影返回原引用，
-                // 差值与旧"裸 system 估算"等价。
+                // roleplay 固定开销（persona/worldbook 注入可达数万 token）必须计入 systemEstimate，
+                // 否则 limit 偏大 → 保留过多 → 投影后仍超线 → CONTEXT_EXHAUSTED 死角。
                 val systemEstimate = run {
                     val projected = AssistantScreenContextProjection.project(
                         roleplayContext?.projectMessages(messages) ?: messages,
@@ -171,7 +144,7 @@ internal class AgentLoop(
                     for (index in systemCount until projected.length()) historyOnly.put(projected.getJSONObject(index))
                     (context.budgetEstimate(projected) - context.budgetEstimate(historyOnly)).coerceAtLeast(0)
                 }
-                // H1（v3.11.24）：直接在原始 JSONObject 上裁剪，保留 _eta_* 瞬态键
+                // 直接在原始 JSONObject 上裁剪，保留 _eta_* 瞬态键
                 //（思考签名块、观察标记、屏幕上下文）——ConversationMessage 往返会剥掉它们。
                 val history = (systemCount until messages.length()).map { messages.getJSONObject(it) }
                 val trimOutcome = AgentHistoryTrimmer.trimJson(
@@ -181,7 +154,7 @@ internal class AgentLoop(
                     calibration = context.calibrationValue(),
                 )
                 if (trimOutcome.trimmed) {
-                    // M1.2：硬裁剪必须可观测 —— UI/日志能区分“摘要压缩”与“硬裁剪丢历史”。
+                    // 硬裁剪必须可观测 —— UI/日志能区分"摘要压缩"与"硬裁剪丢历史"。
                     onEvent(AgentEvent.HistoryTrimmed(operationId, trimOutcome.droppedMessages))
                 }
                 while (messages.length() > systemCount) messages.remove(messages.length() - 1)
@@ -189,14 +162,10 @@ internal class AgentLoop(
                 requestMessages = AssistantScreenContextProjection.project(
                     roleplayContext?.projectMessages(messages) ?: messages,
                 )
-                // C2（v3.11.24）：裁剪后必须重放 prune 与 strip——它们只改出站副本且幂等，
-                // 否则纯文本模型（supportsVision=false）在裁剪轮会把图片块发出去（必然 400），
-                // 超大工具结果也以未修剪原文发出。重放后预算估算口径与真实请求一致。
+                // 裁剪后重放 prune（幂等），保证预算估算口径与真实请求一致。
                 requestMessages = AgentToolResultPruner.pruneRequestMessages(requestMessages)
                 val afterTrimTokens = context.budgetEstimate(requestMessages, roundTools)
                 if (afterTrimTokens >= trimWindow) {
-                    // 摘要+硬裁都救不回来(如 system 本身接近/超过窗口)：返回可恢复的结构化错误，
-                    // 不发必然失败的请求，也不让任务死得不明不白。
                     throw AgentModelFailure(
                         "CONTEXT_EXHAUSTED",
                         false,
@@ -211,7 +180,7 @@ internal class AgentLoop(
             val completedRound = try {
                 modelRetry.complete(
                     initialRound = round,
-                    request = ProviderRequest(config, roundRequestMessages(requestMessages), roundTools, sessionId, purpose),
+                    request = ProviderRequest(config, requestMessages, roundTools, sessionId, purpose),
                     provider = provider,
                     controller = runController,
                     onEvent = { event ->
@@ -243,8 +212,6 @@ internal class AgentLoop(
                 discardPendingToolImageMessage()
             }
             context.observeInputTokens(roundInputTokens)
-            // 用本轮实测校准本地估算；估算只影响判据与裁剪，不改变实际发送内容。
-            context.observeBudget(roundInputTokens, AgentContextBudget.rawEstimate(requestMessages, roundTools))
             round = completedRound.round
             val providerResponse = completedRound.response
 
@@ -298,7 +265,6 @@ internal class AgentLoop(
                     outcome
                 }
                 appendToolImages(round, outcomes)
-                emptyRoundStreak = 0
                 publishTranscript()
                 round += 1
                 continue
@@ -314,23 +280,6 @@ internal class AgentLoop(
 
             val content = assistantMessage.optString("content").trim()
             if (content.isBlank() || content == "null") {
-                val reasoned = assistantMessage.optString("reasoning_content").isNotBlank()
-                if (reasoned) {
-                    // 产生了思考却没有正文：本回合没有产出，先纠偏重试；预算用尽后按
-                    // 「运行已完成但没有返回文字」收尾，而不是让整次运行失败、丢掉已做的工具工作。
-                    emptyRoundStreak += 1
-                    if (emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES) {
-                        pendingEmptyRoundNudge = EMPTY_ROUND_NUDGE
-                        round += 1
-                        continue
-                    }
-                    onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
-                    return Result(
-                        content = "",
-                        reasoningContent = reasoningSnapshot(),
-                        sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
-                    )
-                }
                 val finishReason = assistantMessage.optString("finish_reason")
                 error("模型接口第 $round 轮返回为空${finishReason.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}")
             }
@@ -343,39 +292,6 @@ internal class AgentLoop(
                 reasoningContent = reasoningSnapshot(),
                 sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
             )
-        }
-    }
-
-    /**
-     * 本轮请求的消息视图。空回合纠偏只随下一轮请求发出，不写回 [messages]，
-     * 因此不会进入会话记录，也不会影响后续请求。
-     */
-    /**
-     * 记录本次工具调用的「工具名 + 规范化参数」签名，连续重复时排入提醒。
-     *
-     * 规范化：去掉首尾空白与换行差异，避免「同样命令只因格式微差就绕过检测」。
-     * 只保留最近一次的签名 —— 中间夹了别的调用就说明不是死循环，计数归零。
-     */
-    private fun trackRepeatedToolCall(toolCall: AgentModelClient.ToolCall) {
-        val signature = toolCall.name + "|" + toolCall.argumentsJson.trim().replace(Regex("\\s+"), " ")
-        if (signature == lastToolSignature) {
-            repeatToolStreak += 1
-        } else {
-            lastToolSignature = signature
-            repeatToolStreak = 1
-            return
-        }
-        if (repeatToolStreak == REPEAT_NUDGE_THRESHOLD) {
-            pendingRepeatNudge = REPEAT_TOOL_NUDGE.format(toolCall.name, repeatToolStreak)
-        }
-    }
-
-    private fun roundRequestMessages(base: JSONArray): JSONArray {
-        val nudge = pendingRepeatNudge ?: pendingEmptyRoundNudge ?: return base
-        if (pendingRepeatNudge != null) pendingRepeatNudge = null else pendingEmptyRoundNudge = null
-        return JSONArray().also { merged ->
-            for (index in 0 until base.length()) merged.put(base.get(index))
-            merged.put(AgentConversationCodec.userTextMessage(nudge))
         }
     }
 
@@ -406,12 +322,6 @@ internal class AgentLoop(
         if (AgentConversationCodec.parseToolCalls(message).isNotEmpty()) return
         val content = message.optString("content").trim()
         if (content.isNotBlank() && content != "null") return
-        // 只有「产生了思考却没有正文」的正常结束才走纠偏预算；
-        // 纯空响应（无思考）保持上游语义：按 MODEL_EMPTY_RESPONSE 失败。
-        if (response.stopReason == AssistantStopReason.END_TURN &&
-            emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES &&
-            message.optString("reasoning_content").isNotBlank()
-        ) return
         throw when (response.stopReason) {
             AssistantStopReason.OUTPUT_LIMIT ->
                 AgentModelFailure("MODEL_OUTPUT_LIMIT", false, "模型输出额度已耗尽但未生成正文，请检查输出上限或降低思考强度。")
@@ -445,16 +355,12 @@ internal class AgentLoop(
         toolCall: AgentModelClient.ToolCall,
     ): ToolOutcome {
         runController.throwIfCancelled()
-        toolCallValidator.validate(toolCall)?.let { validationError ->
+        if (toolCall.name !in availableToolNames) {
             return rejectedToolOutcome(
                 round = round,
                 toolCall = toolCall,
-                code = if (toolCallValidator.isRedactedReplay(toolCall)) {
-                    "REDACTED_ARGUMENTS_REPLAYED"
-                } else {
-                    "INVALID_ARGUMENT"
-                },
-                message = validationError,
+                code = "TOOL_NOT_AVAILABLE",
+                message = "工具未在本轮能力目录中提供，请使用当前可用工具",
             )
         }
         onEvent(
@@ -467,7 +373,6 @@ internal class AgentLoop(
             )
         )
 
-        trackRepeatedToolCall(toolCall)
         val result = try {
             toolExecutor.execute(toolCall)
         } catch (throwable: Exception) {
@@ -552,9 +457,7 @@ internal class AgentLoop(
             .distinct()
             .joinToString(", ")
         pendingToolImageMessage = AgentConversationCodec.userMessage(
-            text = "图片观察：以下 ${images.size} 张图片是工具 $toolNames 刚刚实际返回的结果，" +
-                "是本次对话中最新的图片内容。用户之前发送的附件图片不是工具返回，不要把它们当成工具结果。" +
-                "若与历史图片或用户附件混淆，以本条消息内的图片为准。",
+            text = "Latest observation image(s) returned by tool(s): $toolNames.",
             images = images,
         ).put("_eta_observation", true).also(messages::put)
 
@@ -630,19 +533,4 @@ internal class AgentLoop(
             AssistantBlockKind.TOOL_CALL -> AgentEvent.AssistantBlockKind.TOOL_CALL
         }
 
-
-    private companion object {
-        /** 连续空回合的纠偏上限；用尽后按「没有返回文字」自然收尾。 */
-        private const val MAX_EMPTY_ROUND_NUDGES = 2
-        private const val EMPTY_ROUND_NUDGE =
-            "上一轮只产生了思考内容，既没有正文也没有工具调用。" +
-                "请直接输出给用户的答复正文；如果任务还需要继续执行，请给出工具调用。"
-    }
 }
-
-/** 连续多少次完全相同的工具调用后提醒模型。3 次足以区分「幂等重试」与「原地打转」。 */
-private const val REPEAT_NUDGE_THRESHOLD = 3
-
-private const val REPEAT_TOOL_NUDGE =
-    "[系统提醒] 你已经连续 %2\$d 次用完全相同的参数调用 %1\$s，输出不会变化。" +
-        "如果是在等状态变化，请先确认状态确实变了；否则换一种方法，或说明卡在哪里。"
