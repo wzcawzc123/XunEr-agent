@@ -203,6 +203,35 @@ v3.8.1–v3.8.4「报错诊断」系列（全角等号粘包、分支标签、�
 验收：CI #245 双 job 绿，**1771 例 / 1770 通过 / 0 失败 / 1 跳过**；
 空回合纠偏另加 3 例（#246 验证）。
 
+## 四之十、第 10–12 块进展
+
+### 第 10 块（附件与图片，5 条）
+
+| 项 | 结论 |
+| --- | --- |
+| vision 开关 + 纯文本模型出站剥离（3257285c + 68099637） | ✅ ModelConfig.supportsVision 链路打通；stripImagesForTextOnlyModel 覆盖三种图片格式，Loop 两处剥离 |
+| 相机入口 + 图片多选（fe945f2e） | ✅ TakePicture + FileProvider + 三语，失败静默回退图片入口 |
+| 超大附件按需降级（cedba37a） | ✅ ≤12MiB 保真 / >12MiB 降到 1600px。**不能改 attachmentProfile**（契约测试断言 2400×1600 不变），须另立 userAttachmentProfile |
+| read_image 去脱敏 + 图片归因规则（5452a7a2） | ✅ sensitive=false + 观察文案改写 + 归因规则进工具描述 |
+
+### 第 11 块（多语言/无障碍，5 条）
+
+判定后**全部上游已覆盖，无需动作**：语言切换、route_usage_stats、无障碍标签、记忆页三语、六条文案接线均已在前面块完成或上游自带。
+
+### 第 12 块（零散 40 条）
+
+21 条真正待评估（其余属已弃用的 autotask/plan/locate/gui/mlkit）：
+上游已覆盖 10 条（providers/icons/terminal/voice/overlay/mcp/splash 等 67–100%）；
+搬 3 条真实 bug：
+
+| 修复 | 说明 |
+| --- | --- |
+| markdown 围栏死循环（3ea1745d） | 围栏内空行游标原地踏步，UI 卡死；1 行修复 + 超时保护测试 |
+| overlay 横竖屏半屏（ea676b36） | glow 高度不重算；上游只有 glow 一个视图，适配版 |
+| 编辑重发 CONTEXT_OVERFLOW（5cf7907e） | 5050 条会话截断点算偏 → 整段历史带出；boundary 改 messageId 定位 + journal 兜底 + 文案 |
+
+**至此 12 块全部处理完毕。**
+
 ## 五、恢复原则
 
 1. 每块一个提交，编译 + 对应测试通过才进下一块；失败单独回退。
