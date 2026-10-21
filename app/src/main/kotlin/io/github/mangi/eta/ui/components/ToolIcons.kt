@@ -63,7 +63,14 @@ import androidx.compose.material.icons.rounded.WebAsset
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.ui.graphics.vector.ImageVector
 
-internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
+/**
+ * 工具图标；未登记的工具返回 null（调用方决定兜底）。
+ *
+ * 拆出来是为了可测：`AgentToolRequirements` 里每个工具都必须有**专属**图标，
+ * 否则新工具会静默落到通用兜底图标上（真机反馈"新工具徽标和原版不一样"）。
+ * 测试直接断言这里不为 null，新增工具漏配图标会立刻红。
+ */
+internal fun toolIconOrNull(toolId: String): ImageVector? = when (toolId) {
     "observe", "observe_screen" -> Icons.Rounded.DocumentScanner
     // 任务清单：勾选框最直观地表达「步骤 + 完成状态」。
     "todo_write" -> Icons.Rounded.CheckBox
@@ -154,6 +161,10 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
             else -> Icons.Rounded.Smartphone
         }
         toolId.startsWith("mcp_") -> Icons.Rounded.Extension
-        else -> Icons.Rounded.Build
+        else -> null
     }
 }
+
+/** 工具徽标图标；未登记工具用通用构建图标兜底（不影响主链路，测试会拦住漏配）。 */
+internal fun iconForTool(toolId: String): ImageVector =
+    toolIconOrNull(toolId) ?: Icons.Rounded.Build

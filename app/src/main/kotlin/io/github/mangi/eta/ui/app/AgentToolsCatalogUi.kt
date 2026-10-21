@@ -19,6 +19,12 @@ internal fun buildToolsState(context: Context): AgentToolsUiState =
                     ToolItemUi("long_press", context.getString(R.string.tool_ui_long_press_f7a417), context.getString(R.string.tool_ui_long_press_on_coordinates_or_elements_796384)),
                     ToolItemUi("swipe", context.getString(R.string.tool_ui_slide_3723aa), context.getString(R.string.tool_ui_perform_up_down_left_and_right_swipe_gestures_3ef0de)),
                     ToolItemUi("scroll", context.getString(R.string.tool_ui_scroll_220e68), context.getString(R.string.tool_ui_scroll_the_page_or_specify_a_node_83ab24)),
+                    ToolItemUi("locate_on_screen", context.getString(R.string.tool_ui_locate_on_screen_2f77b1), context.getString(R.string.tool_ui_locate_on_screen_2f77b1_description)),
+                    ToolItemUi("tap", context.getString(R.string.tool_ui_tap_coordinate_5b1e0c), context.getString(R.string.tool_ui_tap_coordinate_5b1e0c_description)),
+                    ToolItemUi("long_press_element", context.getString(R.string.tool_ui_long_press_element_7d3a44), context.getString(R.string.tool_ui_long_press_element_7d3a44_description)),
+                    ToolItemUi("scroll_element", context.getString(R.string.tool_ui_scroll_element_9a2c18), context.getString(R.string.tool_ui_scroll_element_9a2c18_description)),
+                    ToolItemUi("wait", context.getString(R.string.tool_ui_wait_3f8d52), context.getString(R.string.tool_ui_wait_3f8d52_description)),
+                    ToolItemUi("wait_for_package", context.getString(R.string.tool_ui_wait_for_package_1c6e93), context.getString(R.string.tool_ui_wait_for_package_1c6e93_description)),
                 ),
             ),
             ToolGroupUi(
@@ -27,6 +33,12 @@ internal fun buildToolsState(context: Context): AgentToolsUiState =
                 tools = listOf(
                     ToolItemUi("type_text", context.getString(R.string.tool_ui_enter_text_ae47ab), context.getString(R.string.tool_ui_type_text_summary)),
                     ToolItemUi("wait_for_text", context.getString(R.string.tool_ui_wait_for_text_9e9a54), context.getString(R.string.tool_ui_wait_for_the_specified_text_to_appear_on_the_scr_43f9b0)),
+                    ToolItemUi("input_text", context.getString(R.string.tool_ui_input_text_4b8a71), context.getString(R.string.tool_ui_input_text_4b8a71_description)),
+                    ToolItemUi("replace_text", context.getString(R.string.tool_ui_replace_text_8e5c02), context.getString(R.string.tool_ui_replace_text_8e5c02_description)),
+                    ToolItemUi("clear_text", context.getString(R.string.tool_ui_clear_text_2a9f47), context.getString(R.string.tool_ui_clear_text_2a9f47_description)),
+                    ToolItemUi("set_clipboard", context.getString(R.string.tool_ui_set_clipboard_6c4d18), context.getString(R.string.tool_ui_set_clipboard_6c4d18_description)),
+                    ToolItemUi("get_clipboard", context.getString(R.string.tool_ui_get_clipboard_3e7b95), context.getString(R.string.tool_ui_get_clipboard_3e7b95_description)),
+                    ToolItemUi("paste_text", context.getString(R.string.tool_ui_paste_text_5d2a66), context.getString(R.string.tool_ui_paste_text_5d2a66_description)),
                 ),
             ),
             ToolGroupUi(
@@ -145,6 +157,31 @@ internal fun buildToolsState(context: Context): AgentToolsUiState =
                     ToolItemUi("read_file", context.getString(R.string.tool_ui_read_file_dc995c), context.getString(R.string.tool_ui_read_the_contents_of_mobile_phone_files_bf3066)),
                     ToolItemUi("write_file", context.getString(R.string.tool_ui_write_file_e620fd), context.getString(R.string.tool_ui_write_or_overwrite_mobile_files_29fae4)),
                     ToolItemUi("list_directory", context.getString(R.string.tool_ui_list_directory_96e765), context.getString(R.string.tool_ui_list_directory_contents_feff30)),
+                    ToolItemUi("androguard_analyze", context.getString(R.string.tool_ui_androguard_analyze_7f1c33), context.getString(R.string.tool_ui_androguard_analyze_7f1c33_description)),
+                ),
+            ),
+            ToolGroupUi(
+                id = "plan_tasks",
+                title = context.getString(R.string.state_plan_and_tasks_6d0b9e),
+                tools = listOf(
+                    ToolItemUi("enter_plan_mode", context.getString(R.string.tool_ui_enter_plan_mode_2b6d84), context.getString(R.string.tool_ui_enter_plan_mode_2b6d84_description)),
+                    ToolItemUi("exit_plan_mode", context.getString(R.string.tool_ui_exit_plan_mode_9c5e07), context.getString(R.string.tool_ui_exit_plan_mode_9c5e07_description)),
+                    ToolItemUi("todo_write", context.getString(R.string.tool_ui_todo_write_4a8f30), context.getString(R.string.tool_ui_todo_write_4a8f30_description)),
+                    ToolItemUi("create_auto_task", context.getString(R.string.tool_ui_create_auto_task_1d7b62), context.getString(R.string.tool_ui_create_auto_task_1d7b62_description)),
+                    ToolItemUi("list_auto_tasks", context.getString(R.string.tool_ui_list_auto_tasks_8e3c50), context.getString(R.string.tool_ui_list_auto_tasks_8e3c50_description)),
+                    ToolItemUi("delete_auto_task", context.getString(R.string.tool_ui_delete_auto_task_5f9a24), context.getString(R.string.tool_ui_delete_auto_task_5f9a24_description)),
+                ),
+            ),
+            ToolGroupUi(
+                id = "skills",
+                title = context.getString(R.string.state_skills_4c71ab),
+                tools = listOf(
+                    ToolItemUi("skills_list", context.getString(R.string.tool_ui_skills_list_3c8d17), context.getString(R.string.tool_ui_skills_list_3c8d17_description)),
+                    ToolItemUi("skills_read", context.getString(R.string.tool_ui_skills_read_6b2e94), context.getString(R.string.tool_ui_skills_read_6b2e94_description)),
+                    ToolItemUi("skills_read_resource", context.getString(R.string.tool_ui_skills_read_resource_9d4a03), context.getString(R.string.tool_ui_skills_read_resource_9d4a03_description)),
+                    ToolItemUi("skills_list_curated", context.getString(R.string.tool_ui_skills_list_curated_2e7f58), context.getString(R.string.tool_ui_skills_list_curated_2e7f58_description)),
+                    ToolItemUi("skills_inspect_github", context.getString(R.string.tool_ui_skills_inspect_github_8a1c46), context.getString(R.string.tool_ui_skills_inspect_github_8a1c46_description)),
+                    ToolItemUi("skills_install_from_github", context.getString(R.string.tool_ui_skills_install_from_github_4f6b29), context.getString(R.string.tool_ui_skills_install_from_github_4f6b29_description)),
                 ),
             ),
         )
