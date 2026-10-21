@@ -43,6 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
@@ -208,12 +209,18 @@ internal fun AgentMemoryScreen(
     pendingTargetSwitch?.let { pending ->
         EtaWindowDialog(
             show = true,
-            title = "切换记忆目标",
-            summary = "当前有未保存的修改，切换会丢弃这些修改并载入${if (pending == MemoryTargetUi.Short) "短期" else "长期"}记忆。",
+            title = stringResource(R.string.memory_switch_target_title),
+            summary = stringResource(
+                R.string.memory_switch_target_summary,
+                stringResource(
+                    if (pending == MemoryTargetUi.Short) R.string.memory_target_short
+                    else R.string.memory_target_long,
+                ),
+            ),
             onDismissRequest = { pendingTargetSwitch = null },
         ) {
             MiuixDialogActions(
-                confirmText = "丢弃并切换",
+                confirmText = stringResource(R.string.memory_discard_and_switch),
                 destructive = true,
                 confirmEnabled = !state.isSaving,
                 onCancel = { pendingTargetSwitch = null },
@@ -226,12 +233,12 @@ internal fun AgentMemoryScreen(
 
         EtaWindowDialog(
             show = true,
-            title = "整理短期记忆？",
-            summary = "整理会重新读取记忆文件并覆盖当前编辑，未保存的修改将丢失。",
+            title = stringResource(R.string.memory_tidy_title),
+            summary = stringResource(R.string.memory_tidy_summary),
             onDismissRequest = { pendingRollup = false },
         ) {
             MiuixDialogActions(
-                confirmText = "丢弃并整理",
+                confirmText = stringResource(R.string.memory_discard_and_tidy),
                 destructive = true,
                 confirmEnabled = !state.isSaving,
                 onCancel = { pendingRollup = false },
@@ -296,7 +303,10 @@ private fun MemoryTargetSwitcher(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (target == MemoryTargetUi.Long) "长期" else "短期",
+                        text = stringResource(
+                            if (target == MemoryTargetUi.Long) R.string.memory_target_long
+                            else R.string.memory_target_short,
+                        ),
                         style = MiuixTheme.textStyles.footnote1,
                         fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                         color = if (selected) colors.onSurface else colors.onSurfaceVariantSummary,
@@ -323,14 +333,16 @@ private fun MemoryTargetSwitcher(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (state.isSaving) "整理中" else "整理",
+                    text = stringResource(
+                        if (state.isSaving) R.string.memory_tidying else R.string.memory_tidy,
+                    ),
                     style = MiuixTheme.textStyles.footnote1,
                     color = if (busy) colors.onSurfaceVariantSummary else colors.primary,
                 )
             }
         } else {
             Text(
-                text = "跨会话持久事实",
+                text = stringResource(R.string.memory_persistent_facts),
                 style = MiuixTheme.textStyles.footnote2,
                 color = colors.onSurfaceVariantSummary,
             )
@@ -381,7 +393,7 @@ private fun MemorySearchField(
                 onModeChange(MemoryViewMode.Preview)
             }
         },
-        label = "搜索记忆",
+        label = stringResource(R.string.memory_search_label),
         useLabelAsPlaceholder = true,
         singleLine = true,
         modifier = Modifier
@@ -396,14 +408,14 @@ private fun MemorySearchField(
 }
 
 /** 在任意文本上做「保留命中行 + 折叠其余」的过滤：搜索时定位命中行，其余行省略。 */
-private fun filterLines(text: String, query: String): String {
+private fun filterLines(text: String, query: String, gapLabel: (Int) -> String): String {
     val lines = text.split('\n')
     val matched = lines.indices.filter { lines[it].contains(query, ignoreCase = true) }
     if (matched.isEmpty()) return ""
     return buildString {
         var last = -1
         matched.forEach { index ->
-            if (last >= 0 && index > last + 1) append("\n…（中间 ${index - last - 1} 行已过滤）…\n")
+            if (last >= 0 && index > last + 1) append("\n" + gapLabel(index - last - 1) + "\n")
             append(lines[index])
             if (index != matched.last()) append('\n')
             last = index
@@ -449,7 +461,11 @@ private fun MemoryDocumentCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     // P1（v3.11.28）：按 target 区分标题，避免用户分不清编辑的是长期还是短期文件。
-                    text = if (state.target == MemoryTargetUi.Short) "MEMORY.md（短期）" else "MEMORY.md",
+                    text = if (state.target == MemoryTargetUi.Short) {
+                        stringResource(R.string.memory_file_short_term)
+                    } else {
+                        "MEMORY.md"
+                    },
                     style = MiuixTheme.textStyles.body2,
                     fontWeight = FontWeight.Medium,
                     color = colors.onSurface,
@@ -532,13 +548,20 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
         val trimmedQuery = query.trim()
         // 搜索时过滤**全文**（不限于核心区切片）：归档区内容也应能定位命中。
         // 输出只保留命中行、数量很少，渲染量小；无搜索时仍渲染核心区切片（防全量布局白屏）。
-        val display = remember(content, trimmedQuery) {
-            if (trimmedQuery.isEmpty()) slice.text else filterLines(content, trimmedQuery)
+        val context = LocalContext.current
+        val display = remember(content, trimmedQuery, context) {
+            if (trimmedQuery.isEmpty()) {
+                slice.text
+            } else {
+                filterLines(content, trimmedQuery) { n ->
+                    context.getString(R.string.memory_search_gaps, n)
+                }
+            }
         }
         if (trimmedQuery.isNotEmpty() && display.isBlank()) {
             // 无命中时给明确反馈，而不是整页空白（用户感知为"没反应"）。
             Text(
-                text = "未找到包含「$trimmedQuery」的内容 · 试试其他关键词",
+                text = stringResource(R.string.memory_search_empty, trimmedQuery),
                 style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.fillMaxWidth(),
@@ -549,7 +572,7 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
         if (slice.truncated && trimmedQuery.isEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "归档区还有 ${slice.archivedChars / 1024} KB（未在预览中渲染）· 切到「编辑」查看全文",
+                text = stringResource(R.string.memory_archive_hint, slice.archivedChars / 1024),
                 style = MiuixTheme.textStyles.footnote2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.fillMaxWidth(),
