@@ -24,13 +24,16 @@ def parse_results(patterns: list[str]) -> tuple[dict, list[tuple[str, str, str]]
 
     files: list[str] = []
     for pattern in patterns:
+        # 允许直接传目录（CI 里就是这么传的），自动展开成 <dir>/*.xml
+        if os.path.isdir(pattern):
+            pattern = os.path.join(pattern, "*.xml")
         files.extend(glob.glob(pattern))
     files = sorted(set(files))
 
     for path in files:
         try:
             root = ET.parse(path).getroot()
-        except ET.ParseError as exc:  # 单个文件坏了不拖垮汇总
+        except (ET.ParseError, OSError) as exc:  # 单个文件坏了不拖垮汇总
             print(f"warn: 跳过无法解析的 {path}: {exc}", file=sys.stderr)
             continue
 
