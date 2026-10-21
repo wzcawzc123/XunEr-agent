@@ -43,6 +43,22 @@
   <string name="action_launch_kimi_web">Launch Kimi Web</string>
   <string name="route_browser">Agent browser</string>
   <string name="route_usage_stats">Usage</string>
+  <string name="usage_scope_hint">Counts all requests sent from every conversation; local prompts and placeholders are not counted.</string>
+  <string name="usage_loading">Computing…</string>
+  <string name="usage_empty">No usage yet. Send your first message and stats will appear here.</string>
+  <string name="usage_billable_input">Billable input</string>
+  <string name="usage_cache_hit_rate">Cache hit rate</string>
+  <string name="usage_cache_explain">%1$d%% of input was served at cache price; only the miss portion is billed at full price.</string>
+  <string name="usage_detail">Details</string>
+  <string name="usage_input_tokens">Input tokens</string>
+  <string name="usage_cached_tokens">of which cached</string>
+  <string name="usage_output_tokens">Output tokens</string>
+  <string name="usage_reasoning_tokens">Reasoning tokens</string>
+  <string name="usage_turns">Requests</string>
+  <string name="usage_by_model">By model</string>
+  <string name="usage_turns_input_format">%1$s turns · %2$s input</string>
+  <string name="usage_unit_hundred_million">%1$.2f B</string>
+  <string name="usage_unit_ten_thousand">%1$.1f K</string>
   <string name="model_supports_vision">Supports images</string>  <string name="model_text_only">Text only</string>
   <string name="route_tools">Tools</string>
   <string name="route_skills" translatable="false">Skills</string>
