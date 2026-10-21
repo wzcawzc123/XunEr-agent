@@ -47,7 +47,7 @@
 
 | # | 功能块 | 提交 | 主要涉及目录 |
 | ---: | --- | ---: | --- |
-| 1 | 上下文预算 / 裁剪 / 压缩 | 22 | `agent/model`、`docs/releases`、`test/agent` |
+| ✅ 1 | 上下文预算 / 裁剪 / 压缩（20 条，跳过 1 条上游已覆盖） | 22 | `agent/model`、`docs/releases`、`test/agent` |
 | 2 | 工具执行链路（含 工具目录、工具参数校验） | 9 | `agent/model`、`test/agent`、`agent/tool` |
 | 3 | Agent 运行时（含 Agent 循环、运行时执行） | 12 | `agent/model`、`test/agent`、`agent/runtime` |
 | 4 | 记忆机制（含 记忆页） | 19 | `test/agent`、`agent/memory`、`agent/model` |
@@ -59,6 +59,12 @@
 | 10 | 附件与相机（含 图片 I/O、图片输入开关） | 5 | `agent/model`、`app/src`、`test/agent` |
 | 11 | 多语言（含 无障碍） | 5 | `app/src`、`ui/components`、`ui/screens` |
 | 12 | 其余零散（22 个域：合并上游适配、测试、悬浮层、数据库、Markdown、语音、终端、Lint 等） | 40 | — |
+
+## 四之二、进度
+
+| 块 | 状态 | 验收 |
+| --- | --- | --- |
+| ① 上下文 | ✅ 完成（commit `e1e0b95`） | 上下文相关 69 例单测全绿；判掉 1 条上游已覆盖（cache_control） |
 
 ## 五、恢复原则
 
