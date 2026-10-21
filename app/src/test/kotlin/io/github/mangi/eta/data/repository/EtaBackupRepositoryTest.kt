@@ -251,6 +251,25 @@ class EtaBackupRepositoryTest {
         assertEquals(ModelSource.CATALOG, ProviderRepository.providerById(provider.id)?.models?.first()?.source)
     }
 
+    @Test
+    fun exportAndImportRoundTripsShortMemoryAlongsideLong() = runBlocking {
+        ShortMemoryRepository.rebindForTests(context)
+        ProviderRepository.ensureBuiltInsMerged()
+        AgentMemoryRepository.replaceAll("# 核心记忆\n长期内容")
+        ShortMemoryRepository.replaceAll("# 任务\n短期内容")
+
+        val output = ByteArrayOutputStream()
+        EtaBackupRepository.export(context, output)
+
+        // 覆盖两端，确保恢复的真的是备份里的内容。
+        AgentMemoryRepository.replaceAll("被覆盖的长期")
+        ShortMemoryRepository.replaceAll("被覆盖的短期")
+
+        EtaBackupRepository.import(context, ByteArrayInputStream(output.toByteArray()))
+        assertEquals("# 核心记忆\n长期内容", AgentMemoryRepository.snapshot().content)
+        assertEquals("# 任务\n短期内容", ShortMemoryRepository.snapshot().content)
+    }
+
     @Test(expected = EtaBackupException::class)
     fun rejectsUnknownBackupFormatBeforeChangingData(): Unit = runBlocking {
         EtaBackupRepository.inspect(context,

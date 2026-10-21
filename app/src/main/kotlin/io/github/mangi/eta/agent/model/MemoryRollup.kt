@@ -12,9 +12,11 @@ import org.json.JSONObject
 /**
  * 短期记忆 → 长期记忆的 rollup 整理（spec memory-upgrade §3.2，手动触发）。
  *
- * 流程：读短期 store 全文 → LLM 提炼成去重/合并后的长期候选（Markdown 小节）→
- * 追加到长期 store。全程失败安全：LLM 失败/输出无效时不写任何文件；追加走
- * 长期 store 的 revision 乐观锁（先读后写，冲突则放弃本次不覆盖）。
+ * 流程（4.0 起拆两段，结果先预览再落盘）：
+ * [propose] 读短期 store 全文 → LLM 提炼成去重/合并后的长期候选（Markdown 小节），
+ * 只返回文本不落盘；[commit] 在用户确认后追加到长期 store。全程失败安全：
+ * LLM 失败/输出无效时不写任何文件；追加走长期 store 的 revision 乐观锁
+ * （先读后写，冲突则放弃本次不覆盖）。[run] 保留为两段的串行组合（测试与脚本用）。
  */
 internal class MemoryRollup(
     private val config: AgentModelClient.ModelConfig,
@@ -24,19 +26,25 @@ internal class MemoryRollup(
     private val shortRepo: MemoryRepository = ShortMemoryRepository,
     private val longRepo: MemoryRepository = AgentMemoryRepository,
 ) {
-    fun run(): RollupOutcome {
+    /** 只提炼不落盘：返回的候选文本交给用户预览确认。 */
+    fun propose(): RollupDraft {
         controller.throwIfCancelled()
         val shortSnapshot = shortRepo.snapshot()
         if (shortSnapshot.content.isBlank()) {
-            return RollupOutcome(false, "短期记忆为空，没有可整理的内容。")
+            return RollupDraft(null, "短期记忆为空，没有可整理的内容。")
         }
         val shortContent = shortSnapshot.content.take(MAX_SHORT_INPUT_CHARS)
         val candidates = requestCandidates(shortContent)
-            ?: return RollupOutcome(false, "记忆整理失败：模型未返回有效结果，短期记忆未改动。")
+            ?: return RollupDraft(null, "记忆整理失败：模型未返回有效结果，短期记忆未改动。")
         if (candidates.isBlank() || candidates == "(无)") {
-            return RollupOutcome(false, "模型判定短期记忆无需整理（无可提炼的长期事实），短期记忆未改动。")
+            return RollupDraft(null, "模型判定短期记忆无需整理（无可提炼的长期事实），短期记忆未改动。")
         }
-        // 追加到长期：revision 乐观锁；若并发修改则放弃本次（不覆盖他人写入）。
+        return RollupDraft(candidates, "")
+    }
+
+    /** 用户确认后落盘：revision 乐观锁追加到长期。 */
+    fun commit(candidates: String): RollupOutcome {
+        controller.throwIfCancelled()
         val longSnapshot = longRepo.snapshot()
         val result = longRepo.mutate(
             AgentMemoryMutation.Append(revision = longSnapshot.revision, content = candidates),
@@ -54,6 +62,12 @@ internal class MemoryRollup(
                 "长期记忆在整理期间被修改，本次提炼未写入；请刷新后重试。",
             )
         }
+    }
+
+    fun run(): RollupOutcome {
+        val draft = propose()
+        val candidates = draft.candidates ?: return RollupOutcome(false, draft.message)
+        return commit(candidates)
     }
 
     private fun requestCandidates(shortContent: String): String? {
@@ -99,5 +113,11 @@ internal class MemoryRollup(
 
 internal data class RollupOutcome(
     val ok: Boolean,
+    val message: String,
+)
+
+/** [MemoryRollup.propose] 的结果：candidates 非空表示可追加的候选文本，否则 message 说明原因。 */
+internal data class RollupDraft(
+    val candidates: String?,
     val message: String,
 )
