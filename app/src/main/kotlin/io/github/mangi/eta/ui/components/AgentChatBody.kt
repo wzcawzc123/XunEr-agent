@@ -136,6 +136,9 @@ internal fun AgentChatBody(
     messages: List<AgentChatMessageUi>,
     modelPickerState: AgentModelPickerUiState,
     isCompacting: Boolean,
+    /** 上次运行被系统回收中断、且可续跑：底部显示续跑提示条。 */
+    resumableInterrupted: Boolean = false,
+    onResumeInterrupted: () -> Unit = {},
     input: String,
     isStreaming: Boolean,
     reasoningEffort: ReasoningEffort,
@@ -240,6 +243,8 @@ internal fun AgentChatBody(
             input = input,
             modelPickerState = modelPickerState,
             isCompacting = isCompacting,
+            resumableInterrupted = resumableInterrupted,
+            onResumeInterrupted = onResumeInterrupted,
             contextUsage = contextUsage,
             isStreaming = isStreaming,
             reasoningEffort = reasoningEffort,
@@ -309,6 +314,8 @@ private fun AgentChatScaffold(
     input: String,
     modelPickerState: AgentModelPickerUiState,
     isCompacting: Boolean,
+    resumableInterrupted: Boolean,
+    onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
     isStreaming: Boolean,
     reasoningEffort: ReasoningEffort,
@@ -376,6 +383,8 @@ private fun AgentChatScaffold(
                 input = input,
                 modelPickerState = modelPickerState,
                 isCompacting = isCompacting,
+                resumableInterrupted = resumableInterrupted,
+                onResumeInterrupted = onResumeInterrupted,
                 contextUsage = contextUsage,
                 showContextUsage = hasMessages,
                 isStreaming = isStreaming,
@@ -407,6 +416,8 @@ private fun AgentChatScaffold(
         },
     ) { innerPadding ->
         val bottomPadding = innerPadding.calculateBottomPadding()
+        // 会话懒加载占位由上游 AgentHomeScreen(isConversationLoaded) 统一处理，
+        // 这里只管「已载入但为空」的空态，避免两套加载态并存。
         if (!hasMessages) {
             EmptyChatState(
                 showSuggestions = showEmptySuggestions,
@@ -993,6 +1004,8 @@ private fun AgentChatBottomBar(
     input: String,
     modelPickerState: AgentModelPickerUiState,
     isCompacting: Boolean,
+    resumableInterrupted: Boolean,
+    onResumeInterrupted: () -> Unit,
     contextUsage: AgentContextUsageUi,
     showContextUsage: Boolean,
     isStreaming: Boolean,
@@ -1079,6 +1092,28 @@ private fun AgentChatBottomBar(
                 .navigationBarsPadding()
                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
         ) {
+            if (resumableInterrupted) {
+                // 系统回收导致的断点：进度已落盘，点一下从断点继续，
+                // 不必让用户重新描述一遍任务。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable(onClick = onResumeInterrupted),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_task_interrupted),
+                        modifier = Modifier.weight(1f),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Text(
+                        text = stringResource(R.string.action_continue),
+                        modifier = Modifier.padding(start = 8.dp),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
             AgentChatInputBar(
                 input = input,
                 modelPickerState = modelPickerState,
