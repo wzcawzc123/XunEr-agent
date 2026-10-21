@@ -40,6 +40,7 @@
   <string name="action_open_browser">開啟瀏覽器</string>
   <string name="action_launch_kimi_web">啟動 Kimi Web</string>
   <string name="route_browser">Agent 瀏覽器</string>
+  <string name="route_usage_stats">用量統計</string>
   <string name="route_tools">工具</string>
   <string name="route_permissions">權限</string>
   <string name="route_system_enhancements">系統增強</string>
