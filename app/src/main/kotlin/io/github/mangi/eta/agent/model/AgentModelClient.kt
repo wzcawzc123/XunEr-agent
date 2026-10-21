@@ -330,6 +330,8 @@ internal object AgentModelClient {
         val deviceDirectTools: Boolean = true,
         val deviceSensitiveReadTools: Boolean = false,
         val deviceSensitiveActionTools: Boolean = false,
+        /** 当前模型是否支持图片输入；false 时运行时剥离所有图片块，保证纯文本接口不报 400。 */
+        val supportsVision: Boolean = true,
         val thinkingEnabled: Boolean = false,
         val reasoningEffort: ReasoningEffort? = null,
         val reasoningCapabilities: ModelReasoningCapabilities? = null,
