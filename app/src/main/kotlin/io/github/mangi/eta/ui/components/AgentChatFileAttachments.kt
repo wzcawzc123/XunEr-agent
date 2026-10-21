@@ -71,6 +71,9 @@ internal val ChatInputPopupMargin = 8.dp
 internal val ChatInputActionSize = 40.dp
 internal val ChatInputActionIconSize = 24.dp
 
+/** 相册多选上限（4.0 重建时丢失）：一次 9 张封顶，防止误选海量图片拖垮编码与发送。 */
+internal val maxMediaItems: Int = 9
+
 @Composable
 internal fun AgentAttachmentPickerButton(
     popupAnchorTopPx: Int,
@@ -94,7 +97,7 @@ internal fun AgentAttachmentPickerButton(
         cameraUri = null
     }
     val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxMediaItems),
     ) { uris ->
         uris.forEach { uri ->
             runCatching {
