@@ -47,6 +47,7 @@ internal object AgentToolRequirements {
             "press_key", "network_info", "get_setting", "recent_notifications",
             "search_personal_orders", "terminal", "terminal_job", "terminal_daemon", "read_file",
             "write_file", "list_directory", "read_image", "edit_file", "stat_file", "glob_files", "grep_files",
+            "androguard_analyze",
         )
         register(
             RootRequirement.REQUIRED,
