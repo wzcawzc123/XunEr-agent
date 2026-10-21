@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.app
 
+import io.github.mangi.eta.data.repository.ModelRepository
 import io.github.mangi.eta.agent.model.AgentContextBudget
 import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentHistoryTrimmer
@@ -43,6 +44,7 @@ import io.github.mangi.eta.agent.runtime.AgentUiHandoffPayload
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.safeLogType
+import io.github.mangi.eta.data.model.Model
 import io.github.mangi.eta.data.model.ModelReasoningCapabilities
 import io.github.mangi.eta.data.model.ProviderSetting
 import io.github.mangi.eta.data.model.ReasoningEffort
@@ -1425,6 +1427,37 @@ internal class AgentAppState(
             return true
         }
         return false
+    }
+
+    /**
+     * 切换模型的图片输入能力声明（attachment / inputModalities ± "image"）。
+     * 关闭后运行时按纯文本处理：工具截图不进入会话、read_image 拒绝、observe_screen 强制去截图。
+     */
+    fun setModelVision(providerId: String, modelId: String, vision: Boolean) {
+        if (homeState.isStreaming) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val provider = ProviderRepository.providerById(providerId) ?: return@launch
+                val model = provider.models.firstOrNull { it.id == modelId } ?: return@launch
+                ModelRepository.saveModel(
+                    provider.id,
+                    model.copy(
+                        attachment = vision,
+                        inputModalities = if (vision) {
+                            (model.inputModalities + Model.IMAGE_MODALITY).distinct()
+                        } else {
+                            model.inputModalities.filterNot {
+                                it.equals(Model.IMAGE_MODALITY, ignoreCase = true)
+                            }
+                        },
+                    ),
+                )
+                RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     /**

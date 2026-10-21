@@ -369,6 +369,8 @@ fun AgentAppRoot(
                                 is AgentHomeAction.HistoryViewportChanged -> agentState.updateHistoryViewport(action.atLatest)
                                 AgentHomeAction.RetryConversationLoad -> agentState.retryConversationLoad()
                                 is AgentHomeAction.ModelSelected -> agentState.selectModel(action.modelId)
+                                is AgentHomeAction.VisionToggled ->
+                                    agentState.setModelVision(action.providerId, action.modelId, action.vision)
                                 is AgentHomeAction.SubmitMessage -> { requestExecutionNotifications(); agentState.sendCurrentMessage(action.text) }
                                 AgentHomeAction.StopRun -> agentState.stopCurrentRun()
                                 is AgentHomeAction.ImageAttached -> agentState.attachImage(action.uri)
