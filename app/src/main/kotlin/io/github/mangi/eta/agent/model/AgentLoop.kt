@@ -49,6 +49,18 @@ internal class AgentLoop(
     private val accumulatedReasoning = StringBuilder()
     private val sensitiveToolCallIds = linkedSetOf<String>()
     private var pendingToolImageMessage: JSONObject? = null
+    /**
+     * 重复调用检测：连续用**完全相同的参数**调同一个工具，通常意味着模型在原地打转
+     * （改了没生效、看错了输出、或忘了已经试过）。真机数据里 scroll / 截图定位的
+     * 低成功率多伴随这种情形，白烧若干轮。
+     *
+     * 只提醒、不拦截：有些工具确实需要幂等重试（等页面加载完再点），
+     * 硬阻断会误伤。提醒让模型自己判断「是重试还是换思路」。
+     */
+    private var lastToolSignature: String? = null
+    private var repeatToolStreak = 0
+    private var pendingRepeatNudge: String? = null
+
     private val context = AgentContextSession(
         config, messages, systemCount, operationId, provider, runController,
         { sensitiveToolCallIds }, onEvent, onContextSnapshot, { transcript.length() },
@@ -173,6 +185,14 @@ internal class AgentLoop(
                             "$afterTrimTokens ≥ $trimWindow)。" +
                             "请新开会话继续任务，或先手动压缩历史；本会话记录未丢失。",
                     )
+                }
+            }
+            // 重复调用提醒只随下一轮请求发出，不写回持久历史。
+            pendingRepeatNudge?.let { nudge ->
+                pendingRepeatNudge = null
+                requestMessages = JSONArray().also { merged ->
+                    for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
+                    merged.put(AgentConversationCodec.userTextMessage(nudge))
                 }
             }
             var roundInputTokens: Int? = null
@@ -351,11 +371,32 @@ internal class AgentLoop(
         AgentConversationCodec.userTextMessage(steeringPrompt(supplement))
             .put("_eta_message_id", "user-$operationId-supplement-${++supplementIndex}")
 
+    /**
+     * 记录本次工具调用的「工具名 + 规范化参数」签名，连续重复时排入提醒。
+     *
+     * 规范化：折叠空白，避免「同样命令只因格式微差就绕过检测」。
+     * 只保留最近一次签名——中间夹了别的调用就说明不是死循环，计数归零。
+     */
+    private fun trackRepeatedToolCall(toolCall: AgentModelClient.ToolCall) {
+        val signature = toolCall.name + "|" + toolCall.argumentsJson.trim().replace(Regex("\\s+"), " ")
+        if (signature == lastToolSignature) {
+            repeatToolStreak += 1
+        } else {
+            lastToolSignature = signature
+            repeatToolStreak = 1
+            return
+        }
+        if (repeatToolStreak == REPEAT_NUDGE_THRESHOLD) {
+            pendingRepeatNudge = REPEAT_TOOL_NUDGE.format(toolCall.name, repeatToolStreak)
+        }
+    }
+
     private fun executeTool(
         round: Int,
         toolCall: AgentModelClient.ToolCall,
     ): ToolOutcome {
         runController.throwIfCancelled()
+        trackRepeatedToolCall(toolCall)
         if (toolCall.name !in availableToolNames) {
             return rejectedToolOutcome(
                 round = round,
@@ -536,3 +577,10 @@ internal class AgentLoop(
         }
 
 }
+
+/** 连续多少次完全相同的调用才提醒（3 次：1 次可能是巧合，2 次可能还在等状态）。 */
+private const val REPEAT_NUDGE_THRESHOLD = 3
+
+private const val REPEAT_TOOL_NUDGE =
+    "[系统提醒] 你已经连续 %2\$d 次用完全相同的参数调用 %1\$s，输出不会变化。" +
+        "如果是在等状态变化，请先确认状态确实变了；否则换一种方法，或说明卡在哪里。"
