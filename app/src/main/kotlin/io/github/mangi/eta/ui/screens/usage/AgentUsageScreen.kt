@@ -113,7 +113,7 @@ internal fun AgentUsageScreen(onBack: () -> Unit) {
                 ) {
                     // 副标题只留一句；轮次放 hero/明细里，不再单独占一行解释。
                     Text(
-                        text = "统计所有会话已发出的请求；本地提示与占位不计入。",
+                        text = stringResource(R.string.usage_scope_hint),
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -138,7 +138,7 @@ internal fun AgentUsageScreen(onBack: () -> Unit) {
 private fun LoadingCard() {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "正在统计…",
+            text = stringResource(R.string.usage_loading),
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(20.dp),
@@ -150,7 +150,7 @@ private fun LoadingCard() {
 private fun EmptyCard() {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "还没有用量记录。发出第一条消息后，这里会出现统计。",
+            text = stringResource(R.string.usage_empty),
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(20.dp),
@@ -171,7 +171,7 @@ private fun HeroCard(summary: AgentCostSummary) {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text(
-                text = "实际计费输入",
+                text = stringResource(R.string.usage_billable_input),
                 style = MiuixTheme.textStyles.body1,
                 fontWeight = FontWeight.Medium,
                 color = MiuixTheme.colorScheme.onSurface,
@@ -186,7 +186,7 @@ private fun HeroCard(summary: AgentCostSummary) {
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "缓存命中率",
+                    text = stringResource(R.string.usage_cache_hit_rate),
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.weight(1f),
@@ -217,7 +217,7 @@ private fun HeroCard(summary: AgentCostSummary) {
             Spacer(Modifier.height(8.dp))
             Text(
                 // 用命中率直接给结论，不再让用户自己拿两个数相减。
-                text = "输入的 $ratePercent% 走了缓存价；只有未命中的部分按全价计费。",
+                text = stringResource(R.string.usage_cache_explain, ratePercent),
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -231,19 +231,19 @@ private fun DetailCard(summary: AgentCostSummary) {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = "明细",
+                text = stringResource(R.string.usage_detail),
                 style = MiuixTheme.textStyles.body1,
                 fontWeight = FontWeight.Medium,
                 color = MiuixTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(10.dp))
-            MetricRow("输入 token", formatTokens(summary.inputTokens))
-            MetricRow("其中缓存命中", formatTokens(summary.cachedTokens))
-            MetricRow("输出 token", formatTokens(summary.outputTokens))
+            MetricRow(stringResource(R.string.usage_input_tokens), formatTokens(summary.inputTokens))
+            MetricRow(stringResource(R.string.usage_cached_tokens), formatTokens(summary.cachedTokens))
+            MetricRow(stringResource(R.string.usage_output_tokens), formatTokens(summary.outputTokens))
             if (summary.reasoningTokens > 0) {
-                MetricRow("推理 token", formatTokens(summary.reasoningTokens))
+                MetricRow(stringResource(R.string.usage_reasoning_tokens), formatTokens(summary.reasoningTokens))
             }
-            MetricRow("请求轮次", formatCount(summary.turns.toLong()), isLast = true)
+            MetricRow(stringResource(R.string.usage_turns), formatCount(summary.turns.toLong()), isLast = true)
         }
     }
 }
@@ -271,7 +271,7 @@ private fun ByModelCard(summary: AgentCostSummary) {
     EtaCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = "按模型",
+                text = stringResource(R.string.usage_by_model),
                 style = MiuixTheme.textStyles.body1,
                 fontWeight = FontWeight.Medium,
                 color = MiuixTheme.colorScheme.onSurface,
@@ -279,7 +279,11 @@ private fun ByModelCard(summary: AgentCostSummary) {
             Spacer(Modifier.height(10.dp))
             val models = summary.byModel
             models.forEachIndexed { index, model ->
-                val value = "${formatCount(model.turns.toLong())} 轮 · ${formatTokens(model.inputTokens)} 输入"
+                val value = stringResource(
+                    R.string.usage_turns_input_format,
+                    formatCount(model.turns.toLong()),
+                    formatTokens(model.inputTokens),
+                )
                 MetricRow(
                     label = model.displayName,
                     value = value,
@@ -305,9 +309,10 @@ private fun formatCount(value: Long): String {
  * token 用「亿 / 万」而不是原始数字：真机已是 17 亿级别，
  * 长串数字既难读，也会把行挤到换行。
  */
+@Composable
 private fun formatTokens(value: Long): String = when {
     value <= 0 -> "0"
-    value >= 100_000_000 -> "%.2f 亿".format(value / 100_000_000.0)
-    value >= 10_000 -> "%.1f 万".format(value / 10_000.0)
+    value >= 100_000_000 -> stringResource(R.string.usage_unit_hundred_million, value / 100_000_000.0)
+    value >= 10_000 -> stringResource(R.string.usage_unit_ten_thousand, value / 10_000.0)
     else -> formatCount(value)
 }
