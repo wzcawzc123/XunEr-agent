@@ -66,6 +66,48 @@
 | --- | --- | --- |
 | ① 上下文 | ✅ 完成（`e1e0b95` + `54576a0`） | 分支 CI #237 双 job 绿：**1690 例 / 1689 通过 / 0 失败 / 1 跳过**；判掉 1 条上游已覆盖（cache_control）|
 
+## 四之三、第 2 块（工具执行）判定与拆分
+
+### 判定表（7 条可搬 + 1 条跳过 + 1 条部分）
+
+| 提交 | 上游命中 | 判定 |
+| --- | ---: | --- |
+| `fix(tool): fileTool 分发补回 terminalTool 权限门` | 100% | 跳过（上游已覆盖） |
+| `feat(tools): androguard_analyze` | 25.7% | 部分：只搬工具与安装器，不搬环境适配 |
+| `fix(tool)` v3.8.1–v3.8.4 四条 | 0–5.8% | 搬 |
+| `fix(tools): 能力页补全 26 个工具` | 3.6% | 搬 |
+| `fix(tool-validation): 全角 XML 粘包引导` | 2.3% | 搬 |
+
+### 关键发现：4 条提交都围绕 `AgentToolCallValidator`
+
+v3.8.1–v3.8.4「报错诊断」系列（全角等号粘包、分支标签、合法取值、截断提示）
+全部改的是这个校验器。它不是死代码，是 4 个真机问题的修复。
+
+**放置决策**：上游契约禁止 Loop 级 schema 预检（`toolArgumentsReachExecutorWithoutSchemaPreflight`），
+但诊断能力不能丢 → 校验搬到 **executor 层**（`AgentLocalTools` 的真实分发处）。
+测试里的 lambda executor 自然绕过，生产路径仍然生效。
+
+### `AgentLocalTools` 函数级拆分（我们 2237 行 / 上游 1481 行）
+
+多出 19 个函数，其中 **10 个属于已弃用功能，不搬**：
+
+- 自动任务 4：`createAutoTask` / `deleteAutoTask` / `listAutoTasks` / `exportAutoTasks`
+- 计划模式 3：`enterPlanMode` / `exitPlanMode` / `todoWrite`
+- GUI/OCR 3：`locate` / `locateViaOcr` / `visibleTextHint`
+
+需要搬的 9 个：
+
+| 函数 | 归属 |
+| --- | --- |
+| `androguardAnalyze` | 本块 |
+| `runCommand` / `terminal` | 本块（终端工具） |
+| `annotateDefaultedEnvironment` / `isValidTerminalEnvironmentArgument` | 本块 |
+| `ensureCoordinateFreshness` | 本块（坐标新鲜度） |
+| `decodeImageBitmap` | 第 10 块（图片） |
+| `isArchivedRead` / `memoryRepositoryFor` | 第 4 块（记忆） |
+
+上游独有 `checkRoot` 需保留，不做整份替换。
+
 ## 五、恢复原则
 
 1. 每块一个提交，编译 + 对应测试通过才进下一块；失败单独回退。
