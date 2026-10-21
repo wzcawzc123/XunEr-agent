@@ -716,6 +716,18 @@ internal object AgentRuntimeWire {
                 putString("reason_code", event.reasonCode)
             }
 
+            is AgentEvent.HistoryTrimmed -> {
+                putString(KEY_TYPE, "history_trimmed")
+                putString("operation_id", event.operationId)
+                putInt("dropped_messages", event.droppedMessages)
+            }
+
+            is AgentEvent.CompactionUnavailable -> {
+                putString(KEY_TYPE, "compaction_unavailable")
+                putString("operation_id", event.operationId)
+                putInt("missing_rounds", event.missingRounds)
+            }
+
             is AgentEvent.ModelRetryScheduled -> {
                 putString(KEY_TYPE, "model_retry_scheduled")
                 putInt("round", event.round)
@@ -873,6 +885,16 @@ internal object AgentRuntimeWire {
         "round_started" -> AgentEvent.RoundStarted(
             round = bundle.getInt("round"),
             messageCount = bundle.getInt("message_count"),
+        )
+
+        "history_trimmed" -> AgentEvent.HistoryTrimmed(
+            operationId = bundle.getString("operation_id").orEmpty(),
+            droppedMessages = bundle.getInt("dropped_messages"),
+        )
+
+        "compaction_unavailable" -> AgentEvent.CompactionUnavailable(
+            operationId = bundle.getString("operation_id").orEmpty(),
+            missingRounds = bundle.getInt("missing_rounds"),
         )
 
         "context_compaction" -> AgentEvent.ContextCompaction(
