@@ -144,6 +144,10 @@ internal object AgentConversationCodec {
                 AnthropicEphemeralState.copyContentBlocks(source, message)
             }
 
+    /** 统一的图片块判定：Chat image_url、Responses input_image、Anthropic image/source。 */
+    internal fun isImageBlock(item: JSONObject): Boolean =
+        item.optString("type") in setOf("image_url", "input_image", "image") || item.has("source")
+
     fun toolResultMessage(
         toolCall: AgentModelClient.ToolCall,
         result: AgentModelClient.ToolResult,

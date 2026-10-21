@@ -49,6 +49,12 @@ private fun AgentOverlayState.projectEvent(event: AgentEvent): AgentOverlayState
     is AgentEvent.ModelRetryScheduled -> copy(round = event.round, detailText = event.displayMessage).thinkingUnlessWorking()
     is AgentEvent.ContextCompaction -> copy(detailText = event.displayMessage).thinkingUnlessWorking()
 
+    is AgentEvent.HistoryTrimmed -> copy(
+        detailText = "上下文已硬裁剪：丢弃 ${event.droppedMessages} 条较旧消息",
+    )
+
+    is AgentEvent.CompactionUnavailable -> this
+
     is AgentEvent.AssistantBlockDelta -> when (event.kind) {
         AgentEvent.AssistantBlockKind.TEXT -> appendStreamingText(event)
         AgentEvent.AssistantBlockKind.THINKING -> copy(thought = appendThought(thought, event.delta))
