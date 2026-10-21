@@ -132,6 +132,9 @@ internal object AgentPromptBuilder {
                     "共享目录位于 /workspace/mounts，访问用户共享文件时先确认实际挂载。" +
                     "分析 APK 使用 Linux 环境的 APK 分析工具；未安装时提示用户在设置中安装，当前 apktool 不支持回编译。" +
                     "读取图片内容调用 read_image；同一轮最多读取一张，观察返回内容后再读下一张。" +
+                    "图片归因规则：工具（read_image/observe_screen）返回的图片只出现在工具结果之后紧邻的图片观察消息里；" +
+                    "用户消息中的图片是用户附件，不是任何工具的返回。判断工具读到了什么时，只能依据紧随该工具调用的观察消息内的图片，" +
+                    "禁止把用户附件或其他历史图片当成工具结果；若观察消息缺失或图片已被省略，必须重新调用工具取图，不得凭附件作答。" +
                     executionContext?.let { "\n" + it.description(rootAvailable) }.orEmpty(),
             ))
         }
