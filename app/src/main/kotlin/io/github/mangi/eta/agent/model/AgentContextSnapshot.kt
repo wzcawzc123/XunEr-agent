@@ -21,9 +21,13 @@ internal data class AgentContextSnapshot(
         private val codec = Json { ignoreUnknownKeys = true; encodeDefaults = false }
         fun decode(raw: String?): AgentContextSnapshot? {
             if (raw.isNullOrBlank()) return null
-            return codec.decodeFromString<AgentContextSnapshot>(raw).also {
-                require(it.version == 1 && it.operationId.isNotBlank())
-            }
+            // 损坏数据按「无快照」处理，由调用方退化到完整历史 + transcript；
+            // 不让单条坏数据在恢复路径抛异常（写入中断/版本升级残留可能产生坏行）。
+            return runCatching {
+                codec.decodeFromString<AgentContextSnapshot>(raw).also {
+                    require(it.version == 1 && it.operationId.isNotBlank())
+                }
+            }.getOrNull()
         }
     }
 }
