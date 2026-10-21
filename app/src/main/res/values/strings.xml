@@ -1176,6 +1176,7 @@
   <string name="chat_reasoning_effort">Reasoning effort: %1$s</string>
   <string name="status_unsupported">Unsupported</string>
   <string name="attachment_image">Image</string>
+  <string name="attachment_camera">Take photo</string>
   <string name="attachment_file">File</string>
   <string name="attachment_folder">Folder</string>
   <string name="attachment_enter_path">Enter path</string>
