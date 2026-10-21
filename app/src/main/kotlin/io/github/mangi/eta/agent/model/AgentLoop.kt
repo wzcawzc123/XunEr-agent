@@ -200,20 +200,14 @@ internal class AgentLoop(
                     )
                 }
             }
-            // 空回合纠偏只随下一轮请求发出，不写回持久历史。
-            pendingEmptyRoundNudge?.let { nudge ->
-                pendingEmptyRoundNudge = null
+            // 纠偏提醒只随下一轮请求发出，不写回持久历史。
+            // 每轮至多消费一条（重复调用优先于空回合）：两条同时注入会让一轮出现两个 user 提醒。
+            val pendingNudge = pendingRepeatNudge ?: pendingEmptyRoundNudge
+            if (pendingNudge != null) {
+                if (pendingRepeatNudge != null) pendingRepeatNudge = null else pendingEmptyRoundNudge = null
                 requestMessages = JSONArray().also { merged ->
                     for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
-                    merged.put(AgentConversationCodec.userTextMessage(nudge))
-                }
-            }
-            // 重复调用提醒只随下一轮请求发出，不写回持久历史。
-            pendingRepeatNudge?.let { nudge ->
-                pendingRepeatNudge = null
-                requestMessages = JSONArray().also { merged ->
-                    for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
-                    merged.put(AgentConversationCodec.userTextMessage(nudge))
+                    merged.put(AgentConversationCodec.userTextMessage(pendingNudge))
                 }
             }
             var roundInputTokens: Int? = null
@@ -254,6 +248,9 @@ internal class AgentLoop(
                 discardPendingToolImageMessage()
             }
             context.observeInputTokens(roundInputTokens)
+            // 用本轮实测校准本地估算；估算只影响判据与裁剪，不改变实际发送内容。
+            // （4.0 重建时该调用随上游 AgentLoop 覆盖丢失，校准馈线断成死参数——别再丢。）
+            context.observeBudget(roundInputTokens, AgentContextBudget.rawEstimate(requestMessages, roundTools))
             round = completedRound.round
             val providerResponse = completedRound.response
 
