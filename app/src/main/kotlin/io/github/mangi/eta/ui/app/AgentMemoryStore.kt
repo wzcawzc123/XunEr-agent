@@ -286,6 +286,10 @@ internal class AgentMemoryStore(
                             }
                             is io.github.mangi.eta.data.repository.AgentMemoryWriteResult.Success -> {
                                 val snapshot = result.snapshot
+                                // 真机实测（2026-10-22）：保存会留下历史快照，但状态里的历史列表
+                                // 只在 refreshMemory 时加载——不同步更新的话，保存后打开历史对话框
+                                // 是空的（磁盘上快照明明在），必须重进页面才能看到。
+                                val history = runCatching { repo.listHistory() }.getOrDefault(emptyList())
                                 withContext(mainDispatcher) {
                                     memoryState = memoryState.copy(
                                         isSaving = false,
@@ -299,6 +303,7 @@ internal class AgentMemoryStore(
                                         dirty = false,
                                         draftBytes = snapshot.byteSize,
                                         baseRevision = snapshot.revision,
+                                        history = history,
                                         notice = appContext.getString(R.string.state_ui_memory_saved_a2c61c),
                                     )
                                 }
@@ -328,19 +333,22 @@ internal class AgentMemoryStore(
             // replaceAll 内部会先把当前内容记入历史快照，清空可回滚。
             runCatching { repo.replaceAll("") }
                 .fold(
-                    onSuccess = { snapshot ->
-                        withContext(mainDispatcher) {
-                            memoryState = memoryState.copy(
-                                isSaving = false,
-                                draft = "",
-                                savedContent = "",
-                                dirty = false,
-                                draftBytes = 0,
-                                baseRevision = snapshot.revision,
-                                notice = appContext.getString(R.string.state_ui_memory_cleared_b415bb),
-                            )
-                        }
-                    },
+                onSuccess = { snapshot ->
+                    // 清空也留历史快照，同步列表（见 saveMemory 同名注释）。
+                    val history = runCatching { repo.listHistory() }.getOrDefault(emptyList())
+                    withContext(mainDispatcher) {
+                        memoryState = memoryState.copy(
+                            isSaving = false,
+                            draft = "",
+                            savedContent = "",
+                            dirty = false,
+                            draftBytes = 0,
+                            baseRevision = snapshot.revision,
+                            history = history,
+                            notice = appContext.getString(R.string.state_ui_memory_cleared_b415bb),
+                        )
+                    }
+                },
                     onFailure = { throwable ->
                         AndroidAgentLogger.warnThrottled("agent_memory_ui_clear_failed") {
                             "Agent memory UI clear failed: type=${throwable.safeLogType()}"
