@@ -12,6 +12,11 @@ import io.github.mangi.eta.agent.device.DeviceControlUnavailableException
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
+import io.github.mangi.eta.data.repository.AgentMemoryStore
+import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
+import io.github.mangi.eta.agent.memory.AgentMemoryHeadingCheck
+import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
+import io.github.mangi.eta.agent.memory.AgentMemoryFreshness
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentToolCallValidator
 import io.github.mangi.eta.agent.model.AgentHttpClient
@@ -54,6 +59,8 @@ import io.github.mangi.eta.core.HookSupport
 import io.github.mangi.eta.data.repository.AgentMemoryException
 import io.github.mangi.eta.data.repository.AgentMemoryMutation
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
+import io.github.mangi.eta.data.repository.ShortMemoryRepository
+import io.github.mangi.eta.data.repository.MemoryRepository
 import io.github.mangi.eta.data.repository.AgentMemoryWriteResult
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import io.github.mangi.eta.data.repository.WebToolsSettingsRepository
@@ -375,47 +382,181 @@ internal class AgentLocalTools(
         )
     }
 
+    /** 记忆分页的「同一页」标识：用于拦截模型重复读同一页。 */
+    private data class MemoryPageKey(
+        val target: String,
+        val section: String?,
+        val query: String?,
+        val startLine: Int,
+        val maxChars: Int,
+        val revision: String,
+    )
+
+    private var lastMemoryPageKey: MemoryPageKey? = null
+
+    /** 记忆目标：short 走短期层（可整理），其余走长期 MEMORY.md。 */
+    private fun memoryRepositoryFor(args: JSONObject): MemoryRepository = if (args.optString("target") == "short") {
+        ShortMemoryRepository
+    } else {
+        AgentMemoryRepository
+    }
+
     private fun memoryGet(args: JSONObject): String = try {
-        val result = AgentMemoryRepository.read(
-            query = args.optString("query").takeIf(String::isNotBlank),
-            startLine = args.optInt("start_line", 1),
-            maxChars = args.optInt("max_chars", 12_000),
-        )
-        JSONObject()
+        val section = args.optString("section").takeIf(String::isNotBlank)
+        val query = args.optString("query").takeIf(String::isNotBlank)
+        // spec memory-upgrade §3.1：target=short 读短期记忆文件，默认 long（向后兼容）。
+        val repo = memoryRepositoryFor(args)
+        val result = if (section != null) {
+            repo.readSection(section, args.optInt("max_chars", 12_000))
+        } else {
+            repo.read(
+                query = query,
+                startLine = args.optInt("start_line", 1),
+                maxChars = args.optInt("max_chars", 12_000),
+            )
+        }
+        // 核心区水位：把「注入了多少 / 预算多少 / 有没有被截断」一并回报。
+        // 之前这些数字只存在于提示构造过程里，模型与用户都看不见 ——
+        // 真机上核心区已用到 89% 而无人知晓，直到某次截断把新规则悄悄丢掉。
+        val gauge = AgentMemoryContextBuilder.build(result.snapshot, null)
+        val coreUsed = gauge.coreContent.length
+        val coreBudget = gauge.coreBudgetChars
+        val payload = JSONObject()
             .put("ok", true)
+            .put("core_usage", JSONObject()
+                .put("used_chars", coreUsed)
+                .put("budget_chars", coreBudget)
+                .put("percent", if (coreBudget > 0) coreUsed * 100 / coreBudget else 0)
+                .put("truncated", gauge.coreTruncated)
+                .put("sections", gauge.coreSectionCount)
+                .put("injected_lines", gauge.coreInjectedLines)
+                .put("total_lines", gauge.coreTotalLines))
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
             .put("line_count", result.snapshot.lineCount)
+            .put("section", result.section ?: JSONObject.NULL)
             .put("start_line", result.startLine ?: JSONObject.NULL)
             .put("end_line", result.endLine ?: JSONObject.NULL)
             .put("matched_lines", result.matchedLines)
+            // 归档区标识：文末 `# 归档` 之后是已结项的项目档案。
+            // 不给这个标记的话，模型会把「一加11独显已收官」这类历史结论当成现状继续引用。
+            .put("archived", isArchivedRead(result.snapshot.content, result.startLine))
+            // 时效性：只标记不隐藏。内容里最晚的日期超过 30 天时提示「当前状态类描述可能过时」，
+            // 因为「当前在跑 v0.17」这类句子一周就失效，而「Debian 13」几年都成立 ——
+            // 机器无法区分二者，只把事实（最晚日期与天数）交给模型判断。
+            .apply {
+                val freshness = AgentMemoryFreshness.assess(
+                    content = result.snapshot.content,
+                    today = java.time.LocalDate.now(),
+                )
+                if (freshness.latestDate != null) {
+                    put("freshness", JSONObject()
+                        .put("latest_date", freshness.latestDate)
+                        .put("age_days", freshness.ageDays ?: 0L)
+                        .put("stale", freshness.stale))
+                    freshness.hint()?.let { put("freshness_hint", it) }
+                }
+            }
             .put("has_more", result.hasMore)
-            .put("content", result.content)
-            .toString()
+        // ★ 分页续读指引：不带 section/query 时这是"从 start_line 读一页"的分页语义。
+        //   只给 has_more 而不给出"下一段从哪读"，模型就只能用同样的参数反复重试
+        //   —— 实测某会话连续 30 次相同参数的 memory_get，每次都只拿到第 1 页。
+        if (result.hasMore && section == null && query == null) {
+            val next = (result.endLine ?: 0) + 1
+            payload
+                .put("next_start_line", next)
+                .put(
+                    "paging_hint",
+                    "已返回第 ${result.startLine}-${result.endLine} 行（共 ${result.snapshot.lineCount} 行）；" +
+                        "还有内容未返回，继续读取请传 start_line=$next",
+                )
+        }
+        val key = MemoryPageKey(
+            target = args.optString("target", "long"),
+            section = section,
+            query = query,
+            startLine = args.optInt("start_line", 1),
+            maxChars = args.optInt("max_chars", 12_000),
+            revision = result.snapshot.revision,
+        )
+        val duplicatePage = key == lastMemoryPageKey && section == null && query == null && result.hasMore
+        lastMemoryPageKey = key
+        if (duplicatePage) {
+            errorResult(
+                "DUPLICATE_PAGE",
+                "同参重复读取第 ${result.startLine}-${result.endLine} 行不会得到新内容（revision 未变）；" +
+                    "请传 start_line=${payload.optInt("next_start_line")} 续读。" +
+                    "如确需重读本页（例如上下文被压缩），先读一次其他页再回来。",
+            )
+        } else {
+            payload.put("content", result.content).toString()
+        }
     } catch (failure: AgentMemoryException) {
         errorResult(failure.code, failure.message ?: "记忆读取失败")
     }
 
     private fun memoryWrite(args: JSONObject): String = try {
         val revision = args.getString("revision")
-        val mutation = when (args.getString("mode")) {
+        val mutation = when (val mode = args.getString("mode")) {
+            "replace_section" -> AgentMemoryMutation.ReplaceSection(
+                revision = revision,
+                section = args.optString("section"),
+                content = args.optString("content"),
+            )
             "replace_range" -> AgentMemoryMutation.ReplaceRange(
                 revision = revision,
                 startLine = args.getInt("start_line"),
                 endLine = args.getInt("end_line"),
-                content = args.requiredText("content"),
+                content = args.getString("content"),
             )
             "append" -> AgentMemoryMutation.Append(
                 revision = revision,
-                content = args.requiredText("content"),
+                content = args.getString("content"),
             )
-            "clear" -> AgentMemoryMutation.Clear(revision)
-            else -> error("不支持的记忆写入模式")
+            "clear" -> {
+                val confirmation = args.optString("content")
+                if (confirmation != AgentMemoryStore.CLEAR_CONFIRMATION) {
+                    throw AgentMemoryException(
+                        code = "MEMORY_CONFIRM_REQUIRED",
+                        message = "清空全部记忆需要在 content 里回传 \"${AgentMemoryStore.CLEAR_CONFIRMATION}\" 作为确认。",
+                    )
+                }
+                AgentMemoryMutation.Clear(revision)
+            }
+            else -> throw AgentMemoryException(
+                code = "INVALID_ARGUMENT",
+                message = "不支持的记忆写入模式 $mode；可用：replace_section / replace_range / append / clear。",
+            )
         }
-        when (val result = AgentMemoryRepository.mutate(mutation)) {
+        when (val result = memoryRepositoryFor(args).mutate(mutation)) {
             is AgentMemoryWriteResult.Success -> JSONObject()
                 .put("ok", true)
+                .put("changed", result.changed)
+                .apply {
+                    if (!result.changed) put("message", "内容与写入前逐字节一致，未产生任何改动。")
+                }
                 .put("revision", result.snapshot.revision)
+                // 位置建议：核心预算只有 32K，写错地方会挤掉真正每轮都要用的规则。
+                // 只建议、不自动移动 —— MEMORY.md 是用户资产。
+                .apply {
+                    val written = args.optString("content")
+                    if (written.isNotBlank() && args.optString("mode") != "clear") {
+                        val suggestion = AgentMemoryPlacement.suggest(written)
+                        put("placement", JSONObject()
+                            .put("suggested", suggestion.placement.wire)
+                            .put("label", suggestion.placement.label)
+                            .put("reason", suggestion.reason))
+
+                        // 同名标题检测：append 一个已存在的 `## X` 几乎总是意外
+                        // （想更新那一节应该用 replace_section）。只报事实，不拦截。
+                        val dup = AgentMemoryHeadingCheck.check(result.snapshot.content, written)
+                        if (dup.hasDuplicates) {
+                            put("duplicate_headings", dup.duplicates.joinToString("、"))
+                            put("duplicate_hint",
+                                "上面这些标题文档里已存在；若本意是更新，请改用 replace_section。")
+                        }
+                    }
+                }
                 .put("bytes", result.snapshot.byteSize)
                 .put("line_count", result.snapshot.lineCount)
                 .toString()
@@ -1558,3 +1699,12 @@ private const val TYPE_TEXT_INCREMENTAL_CHARS = 200
 
 /** 归一化坐标上界：0–999，与主流 GUI 模型的输出习惯一致。 */
 private const val NORMALIZED_MAX = 999
+
+internal fun isArchivedRead(content: String, startLine: Int?): Boolean {
+    if (startLine == null) return false
+    var boundary = -1
+    content.lineSequence().forEachIndexed { index, line ->
+        if (line.trim() == "# 归档") boundary = index + 1
+    }
+    return boundary > 0 && startLine >= boundary
+}
