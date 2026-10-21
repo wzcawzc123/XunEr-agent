@@ -28,6 +28,9 @@ internal fun AgentHomeScreen(
     onAction: (AgentHomeAction) -> Unit,
     isLoadingConversation: Boolean = false,
     conversationLoadFailed: Boolean = false,
+    /** 上次运行被系统回收中断且可续跑：聊天底部显示「继续」提示条。 */
+    resumableInterrupted: Boolean = false,
+    onResumeInterrupted: () -> Unit = {},
     historyLoadState: ConversationHistoryLoadState = ConversationHistoryLoadState.Idle,
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
@@ -47,6 +50,8 @@ internal fun AgentHomeScreen(
                     messages = state.messages,
                     modelPickerState = modelPickerState,
                     isCompacting = state.isCompacting,
+                    resumableInterrupted = resumableInterrupted,
+                    onResumeInterrupted = onResumeInterrupted,
                     input = state.input,
                     isStreaming = state.isStreaming,
                     reasoningEffort = state.reasoningEffort,

@@ -33,6 +33,9 @@ import kotlinx.serialization.json.Json
 internal object AgentRuntimeWire {
     const val MSG_READ_CONTEXT_RESULT = 15
     const val OP_CHAT = "chat"
+    /** onDestroy 因系统回收而中断进行中 run 的 error 标记（恢复层据此区分「中断」与「失败」）。 */
+    const val SYSTEM_INTERRUPTED = "SYSTEM_INTERRUPTED"
+
     const val OP_COMPACT = "compact"
     const val OP_REWRITE_REPLY = "rewrite_reply"
 

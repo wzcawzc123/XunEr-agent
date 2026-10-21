@@ -1,5 +1,9 @@
 package io.github.mangi.eta.ui.app
 
+import io.github.mangi.eta.agent.model.AgentContextBudget
+import io.github.mangi.eta.agent.model.AgentConversationCodec
+import io.github.mangi.eta.agent.model.AgentHistoryTrimmer
+import org.json.JSONArray
 import io.github.mangi.eta.agent.model.AgentContextSnapshot
 
 import android.content.ContentResolver
@@ -100,6 +104,9 @@ internal class AgentAppState(
     private val runEventFlushJobs = mutableMapOf<String, Job>()
     private var currentRunId: String? = null
     private var currentRunJob: Job? = null
+
+    /** 恢复后待用户确认续跑的被中断 run（系统回收中断，进度已折叠进会话）。 */
+    private var resumableInterruptedRun: ResumableInterruptedRun? = null
     private val persistenceLock = Any()
     private var persistenceJob: Job? = null
     // 导入期间暂停保存：旧状态的增量保存会删除刚导入的会话；导入成功后整体重载，失败时数据库已回滚。
@@ -427,6 +434,14 @@ internal class AgentAppState(
                         checkpoint = checkpoint,
                         interrupted = true,
                     ) || stateChanged
+                    // 中断前有实际进度（transcript 或快照）→ 提供续跑入口；
+                    // 什么都没做过的 run 没必要让用户「继续」一个空任务。
+                    if (checkpoint.transcript.isNotEmpty() || checkpoint.contextSnapshot != null) {
+                        resumableInterruptedRun = ResumableInterruptedRun(
+                            runId = checkpoint.runId,
+                            conversationId = AgentUiHandoffPayload.from(checkpoint.handoff.payload).conversationId,
+                        )
+                    }
                 }
                 orphanRewrites.forEach { (conversationId, runId) ->
                     conversationsById[conversationId]?.let { state ->
@@ -1113,6 +1128,17 @@ internal class AgentAppState(
             cancelMessageEdit()
             return
         }
+        // 编辑重发：前缀历史已接近窗口上限时直接拦截。这类请求发出去必然被 Provider 拒绝，
+        // 白烧一次失败 + 重试退避，用户还以为是网络问题。
+        if (editBoundary != null && guardHistoryPrefix(
+                editBoundary.historyPrefix,
+                homeState.history,
+                "编辑重发",
+            )
+        ) {
+            cancelMessageEdit()
+            return
+        }
 
         val conversationId = selectedConversationId ?: newConversationId().also {
             selectedConversationId = it
@@ -1348,6 +1374,86 @@ internal class AgentAppState(
             reasoningEffort = homeState.reasoningEffort, operation = AgentRuntimeWire.OP_COMPACT,
         )
     }
+
+    /** 恢复后被系统中断且可续跑的 run（供 UI 展示「继续」入口）。 */
+    val resumableInterrupted: ResumableInterruptedRun?
+        get() = resumableInterruptedRun
+
+    /**
+     * 编辑重发的前缀体积守卫：前缀 = 被编辑消息之前的历史，其后内容会被丢弃，
+     * 所以只看这一段加上固定开销是否已经装不下。
+     *
+     * 窗口与 run 同源（会话绑定模型 → loadConfig → 保守默认），固定开销保底 24K。
+     *
+     * @return true 表示应拦截（调用方负责自己的收尾，如编辑分支 cancelMessageEdit）
+     */
+    private fun guardHistoryPrefix(
+        prefix: List<AgentModelClient.ConversationMessage>,
+        overheadHistory: List<AgentModelClient.ConversationMessage>,
+        entryLabel: String,
+    ): Boolean {
+        if (prefix.isEmpty()) return false
+        val guardWindow = providers.enabledModel(homeState.effectiveModelId)?.model?.effectiveContextWindow
+            ?: AgentModelClient.loadConfig().contextWindow
+            ?: GUARD_FALLBACK_WINDOW_TOKENS
+        val lastInput = homeState.messages.asReversed()
+            .filterIsInstance<AgentMessageUi>()
+            .mapNotNull { it.usage?.inputTokens }
+            .firstOrNull()
+        val measuredOverhead = lastInput?.let { real ->
+            (real - AgentContextBudget.rawEstimate(
+                JSONArray().also { h ->
+                    overheadHistory.forEach { h.put(AgentConversationCodec.toJsonObject(it)) }
+                },
+            )).coerceAtLeast(0)
+        }
+        // 固定开销保底：raw 已知高估时实测差值可能归零（system/memory/tools 不计入），
+        // 强制保留工具 schema 预留下限，避免守卫因 overhead 归零而失效。
+        val guardOverhead = maxOf(measuredOverhead ?: 0, AgentHistoryTrimmer.TOOL_SCHEMA_RESERVE_TOKENS)
+        val estimate = AgentContextBudget.rawEstimate(
+            JSONArray().also { arr ->
+                prefix.forEach { arr.put(AgentConversationCodec.toJsonObject(it)) }
+            },
+        ) + guardOverhead
+        // 阈值留 5% 余量（与硬裁剪 TARGET_RATIO 0.95 对齐），避免在窗口边界处发出必败请求。
+        if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
+            Toast.makeText(
+                appContext,
+                "${entryLabel}的前缀历史接近上下文上限，建议先手动压缩历史或新建会话；本次未发送",
+                Toast.LENGTH_LONG,
+            ).show()
+            return true
+        }
+        return false
+    }
+
+    /**
+     * 续跑被系统中断的任务：进度已由恢复折叠进会话 history，这里以其为基发起新 run，
+     * 并带防重复副作用引导（GUI 动作/写操作不得重复执行）。
+     */
+    fun resumeInterruptedRun() {
+        val pending = resumableInterruptedRun ?: return
+        if (currentRunId != null) return
+        val state = conversationsById[pending.conversationId] ?: return
+        launchConversationRun(
+            conversationId = pending.conversationId,
+            runId = java.util.UUID.randomUUID().toString(),
+            prompt = RESUME_INTERRUPTED_PROMPT,
+            images = emptyList(),
+            history = state.history,
+            userHistoryMessage = null,
+            messages = state.messages,
+            state = state,
+            reasoningEffort = state.reasoningEffort,
+        )
+        resumableInterruptedRun = null
+    }
+
+    /** 可续跑的被中断 run 标识（进度已折叠进会话 history，续跑以会话 history 为基）。 */
+    data class ResumableInterruptedRun(
+        val runId: String,
+        val conversationId: String,
+    )
 
     private fun launchConversationRun(
         conversationId: String,
@@ -1848,6 +1954,7 @@ internal class AgentAppState(
                 val notice = when {
                     result.ok && result.content.isNotBlank() -> null
                     result.ok -> SystemNoticeCode.EmptyResult
+                    result.error == AgentRuntimeWire.SYSTEM_INTERRUPTED -> SystemNoticeCode.Interrupted
                     result.error == LEGACY_STOPPED_ERROR || result.error == SYNTHETIC_STATUS_STOPPED ->
                         SystemNoticeCode.Stopped
                     else -> SystemNoticeCode.RuntimeFailed
@@ -2104,6 +2211,12 @@ internal class AgentAppState(
     private companion object {
         const val MAX_TITLE_CHARS = 24
         const val MAX_PREVIEW_CHARS = 48
+        /** 守卫窗口兜底（取不到模型配置时）：128K，比多数模型小但比默认窗口保守。 */
+        private const val GUARD_FALLBACK_WINDOW_TOKENS = 128_000
+
+        const val RESUME_INTERRUPTED_PROMPT =
+            "上次任务被系统中断（Eta 后台服务被系统回收），中断前已完成并保存的进度见下方历史。" +
+                "请基于这些进度继续完成原任务；已完成并验证过的步骤不要重复执行，尤其不要重复已生效的 GUI 动作与写操作。"
         const val LEGACY_STOPPED_ERROR = "已停止"
         const val SYNTHETIC_STATUS_STOPPED = "eta_status:stopped"
         // 数据状态以较粗粒度发布，文字显现由独立的帧时钟连续推进。

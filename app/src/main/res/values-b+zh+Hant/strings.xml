@@ -21,6 +21,7 @@
   <string name="action_save">儲存</string>
   <string name="action_retry">重試</string>
   <string name="action_continue">繼續</string>
+  <string name="chat_task_interrupted">任務被系統中斷，進度已保留。點擊繼續任務（若已涉及傳送、修改或 GUI 操作，請先確認目前狀態再繼續）</string>
   <string name="action_stop">停止</string>
   <string name="action_edit">編輯</string>
   <string name="action_rename">重新命名</string>
