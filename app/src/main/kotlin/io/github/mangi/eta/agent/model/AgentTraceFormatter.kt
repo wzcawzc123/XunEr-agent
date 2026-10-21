@@ -673,7 +673,7 @@ internal class AgentTraceFormatter {
         else -> "终端操作"
     }
 
-    private fun String.terminalEnvironmentLabel(): String = when (this) {
+    private fun String.terminalEnvironmentLabel(): String = when (lowercase()) {
         "linux" -> "Linux"
         "alpine" -> "Alpine"
         "debian" -> "Debian"

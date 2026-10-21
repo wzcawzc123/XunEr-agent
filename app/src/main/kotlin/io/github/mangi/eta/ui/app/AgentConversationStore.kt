@@ -1,6 +1,7 @@
 package io.github.mangi.eta.ui.app
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import android.util.JsonReader
 import android.util.JsonToken
 import androidx.room.withTransaction
@@ -548,9 +549,23 @@ internal object AgentConversationStore {
             }
         }.getOrDefault(emptyList())
 
-    private fun List<ConversationMessageEntity>.toLegacyHistory(): List<AgentModelClient.ConversationMessage> =
-        mapNotNull { message ->
-            when (message.type) {
+    /**
+     * 旧数据迁移路径：检查点缺失或解码为空时，用消息表重建一份可用的 history。
+     *
+     * **必须有界。** 早期实现直接返回全部 user/assistant 正文，长会话实测可达 800 万字符；
+     * 那会让下一次 run 的 messages 远超模型窗口，Provider 直接拒绝，表现为
+     * model_retry / runtime_failed，随后压缩才把它压回来 —— 这正是「频繁压缩 + 运行失败」
+     * 成对出现的根因。因此从最新往回取，同时受条数与字符双重上限约束：宁可少给，不可超窗。
+     * 完整对话记录不受影响，仍在 journal 与消息表里。
+     */
+    @VisibleForTesting
+    internal fun List<ConversationMessageEntity>.toLegacyHistory(): List<AgentModelClient.ConversationMessage> {
+        val tail = ArrayList<AgentModelClient.ConversationMessage>(LEGACY_HISTORY_MAX_MESSAGES)
+        var chars = 0
+        for (index in indices.reversed()) {
+            if (tail.size >= LEGACY_HISTORY_MAX_MESSAGES) break
+            val message = this[index]
+            val entry = when (message.type) {
                 TYPE_USER -> AgentModelClient.ConversationMessage(
                     role = "user",
                     content = message.content,
@@ -564,8 +579,20 @@ internal object AgentConversationStore {
                         )
                     }
                 else -> null
-            }
+            } ?: continue
+            if (chars + entry.content.length > LEGACY_HISTORY_MAX_CHARS) break
+            tail += entry
+            chars += entry.content.length
         }
+        tail.reverse()
+        return tail
+    }
+
+    /** 迁移兜底的条数上限：够覆盖最近若干轮，又不会把整段长会话塞进请求。 */
+    private const val LEGACY_HISTORY_MAX_MESSAGES = 40
+
+    /** 迁移兜底的字符上限：32k 字符约 8k token，离多数窗口都有余量。 */
+    private const val LEGACY_HISTORY_MAX_CHARS = 32_000
 
     private const val TYPE_USER = "user"
     private const val TYPE_ASSISTANT = "assistant"
