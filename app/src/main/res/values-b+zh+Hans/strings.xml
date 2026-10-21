@@ -323,6 +323,17 @@
 - 用户名字：
 - 长期偏好：</string>
   <string name="ui_apk_analysis_95ad17">APK 分析</string>
+  <string name="linux_androguard_tools_ready">Androguard 4.1.4 已就绪。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
+  <string name="linux_androguard_tools_summary">在隔离环境中安装 Androguard 4.1.4（Python 逆向工程工具集）。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
+  <string name="linux_androguard_tools_installed">Androguard 4.1.4 已安装</string>
+  <string name="linux_androguard_tools_ready_short">Androguard 工具已就绪</string>
+  <string name="linux_androguard_stage_failed">%1$s 失败。请稍后重试</string>
+  <string name="linux_androguard_stage_checking">正在检查 Linux 基础环境</string>
+  <string name="linux_androguard_stage_installing">正在安装 Androguard 4.1.4</string>
+  <string name="linux_androguard_stage_verifying">正在校验 Androguard 命令</string>
+  <string name="linux_androguard_stage_complete">Androguard 工具已就绪</string>
+  <string name="tool_ui_androguard_analyze_7f1c33">分析应用包</string>
+  <string name="tool_ui_androguard_analyze_7f1c33_description">解析 APK 的权限、组件与结构（只读）。</string>
   <string name="ui_agent_and_local_tools_can_still_be_used_but_the_syst_b14479">Agent 与本地工具仍可使用，系统助手接管、Gemini 和一圈即搜设置暂不可修改</string>
   <string name="ui_endpoint_mode_3c8546">Endpoint 模式</string>
   <string name="ui_eta_system_assistant_003e9b">数字助理应用</string>
