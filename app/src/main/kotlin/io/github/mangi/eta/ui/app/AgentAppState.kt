@@ -110,6 +110,9 @@ internal class AgentAppState(
 
     /** 恢复后待用户确认续跑的被中断 run（系统回收中断，进度已折叠进会话）。 */
     private var resumableInterruptedRun: ResumableInterruptedRun? = null
+
+    /** 续跑前的会话补载进行中（防重入：补载期间再次点续跑直接忽略）。 */
+    private var resumeLoadInProgress = false
     private val persistenceLock = Any()
     private var persistenceJob: Job? = null
     // 导入期间暂停保存：旧状态的增量保存会删除刚导入的会话；导入成功后整体重载，失败时数据库已回滚。
@@ -458,6 +461,12 @@ internal class AgentAppState(
                     }
                 }
                 orphanRewrites.forEach { (conversationId, runId) ->
+                    // C8（v3.11.24）：孤儿判定在上一个 Main 块完成，两个 Main 块之间有协程让出窗口；
+                    // 用户恰好在窗口内发起的 rewrite 此时 currentRunId 已指向它——绝不是孤儿，
+                    // 跳过，让正常 applyRunResult 处理真结果。否则会被写入失败通知并占 appliedRuntimeRunIds，
+                    // 真结果到达时被幂等守卫丢弃（改写内容丢失 + 假「重新生成已中断」提示）。
+                    // （4.0 重建时该守卫丢失。）
+                    if (runId == currentRunId) return@forEach
                     conversationsById[conversationId]?.let { state ->
                         updateConversation(conversationId, RoleplayConversationReducer.applyRewrite(state, runId,
                             AgentRuntimeWire.RunResult(runId, false, "", "重新生成已中断，原回复已保留。",
@@ -1462,6 +1471,8 @@ internal class AgentAppState(
         if (homeState.roleplay != null) {
             val target = homeState.messages.filterIsInstance<AgentMessageUi>().firstOrNull { it.id == messageId } ?: return
             val prefix = RoleplayConversationReducer.rewriteHistory(homeState, messageId) ?: return
+            // C5：regenerate 与编辑重发同等规模前缀，同样过容量守卫（4.0 重建时调用点丢失）。
+            if (guardHistoryPrefix(prefix, homeState.history, "重新生成")) return
             val runId = "run-${UUID.randomUUID()}"
             launchConversationRun(
                 conversationId, runId, target.content, emptyList(), prefix, null, homeState.messages,
@@ -1473,6 +1484,8 @@ internal class AgentAppState(
             return
         }
         val boundary = revisionBoundary(messageId) ?: return
+        // C5：普通重发同样携带边界前缀，过容量守卫（4.0 重建时调用点丢失）。
+        if (guardHistoryPrefix(boundary.historyPrefix, homeState.history, "重新生成")) return
         val images = boundary.userMessage.images.mapIndexed { index, dataUrl ->
             PendingImageUi(
                 id = "regenerate-${boundary.userMessage.id}-$index",
@@ -1601,8 +1614,29 @@ internal class AgentAppState(
      */
     fun resumeInterruptedRun() {
         val pending = resumableInterruptedRun ?: return
-        if (currentRunId != null) return
+        if (currentRunId != null || resumeLoadInProgress) return
+        // 目标会话可能已被卸载（unloadConversation）：先补载再续跑，否则会以空 history 为基。
+        // 4.0 重建时补载+防重入丢失，未载入时静默 return（按钮点了没反应）。
+        resumeLoadInProgress = true
+        scope.launch(Dispatchers.IO) {
+            val loaded = ensureConversationLoaded(pending.conversationId)
+            withContext(Dispatchers.Main.immediate) { resumeLoadInProgress = false }
+            if (!loaded) {
+                // 会话已不存在（被删除）：清掉待续跑标记。
+                withContext(Dispatchers.Main.immediate) {
+                    if (resumableInterruptedRun == pending) resumableInterruptedRun = null
+                }
+                return@launch
+            }
+            withContext(Dispatchers.Main.immediate) { resumeInterruptedRunNow(pending) }
+        }
+    }
+
+    private fun resumeInterruptedRunNow(pending: ResumableInterruptedRun) {
         val state = conversationsById[pending.conversationId] ?: return
+        // C5：续跑以完整 history 为基，规模与编辑重发同级，同样过容量守卫——
+        // 超窗续跑会重演「Runtime 运行失败」；拦截时保留 resumableInterruptedRun 供压缩后重试。
+        if (guardHistoryPrefix(state.history, state.history, "续跑")) return
         launchConversationRun(
             conversationId = pending.conversationId,
             runId = java.util.UUID.randomUUID().toString(),
@@ -2088,6 +2122,16 @@ internal class AgentAppState(
             // 流式增量只刷新消息，不推进会话时间戳，也不重算侧栏摘要；其余可见变化两者都更新。
             is AgentEvent.AssistantBlockDelta -> updateMessages(runId, updateTimestamp = false) { messages ->
                 runMessageProjector.applyEvent(runId, event, messages)
+            }
+            // 硬裁剪真的丢了历史必须在会话里可见（M1.2）：投影层是空操作，这里补 SystemNotice。
+            // （4.0 重建时该分支丢失，用户只在浮层看到、会话内无痕。）
+            is AgentEvent.HistoryTrimmed -> updateMessages(runId) { messages ->
+                val id = "assistant-$runId-trim-${event.operationId}"
+                messages.filterNot { it.id == id } + SystemNoticeMessageUi(
+                    id = id,
+                    code = SystemNoticeCode.ContextCompaction,
+                    detail = "上下文超出窗口：已硬裁剪丢弃 ${event.droppedMessages} 条较旧消息（摘要压缩未能完成或仍不足）。",
+                )
             }
             else -> updateRunTrace(runId) { messages -> runMessageProjector.applyEvent(runId, event, messages) }
         }
