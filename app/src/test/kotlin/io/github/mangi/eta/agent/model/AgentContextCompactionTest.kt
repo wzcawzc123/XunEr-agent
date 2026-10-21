@@ -31,19 +31,30 @@ class AgentContextCompactionTest {
     )
 
     @Test
-    fun largeHistoryWithoutUsageDoesNotTriggerCompaction() {
+    fun largeHistoryWithoutUsageSkipsCompactionAndUsesTrimInstead() {
+        // 审查 C1（v3.4.0-audit）后契约：无 usage 回执时**不做摘要压缩**（本测试原意保留），
+        // 但窗口级硬裁允许介入——估量口径与轮次无关，round1 超窗必须先裁再发，
+        // 不得再原样发送巨型历史（旧断言 contains(original) 已被 C1 修复推翻）。
         val original = "历史事实".repeat(40_000)
         var requests = 0
-        val result = AgentModelClient.complete(config, "继续", AgentModelClient.ToolExecutor { error("不应执行工具") },
+        val events = mutableListOf<AgentEvent>()
+        // 校准默认值改为保守初值（未获实测前按 1/4 折算），这里同步调小窗口，
+        // 保留"历史远超窗口必被硬裁"这个原意；仅本用例生效，不动共享 fixture。
+        val result = AgentModelClient.complete(config.copy(contextWindow = 20_000), "继续", AgentModelClient.ToolExecutor { error("不应执行工具") },
             history = listOf(AgentModelClient.ConversationMessage("assistant", original)),
+            onEvent = events::add,
             provider = provider { request, _ ->
                 requests++
                 assertEquals(ProviderRequestPurpose.CHAT, request.purpose)
-                assertTrue(request.messages.toString().contains(original))
+                assertFalse(
+                    "round1 应已被硬裁，历史原文不得再出现（C1 修复）",
+                    request.messages.toString().contains(original),
+                )
                 response("完成")
             })
         assertEquals(1, requests)
         assertNull(result.contextSnapshot)
+        assertTrue(events.filterIsInstance<AgentEvent.HistoryTrimmed>().isNotEmpty())
     }
 
     @Test
@@ -63,7 +74,7 @@ class AgentContextCompactionTest {
     fun automaticCompactionPreservesIncrementalTranscriptAndLatestRequest() {
         val history = (1..8).flatMap { turn -> listOf(
             AgentModelClient.ConversationMessage("user", "第 $turn 个任务"),
-            AgentModelClient.ConversationMessage("assistant", "事实 $turn ".repeat(2200)),
+            AgentModelClient.ConversationMessage("assistant", "事实 $turn ".repeat(5000)),
         ) }
         val events = mutableListOf<AgentEvent>()
         var summaries = 0
@@ -88,10 +99,71 @@ class AgentContextCompactionTest {
         assertEquals(listOf("完成最新请求"), result.transcript.map { it.content })
         val snapshot = checkNotNull(result.contextSnapshot)
         assertTrue(snapshot.messages.any { it.contextSummary })
-        assertEquals("最新请求必须保留", snapshot.messages.last().content)
+        assertTrue("最新用户请求必须逐字保留", snapshot.messages.any { it.role == "user" && it.content == "最新请求必须保留" })
         assertEquals(9, snapshot.consumedUserTurns)
         assertTrue(events.filterIsInstance<AgentEvent.ContextCompaction>().any { it.phase == "completed" })
         assertTrue(snapshots.all { AgentContextSnapshot.decode(it.encode()) == it })
+    }
+
+    @Test
+    fun corruptedSnapshotDecodeReturnsNullInsteadOfThrowing() {
+        assertNull(AgentContextSnapshot.decode(null))
+        assertNull(AgentContextSnapshot.decode(""))
+        assertNull(AgentContextSnapshot.decode("not-json"))
+        assertNull(AgentContextSnapshot.decode("""{"version":2,"operationId":"run","messages":[]}"""))
+    }
+
+    @Test
+    fun manualCompactionWithNothingToCompactReturnsSuccessWithoutSnapshot() {
+        var summaries = 0
+        val provider = provider { request, _ ->
+            summaries++
+            response("不应被调用：无可压缩历史")
+        }
+        val result = AgentModelClient.complete(
+            config, "", AgentModelClient.ToolExecutor { error("不应执行工具") },
+            history = emptyList(), compactOnly = true, provider = provider,
+        )
+        // 对齐 harness "No compactable history yet"：无可压缩内容是成功而非失败
+        assertEquals("", result.content)
+        assertNull(result.contextSnapshot)
+        assertTrue(result.transcript.isEmpty())
+        assertEquals(0, summaries)
+    }
+
+    @Test
+    fun summaryInputIsBoundedAndDropsOldestBeyondBudget() {
+        // 窗口 50k → 摘要输入预算 = 50_000/2 = 25_000 → 下限 32_000 字符。
+        // C1（v3.11.24）：compactEnd 按校准口径保留近期历史后，进入摘要的部分变小，
+        // 故放大轮次/消息长度，确保校准口径（默认 0.25）下摘要输入仍超过 32k 字符预算、
+        // boundSummaryInput 截断仍会被触发（本测试验证的正是该截断逻辑）。
+        val turns = (1..12).flatMap { turn -> listOf(
+            AgentModelClient.ConversationMessage("user", "任务 $turn"),
+            AgentModelClient.ConversationMessage("assistant", "事实 ".repeat(6000) + "turn$turn"),
+        ) }
+        var compactionInputChars = -1
+        var summaries = 0
+        val provider = provider { request, _ ->
+            if (request.purpose == ProviderRequestPurpose.COMPACTION) {
+                summaries++
+                compactionInputChars = request.messages.getJSONObject(request.messages.length() - 1)
+                    .optString("content").length
+                response("已完成前面的任务，继续处理最新请求。")
+            } else {
+                response("完成")
+            }
+        }
+        val result = AgentModelClient.complete(
+            config.copy(contextWindow = 50_000), "最新", AgentModelClient.ToolExecutor { error("不应执行工具") },
+            history = turns, provider = provider, compactOnly = true,
+        )
+        assertEquals(1, summaries)
+        // 摘要输入被限制在预算内（32k 预算 + 指令包装余量）
+        assertTrue(compactionInputChars <= 33_000)
+        val snapshot = checkNotNull(result.contextSnapshot)
+        val summaryMessage = snapshot.messages.firstOrNull { it.contextSummary }
+        assertNotNull(summaryMessage)
+        assertTrue(summaryMessage!!.content.contains("超出摘要输入预算"))
     }
 
     @Test
@@ -238,6 +310,27 @@ class AgentContextCompactionTest {
     }
 
     @Test
+    fun budgetUsesModelWindowAndUsageCalibrationWithoutCountingImageBase64() {
+        val budget = AgentContextBudget(10_000)
+        assertFalse(budget.shouldCompact(7999))
+        assertTrue(budget.shouldCompact(8000))
+        assertFalse(budget.shouldCompact(0))
+        assertFalse(AgentContextBudget(null).shouldCompact(Int.MAX_VALUE))
+        assertEquals(4, AgentContextBudget.textTokens("中文测试"))
+        assertEquals(2, AgentContextBudget.textTokens("abcdef"))
+        val messages = JSONArray().put(AgentConversationCodec.userTextMessage("文本"))
+        val raw = AgentContextBudget.rawEstimate(messages)
+        budget.observe(AgentTokenUsage(inputTokens = raw * 2), raw)
+        assertEquals(raw * 2, budget.estimate(messages, JSONArray()))
+        assertTrue(AgentContextBudget.rawEstimate(messages, JSONArray().put("tool".repeat(100))) > raw)
+        fun image(bytes: Int) = JSONArray().put(AgentConversationCodec.userMessage("图片", listOf(
+            AgentModelClient.ModelImage("data:image/png;base64," + "A".repeat(bytes), "image/png", bytes),
+        )))
+        assertEquals(AgentContextBudget.rawEstimate(image(10)), AgentContextBudget.rawEstimate(image(10000)))
+
+    }
+
+    @Test
     fun overflowClassificationDoesNotTreatEveryBadRequestAsCapacityFailure() {
         assertEquals("CONTEXT_OVERFLOW", AgentModelFailure.http(400,
             """{"error":{"code":"context_length_exceeded","message":"private fixture"}}""").code)
@@ -316,6 +409,73 @@ class AgentContextCompactionTest {
         assertNotNull(result.contextSnapshot)
         assertEquals(finalText, result.contextSnapshot!!.messages.last().content)
         assertEquals(finalText, result.transcript.last().content)
+    }
+
+    @Test
+    fun missingUsageRoundsEmitCompactionUnavailableOnce() {
+        // C3b（v3.11.26）：服务商连续不回 usage（input_tokens 为 null）时自动压缩停摆；
+        // 达到阈值后发一次 CompactionUnavailable 诊断事件（不每轮刷屏）。
+        val events = mutableListOf<AgentEvent>()
+        val messages = jsonHistory()
+        val session = AgentContextSession(
+            config, messages, 1, "operation",
+            provider { _, _ -> response("完成") },
+            AgentRunController(), { emptySet() },
+            onEvent = events::add,
+            onContextSnapshot = {},
+        )
+        repeat(4) { session.observeInputTokens(null) }
+        val diagnostics = events.filterIsInstance<AgentEvent.CompactionUnavailable>()
+        assertEquals("连续缺失达阈值后应恰好发一次诊断事件", 1, diagnostics.size)
+        assertEquals("触发当轮计数即阈值 3", 3, diagnostics.single().missingRounds)
+
+        // 收到 usage 后计数复位：再连续缺失一轮不补发（还差两轮才到阈值）。
+        session.observeInputTokens(1_000)
+        session.observeInputTokens(null)
+        assertEquals(1, events.filterIsInstance<AgentEvent.CompactionUnavailable>().size)
+    }
+
+    @Test
+    fun reductionJudgementUsesCharCountNotRawEstimate() {
+        // P0 回归（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+        // 降幅判定必须基于【字符数】。构造"工具结果密集（ASCII，rawEstimate 低估约 3 倍）"的历史，
+        // 若判据用 rawEstimate 比值会得出偏高的「降幅不足」结论而误拒；字符数判据应放行。
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "固定规则"))
+        repeat(20) { turn ->
+            messages.put(JSONObject().put("role", "user").put("content", "问题 $turn"))
+            messages.put(JSONObject().put("role", "tool").put("content", "x".repeat(20_000)))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", "最新问题"))
+
+        val beforeChars = messages.toString().length
+        val compacted = AgentContextCompactor(
+            config,
+            provider { _, _ -> response("摘".repeat(8_000)) },
+            AgentRunController(),
+        ).compact(messages, 1, emptySet())
+
+        val afterChars = compacted.toString().length
+        assertTrue(
+            "压缩后字符数应显著小于压缩前（实际 $beforeChars → $afterChars）",
+            afterChars * 100 < beforeChars * 80,
+        )
+    }
+
+    @Test
+    fun compactionRejectedWhenCharReductionIsInsufficient() {
+        // 守住原有保护：字符数降幅不足时仍须拒绝，不得因为换了判据就放行。
+        val messages = jsonHistory()
+        var thrown: AgentModelFailure? = null
+        try {
+            AgentContextCompactor(
+                config,
+                provider { _, _ -> response("摘".repeat(15_000)) },   // 摘要比待压内容还大
+                AgentRunController(),
+            ).compact(messages, 1, emptySet())
+        } catch (failure: AgentModelFailure) {
+            thrown = failure
+        }
+        assertEquals("CONTEXT_NO_REDUCTION", thrown?.code)
     }
 
     private fun history() = (1..6).flatMap { turn -> listOf(
