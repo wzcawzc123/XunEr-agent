@@ -68,6 +68,10 @@ internal class AgentLoop(
     )
     private var supplementIndex = initialSupplementIndex
 
+    /** 连续空回合的纠偏计数；出现工具进展会复位。 */
+    private var emptyRoundStreak = 0
+    private var pendingEmptyRoundNudge: String? = null
+
     fun contextSnapshot(): AgentContextSnapshot? = context.snapshot()
 
     private fun appendMessage(message: JSONObject) {
@@ -187,6 +191,14 @@ internal class AgentLoop(
                     )
                 }
             }
+            // 空回合纠偏只随下一轮请求发出，不写回持久历史。
+            pendingEmptyRoundNudge?.let { nudge ->
+                pendingEmptyRoundNudge = null
+                requestMessages = JSONArray().also { merged ->
+                    for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
+                    merged.put(AgentConversationCodec.userTextMessage(nudge))
+                }
+            }
             // 重复调用提醒只随下一轮请求发出，不写回持久历史。
             pendingRepeatNudge?.let { nudge ->
                 pendingRepeatNudge = null
@@ -285,6 +297,8 @@ internal class AgentLoop(
                     outcome
                 }
                 appendToolImages(round, outcomes)
+                // 工具跑出了实际进展：空回合计数复位，避免跨越正常回合累计。
+                emptyRoundStreak = 0
                 publishTranscript()
                 round += 1
                 continue
@@ -300,6 +314,24 @@ internal class AgentLoop(
 
             val content = assistantMessage.optString("content").trim()
             if (content.isBlank() || content == "null") {
+                val reasoned = assistantMessage.optString("reasoning_content").isNotBlank()
+                if (reasoned) {
+                    // 产生了思考却没有正文：本回合没有任何产出，先纠偏重试；
+                    // 预算用尽后按「运行已完成但没有返回文字」收尾，
+                    // 而不是让整次运行失败、丢掉此前已完成的工具工作。
+                    emptyRoundStreak += 1
+                    if (emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES) {
+                        pendingEmptyRoundNudge = EMPTY_ROUND_NUDGE
+                        round += 1
+                        continue
+                    }
+                    onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
+                    return Result(
+                        content = "",
+                        reasoningContent = reasoningSnapshot(),
+                        sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
+                    )
+                }
                 val finishReason = assistantMessage.optString("finish_reason")
                 error("模型接口第 $round 轮返回为空${finishReason.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}")
             }
@@ -342,6 +374,14 @@ internal class AgentLoop(
         if (AgentConversationCodec.parseToolCalls(message).isNotEmpty()) return
         val content = message.optString("content").trim()
         if (content.isNotBlank() && content != "null") return
+        // 只有「产生了思考却没有正文」的正常结束才走纠偏预算；
+        // 纯空响应（无思考）保持上游语义：按 MODEL_EMPTY_RESPONSE 失败。
+        if (response.stopReason == AssistantStopReason.END_TURN &&
+            emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES &&
+            message.optString("reasoning_content").isNotBlank()
+        ) {
+            return
+        }
         throw when (response.stopReason) {
             AssistantStopReason.OUTPUT_LIMIT ->
                 AgentModelFailure("MODEL_OUTPUT_LIMIT", false, "模型输出额度已耗尽但未生成正文，请检查输出上限或降低思考强度。")
@@ -577,6 +617,12 @@ internal class AgentLoop(
 }
 
 /** 连续多少次完全相同的调用才提醒（3 次：1 次可能是巧合，2 次可能还在等状态）。 */
+/** 连续空回合的纠偏上限；用尽后按「没有返回文字」自然收尾。 */
+private const val MAX_EMPTY_ROUND_NUDGES = 2
+private const val EMPTY_ROUND_NUDGE =
+    "上一轮只产生了思考内容，既没有正文也没有工具调用。" +
+        "请直接输出给用户的答复正文；如果任务还需要继续执行，请给出工具调用。"
+
 private const val REPEAT_NUDGE_THRESHOLD = 3
 
 private const val REPEAT_TOOL_NUDGE =
