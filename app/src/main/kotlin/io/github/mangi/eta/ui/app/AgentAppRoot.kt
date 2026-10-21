@@ -380,6 +380,9 @@ fun AgentAppRoot(
                         state = agentState.homeState,
                         modelPickerState = agentState.modelPickerState,
                         conversationKey = agentState.conversationPaneState.selectedConversationId,
+                        onVisionToggled = { providerId, modelId, vision ->
+                            agentState.setModelVision(providerId, modelId, vision)
+                        },
                         resumableInterrupted = agentState.resumableInterrupted != null,
                         onResumeInterrupted = agentState::resumeInterruptedRun,
                         onAction = { action ->
