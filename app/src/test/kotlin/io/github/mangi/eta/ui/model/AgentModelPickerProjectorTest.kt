@@ -117,6 +117,7 @@ class AgentModelPickerProjectorTest {
                 providerSourceType = ProviderSourceTypes.CUSTOM,
                 modelId = id,
                 displayName = displayName,
+                supportsVision = true,
                 contextWindow = null,
             )
         val state = AgentModelPickerUiState(
@@ -162,6 +163,7 @@ class AgentModelPickerProjectorTest {
             providerSourceType = ProviderSourceTypes.CUSTOM,
             modelId = "model",
             displayName = "Model",
+            supportsVision = true,
             contextWindow = 100_000,
         )
         val messages = listOf(

@@ -9,6 +9,8 @@ sealed interface AgentHomeAction {
     data object CompactContext : AgentHomeAction
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentHomeAction
     data class ModelSelected(val modelId: String) : AgentHomeAction
+    /** 切换模型的图片输入能力声明。 */
+    data class VisionToggled(val providerId: String, val modelId: String, val vision: Boolean) : AgentHomeAction
     data class SubmitMessage(val text: String) : AgentHomeAction
     data class InterruptAndSubmitMessage(val text: String) : AgentHomeAction
     data class SteerQueuedMessage(val id: String) : AgentHomeAction

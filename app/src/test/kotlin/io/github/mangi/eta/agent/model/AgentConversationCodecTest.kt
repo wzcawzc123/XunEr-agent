@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -127,5 +128,123 @@ class AgentConversationCodecTest {
         val encoded = AgentConversationCodec.encodeTranscriptForStorage(listOf(stable))
         assertFalse(encoded.contains("opaque-secret"))
         assertFalse(encoded.contains("_eta_responses_output_items"))
+    }
+
+    @Test
+    fun stripImagesRemovesChatImageUrlBlocksAndReturnsNewArray() {
+        val message = JSONObject()
+            .put("role", "user")
+            .put(
+                "content",
+                JSONArray()
+                    .put(JSONObject().put("type", "text").put("text", "看这张图"))
+                    .put(
+                        JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", JSONObject().put("url", "data:image/png;base64,AA=="))
+                    )
+            )
+        val messages = JSONArray().put(message)
+
+        val stripped = AgentConversationCodec.stripImagesForTextOnlyModel(messages)
+
+        assertTrue(stripped !== messages)
+        assertEquals(1, stripped.length())
+        val content = stripped.getJSONObject(0).getJSONArray("content")
+        assertEquals(1, content.length())
+        assertEquals("text", content.getJSONObject(0).getString("type"))
+        // 有文本的消息只删图片块，不追加占位符。
+        assertEquals("看这张图", content.getJSONObject(0).getString("text"))
+        // 原数组不被污染（持久历史保持原样）。
+        assertTrue(messages.getJSONObject(0).getJSONArray("content").length() == 2)
+    }
+
+    @Test
+    fun stripImagesRemovesResponsesInputImageBlocks() {
+        val message = JSONObject()
+            .put("role", "user")
+            .put(
+                "content",
+                JSONArray().put(
+                    JSONObject()
+                        .put("type", "input_image")
+                        .put("image_url", "data:image/png;base64,AA==")
+                )
+            )
+        val stripped = AgentConversationCodec.stripImagesForTextOnlyModel(JSONArray().put(message))
+
+        assertEquals(1, stripped.length())
+        val content = stripped.getJSONObject(0).getJSONArray("content")
+        // 纯图片消息保留占位符文本，保证请求合法。
+        assertEquals(1, content.length())
+        assertEquals("text", content.getJSONObject(0).getString("type"))
+        assertTrue(content.getJSONObject(0).getString("text").contains("图片已忽略"))
+    }
+
+    @Test
+    fun stripImagesRemovesAnthropicImageSourceBlocks() {
+        val message = JSONObject()
+            .put("role", "user")
+            .put(
+                "content",
+                JSONArray().put(
+                    JSONObject()
+                        .put("type", "image")
+                        .put(
+                            "source",
+                            JSONObject()
+                                .put("type", "base64")
+                                .put("media_type", "image/png")
+                                .put("data", "AA==")
+                        )
+                )
+            )
+        val stripped = AgentConversationCodec.stripImagesForTextOnlyModel(JSONArray().put(message))
+
+        assertEquals(1, stripped.length())
+        val content = stripped.getJSONObject(0).getJSONArray("content")
+        assertEquals(1, content.length())
+        assertTrue(content.getJSONObject(0).getString("text").contains("图片已忽略"))
+    }
+
+    @Test
+    fun stripImagesReturnsOriginalReferenceWhenNothingToStrip() {
+        val message = JSONObject()
+            .put("role", "user")
+            .put("content", "纯文本消息")
+        val messages = JSONArray().put(message)
+
+        val stripped = AgentConversationCodec.stripImagesForTextOnlyModel(messages)
+
+        assertSame(messages, stripped)
+    }
+
+    @Test
+    fun isImageBlockCoversAllThreeProviderFormats() {
+        assertTrue(
+            AgentConversationCodec.isImageBlock(
+                JSONObject().put("type", "image_url").put("image_url", JSONObject())
+            )
+        )
+        assertTrue(
+            AgentConversationCodec.isImageBlock(
+                JSONObject().put("type", "input_image")
+            )
+        )
+        assertTrue(
+            AgentConversationCodec.isImageBlock(
+                JSONObject().put("type", "image").put("source", JSONObject())
+            )
+        )
+        assertFalse(
+            AgentConversationCodec.isImageBlock(
+                JSONObject().put("type", "text").put("text", "普通文本")
+            )
+        )
+        assertFalse(
+            AgentConversationCodec.isImageBlock(
+                JSONObject().put("type", "tool_result").put("content", "结果")
+            )
+        )
     }
 }
