@@ -51,7 +51,7 @@
 
 | 项 | 结论 |
 | --- | --- |
-| 参数体检（v3.8.1–v3.8.4 四条） | ✅ 已落地：`validateArguments()` 挂在 `AgentLocalTools.execute()` 入口（executor 层），41 例全绿 |
+| 参数体检（v3.8.1–v3.8.4 四条） | ✅ 已落地：`validateArguments()` 挂在 `AgentLocalTools.execute()` 入口（executor 层）。CI #239：**1707 例 / 1706 通过 / 0 失败 / 1 跳过** |
 | `AgentFileToolCatalog` | ✅ 取 fork 版：`path` 补 `minLength=1`、`read_file` 补 offset_bytes/start_line 互斥 |
 | 终端 `runCommand`/`terminal` | ⏭ 不搬：上游有 `terminal` / `terminal_job` / `terminal_daemon` 新设计 |
 | 坐标新鲜度 | ⏭ 跳过：属 GUI 行为（已定 GUI 不动） |
