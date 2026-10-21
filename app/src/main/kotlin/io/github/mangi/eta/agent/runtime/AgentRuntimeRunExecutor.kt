@@ -128,7 +128,7 @@ internal class AgentRuntimeRunExecutor(
             }
             val characterMemoryTools = roleplayContext?.let { roleplay ->
                 CharacterMemoryTools(appContext, roleplay.characterId) {
-                    runBlocking { AgentMemoryRepository.isEnabled() }
+                    AgentMemoryRepository.isEnabledCached()
                 }
             }
             val memoryContext = if (memoryEnabled) {
@@ -198,7 +198,7 @@ internal class AgentRuntimeRunExecutor(
                         currentPermissions().deviceSensitiveActionTools
                 },
                 memoryToolsEnabled = {
-                    runBlocking { AgentMemoryRepository.isEnabled() }
+                    AgentMemoryRepository.isEnabledCached()
                 },
                 memoryWritable = roleplayContext == null,
                 screenshotExcludedPackages = {
@@ -310,9 +310,16 @@ internal class AgentRuntimeRunExecutor(
                     characterMemoryTools.execute(call)
                 } else routingExecutor.execute(call).also { result ->
                     if (call.name == "memory_write") {
-                        runCatching { JSONObject(result.content) }.getOrNull()
-                            ?.takeIf { it.optBoolean("ok") }
-                            ?.let { ConversationMemoryPins.recordOwnWrite(conversationId, it.optString("revision")) }
+                        // 只有长期记忆写入才更新注入 pin：短期写入的 revision 是短期文件哈希，
+                        // 记进长期 pin 会让下一轮白白重建一次注入快照。
+                        val isLongTarget = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
+                            .getOrNull()
+                            ?.optString("target", "long") != "short"
+                        if (isLongTarget) {
+                            runCatching { JSONObject(result.content) }.getOrNull()
+                                ?.takeIf { it.optBoolean("ok") }
+                                ?.let { ConversationMemoryPins.recordOwnWrite(conversationId, it.optString("revision")) }
+                        }
                     }
                 }
             }

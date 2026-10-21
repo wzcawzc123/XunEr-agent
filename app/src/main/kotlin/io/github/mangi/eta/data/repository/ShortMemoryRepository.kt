@@ -56,6 +56,27 @@ internal object ShortMemoryRepository : MemoryRepository {
         return store.replaceAll(content)
     }
 
+    override fun replaceAllIfRevision(content: String, revision: String): AgentMemoryWriteResult {
+        ensureInitialized()
+        return store.replaceAllIfRevision(content, revision)
+    }
+
+    override fun listHistory(): List<AgentMemoryHistoryEntry> {
+        ensureInitialized()
+        return store.listHistory()
+    }
+
+    override fun restoreHistory(id: String): AgentMemorySnapshot {
+        ensureInitialized()
+        return store.restoreHistory(id)
+    }
+
+    /** 仅供测试：与 [AgentMemoryRepository.rebindForTests] 同因（Robolectric 每类新 Application）。 */
+    @androidx.annotation.VisibleForTesting
+    internal fun rebindForTests(context: Context) {
+        store = AgentMemoryStore(File(context.applicationContext.filesDir, SHORT_ROOT_DIR))
+    }
+
     private fun ensureInitialized() {
         check(::store.isInitialized) {
             "ShortMemoryRepository.init(context) must be called in Application.onCreate()"

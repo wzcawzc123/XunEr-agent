@@ -95,7 +95,8 @@ internal class AgentLocalTools(
         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS)
     },
     private val memoryToolsEnabled: () -> Boolean = {
-        runBlocking { AgentMemoryRepository.isEnabled() }
+        // 工具派发路径不阻塞：读启动时预热的缓存（开关闭合只可能从设置页发生）。
+        AgentMemoryRepository.isEnabledCached()
     },
     private val memoryWritable: Boolean = true,
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },

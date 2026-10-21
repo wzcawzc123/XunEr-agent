@@ -90,5 +90,10 @@ internal object EtaBackupValidation {
             throw EtaBackupException("备份中的会话状态无效")
         }
         if (document.memoryMd.toByteArray(Charsets.UTF_8).size > 1024 * 1024) throw EtaBackupException("MEMORY.md 超过 1 MiB 限制")
+        if (document.memoryShortMd != null &&
+            document.memoryShortMd.toByteArray(Charsets.UTF_8).size > 1024 * 1024
+        ) {
+            throw EtaBackupException("短期 MEMORY.md 超过 1 MiB 限制")
+        }
     }
 }
