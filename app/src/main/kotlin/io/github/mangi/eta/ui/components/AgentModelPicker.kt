@@ -1,5 +1,7 @@
 package io.github.mangi.eta.ui.components
 
+import top.yukonga.miuix.kmp.basic.Switch
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -81,6 +83,7 @@ internal fun AgentModelPickerButton(
     popupAnchorTopPx: Int,
     popupMaxHeight: Dp,
     onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     var showPopup by remember { mutableStateOf(false) }
@@ -143,6 +146,7 @@ internal fun AgentModelPickerButton(
                     showPopup = false
                     onModelSelected(modelId)
                 },
+                onVisionToggled = onVisionToggled,
             )
         }
 
@@ -159,6 +163,7 @@ internal fun AgentModelPickerButton(
                         showSheet = false
                         onModelSelected(modelId)
                     },
+                    onVisionToggled = onVisionToggled,
                 )
             }
         }
@@ -169,6 +174,7 @@ internal fun AgentModelPickerButton(
 private fun ModelQuickList(
     state: AgentModelPickerUiState,
     onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit,
 ) {
     val select = rememberConfirmedSelection(onModelSelected)
     val selectedId = select.pendingId ?: state.selectedModel?.id
@@ -186,6 +192,7 @@ private fun ModelQuickList(
                     model = model,
                     selected = model.id == selectedId,
                     onClick = { select(model.id) },
+                    onVisionToggled = { vision -> onVisionToggled(model.providerId, model.modelId, vision) },
                 )
             }
         }
@@ -208,6 +215,7 @@ private sealed interface ModelSheetEntry {
 private fun ModelSheetContent(
     state: AgentModelPickerUiState,
     onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var providerFilter by remember { mutableStateOf<String?>(null) }
@@ -304,6 +312,9 @@ private fun ModelSheetContent(
                         model = entry.model,
                         selected = entry.model.id == selectedId,
                         onClick = { select(entry.model.id) },
+                        onVisionToggled = { vision ->
+                            onVisionToggled(entry.model.providerId, entry.model.modelId, vision)
+                        },
                         horizontalPadding = 12.dp,
                     )
                 }
@@ -360,6 +371,7 @@ private fun ModelPickerRow(
     model: AgentModelOptionUi,
     selected: Boolean,
     onClick: () -> Unit,
+    onVisionToggled: ((Boolean) -> Unit)? = null,
     horizontalPadding: Dp = 8.dp,
 ) {
     val contentColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface
@@ -372,14 +384,35 @@ private fun ModelPickerRow(
             .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = model.displayName,
-            style = MiuixTheme.textStyles.body2,
-            color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = model.displayName,
+                style = MiuixTheme.textStyles.body2,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 图片输入能力声明：模型自动推断可能不准，给开关让用户手动覆盖。
+            Text(
+                text = if (model.supportsVision) {
+                    stringResource(R.string.model_supports_vision)
+                } else {
+                    stringResource(R.string.model_text_only)
+                },
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+            )
+        }
+        if (onVisionToggled != null) {
+            Spacer(modifier = Modifier.width(6.dp))
+            // Switch 自带 toggleable 消费点击，不会连带触发整行的选中。
+            Switch(
+                checked = model.supportsVision,
+                onCheckedChange = onVisionToggled,
+                modifier = Modifier.scale(0.8f),
+            )
+        }
         if (selected) {
             Spacer(modifier = Modifier.width(8.dp))
             Icon(
