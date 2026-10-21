@@ -28,6 +28,7 @@
   <string name="action_save">Save</string>
   <string name="action_retry">Retry</string>
   <string name="action_continue">Continue</string>
+  <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
   <string name="action_stop">Stop</string>
   <string name="action_edit">Edit</string>
   <string name="action_rename">Rename</string>
