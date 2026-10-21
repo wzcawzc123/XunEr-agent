@@ -178,13 +178,22 @@ class AgentToolCatalogTest {
             memoryTools = true,
         )
         assertTrue("memory_get" in enabled.toolNames())
+        // 按标题整节读取，避免调用方为定位一节而整份翻页。
+        val read = enabled.function("memory_get")
+        assertTrue(read.getJSONObject("parameters").getJSONObject("properties").has("section"))
+
         val write = enabled.function("memory_write")
-        val properties = write.getJSONObject("parameters").getJSONObject("properties")
+        val parameters = write.getJSONObject("parameters")
+        val properties = parameters.getJSONObject("properties")
         assertEquals(3_500, properties.getJSONObject("content").getInt("maxLength"))
         assertEquals(
-            listOf("replace_range", "append", "clear"),
+            listOf("replace_section", "replace_range", "append", "clear"),
             properties.getJSONObject("mode").getJSONArray("enum").stringValues(),
         )
+        // 按标题替换：提示词里"优先替换已有章节"唯一可执行的手段。
+        assertTrue(properties.has("section"))
+        // 仍只强制 mode + revision，各模式自行校验自己需要的字段。
+        assertEquals(setOf("mode", "revision"), parameters.requiredNames())
     }
 
     private fun JSONArray.toolNames(): List<String> =
