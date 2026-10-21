@@ -13,6 +13,7 @@ import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.AgentToolCallValidator
 import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.device.LocalNetworkPermission
 import io.github.mangi.eta.agent.web.AgentWebTools
@@ -98,10 +99,12 @@ internal class AgentLocalTools(
     private val skillPackageInstaller: SkillPackageInstaller? = null,
     runAvailableSkillIds: Set<String> = emptySet(),
     pendingSkillConflict: PendingSkillConflictCapability? = null,
-    private val rootAvailable: () -> Boolean = { RootAccess.isGranted },
+    private val rootAvailable: () -> Boolean = { RootAccess.isGranted }
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
 
     private val closed = AtomicBoolean(false)
+    /** schema 无关的参数体检器：见 [AgentToolCallValidator.validateArguments]。 */
+    private val argumentGuard = AgentToolCallValidator(JSONArray())
     private val deviceController = RootShellDeviceController(logger, screenshotExcludedPackages, rootAvailable)
     private val rootCommandExecutor = BoundedRootCommandExecutor(logger, rootAvailable = rootAvailable)
     private val structuredDeviceTools = AgentStructuredDeviceTools(
@@ -163,6 +166,11 @@ internal class AgentLocalTools(
                 AgentToolRequirements.rootDenied(toolCall.name, args, rootAvailable())
             ) {
                 return@runCatching textResult(errorResult("ROOT_REQUIRED", "此操作需要 Root 授权，本次未执行"))
+            }
+            // 参数体检（无 schema）：畸形 JSON / 脱敏重放 / XML 粘包残渣，给出可执行引导。
+            // 放在 executor 层而非 Loop：上游契约要求参数直达执行器，schema 校验交给各工具。
+            argumentGuard.validateArguments(toolCall)?.let { guidance ->
+                return@runCatching textResult(errorResult("INVALID_ARGUMENT", guidance))
             }
             deviceToolPermissionError(toolCall.name)?.let { return@runCatching it }
             memoryToolPermissionError(toolCall.name)?.let { return@runCatching it }
