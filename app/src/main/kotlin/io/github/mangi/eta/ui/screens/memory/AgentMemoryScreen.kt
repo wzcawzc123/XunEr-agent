@@ -43,7 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
@@ -548,14 +547,14 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
         val trimmedQuery = query.trim()
         // 搜索时过滤**全文**（不限于核心区切片）：归档区内容也应能定位命中。
         // 输出只保留命中行、数量很少，渲染量小；无搜索时仍渲染核心区切片（防全量布局白屏）。
-        val context = LocalContext.current
-        val display = remember(content, trimmedQuery, context) {
+        // 模板走 stringResource（配置变化会重组），占位符在非 composable 里用 String.format 填，
+        // 不用 LocalContext.getString —— 那样 lint 会判 LocalContextGetResourceValueCall。
+        val gapsTemplate = stringResource(R.string.memory_search_gaps)
+        val display = remember(content, trimmedQuery, gapsTemplate) {
             if (trimmedQuery.isEmpty()) {
                 slice.text
             } else {
-                filterLines(content, trimmedQuery) { n ->
-                    context.getString(R.string.memory_search_gaps, n)
-                }
+                filterLines(content, trimmedQuery) { n -> gapsTemplate.format(n) }
             }
         }
         if (trimmedQuery.isNotEmpty() && display.isBlank()) {
