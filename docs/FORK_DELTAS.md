@@ -136,6 +136,23 @@ v3.8.1–v3.8.4「报错诊断」系列（全角等号粘包、分支标签、�
 
 验收：CI #241 双 job 绿，**1713 例 / 1712 通过 / 0 失败 / 1 跳过**
 
+## 四之六、第 4 块（记忆）进展
+
+判定表（19 条）：跳过 1（记忆上下文按会话固定，95.5% 上游已有）、部分 3、搬 15。
+本轮先落后端（UI 与三语下一轮）：
+
+| 项 | 说明 |
+| --- | --- |
+| 新增 | `ShortMemoryRepository`（短期层）、`MemoryRollup`（整理）、`AgentMemoryFreshness`（时效）、`AgentMemoryHeadingCheck`（同名检测）、`AgentMemoryPlacement`（位置建议）、`AgentMemoryPreview`（预览核心区） |
+| 替换 | `AgentMemoryRepository` 606 vs 350（多 10 个函数，上游无独有）、`AgentMemoryContext` 217 vs 86（Builder + 短期分层）、`AgentMemoryToolCatalog` 144 vs 103（section/水位/归档/分页） |
+| 工具实现 | `memoryGet` / `memoryWrite` 换成 fork 版（94/78 行），补 `MemoryPageKey`（拦重复读同一页）、`memoryRepositoryFor`、`isArchivedRead` |
+| 测试 | 取入 10 个记忆测试；`AgentToolCatalogTest` 断言对齐 fork 契约（mode 含 `replace_section`、`section` 字段、必填仍只有 mode+revision） |
+
+验收：CI #243 双 job 绿，**1771 例 / 1770 通过 / 0 失败 / 1 跳过**
+（记忆相关 100 例含：ContextBuilder / Freshness / HeadingCheck / Placement / Preview / Rollup / GetPaging / ArchiveBoundary / Store）
+
+**未做**：记忆页 UI（`AgentMemoryScreen` 727 行 vs 上游 467）与 `memory_*` 三语、热力图已弃用。
+
 ## 五、恢复原则
 
 1. 每块一个提交，编译 + 对应测试通过才进下一块；失败单独回退。
