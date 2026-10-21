@@ -58,6 +58,18 @@ internal class AgentToolCallValidator(tools: JSONArray) {
     }
 
     /**
+     * 只对 schema 已声明的工具做完整约束校验；未声明的名字返回 null，
+     * 交给执行器的派发处理（legacy 兼容名如 input_text 系列仍可执行，未知名由派发报错）。
+     *
+     * 供 executor 层调用：目录约束（minLength、参数互斥、枚举）必须有运行时执行，
+     * 否则空 path 这类旧病灶会漏到 shell 层才报错。
+     */
+    fun validateDeclared(call: AgentModelClient.ToolCall): String? {
+        if (schemasByName[call.name] == null) return null
+        return validate(call)
+    }
+
+    /**
      * 无 schema 的参数体检：只做与工具定义无关的三项——畸形 JSON、脱敏重放、XML 粘包残渣。
      *
      * 供 executor 层（[io.github.mangi.eta.agent.tool.AgentLocalTools]）在真正执行前调用：
