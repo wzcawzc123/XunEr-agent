@@ -57,6 +57,21 @@ internal class AgentToolCallValidator(tools: JSONArray) {
         )
     }
 
+    /**
+     * 无 schema 的参数体检：只做与工具定义无关的三项——畸形 JSON、脱敏重放、XML 粘包残渣。
+     *
+     * 供 executor 层（[io.github.mangi.eta.agent.tool.AgentLocalTools]）在真正执行前调用：
+     * 上游契约不允许 Loop 做 schema 预检，但这三项是模型输出格式问题，与工具语义无关，
+     * 放在执行入口既能给出可执行引导，也不干扰上游的"参数直达执行器"约定。
+     */
+    fun validateArguments(call: AgentModelClient.ToolCall): String? {
+        val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }
+            .getOrElse { return malformedArgumentsGuidance(call.argumentsJson) }
+        if (isRedactedPayload(arguments)) return REDACTED_REPLAY_GUIDANCE
+        findXmlResidue(arguments)?.let { residue -> return xmlResidueGuidance(residue.first, residue.second) }
+        return null
+    }
+
     /** 历史里敏感工具的参数会被脱敏成 {_redacted,_note,_fields}；模型原样重发时必须给出可执行引导。 */
     fun isRedactedReplay(call: AgentModelClient.ToolCall): Boolean {
         val arguments = runCatching { JSONObject(call.argumentsJson.ifBlank { "{}" }) }.getOrNull() ?: return false
