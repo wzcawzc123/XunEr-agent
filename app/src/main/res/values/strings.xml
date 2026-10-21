@@ -42,6 +42,7 @@
   <string name="action_open_browser">Open browser</string>
   <string name="action_launch_kimi_web">Launch Kimi Web</string>
   <string name="route_browser">Agent browser</string>
+  <string name="route_usage_stats">Usage</string>
   <string name="route_tools">Tools</string>
   <string name="route_skills" translatable="false">Skills</string>
   <string name="route_permissions">Permissions</string>
