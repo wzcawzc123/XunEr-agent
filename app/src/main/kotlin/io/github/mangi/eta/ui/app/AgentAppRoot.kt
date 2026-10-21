@@ -687,9 +687,13 @@ fun AgentAppRoot(
                             AgentMemoryAction.NavigateBack -> popRoute()
                             is AgentMemoryAction.ToggleEnabled -> memory.setMemoryEnabled(action.enabled)
                             is AgentMemoryAction.DraftChanged -> memory.updateMemoryDraft(action.content)
+                            AgentMemoryAction.DiscardDraft -> memory.resetDraft()
                             AgentMemoryAction.Save -> memory.saveMemory()
                             AgentMemoryAction.Clear -> memory.clearMemory()
                             AgentMemoryAction.DismissNotice -> memory.dismissMemoryNotice()
+                            is AgentMemoryAction.SwitchTarget -> memory.switchTarget(action.target)
+                            is AgentMemoryAction.SearchChanged -> memory.updateSearchQuery(action.query)
+                            AgentMemoryAction.Rollup -> memory.rollupMemory()
                         }
                     },
                 )

@@ -1,5 +1,6 @@
 package io.github.mangi.eta.ui.screens.memory
 
+import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -66,6 +67,7 @@ import io.github.mangi.eta.ui.markdown.MarkdownTone
 import io.github.mangi.eta.ui.markdown.StaticMarkdown
 import io.github.mangi.eta.ui.model.AgentMemoryAction
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
+import io.github.mangi.eta.ui.model.MemoryTargetUi
 import java.text.NumberFormat
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -88,6 +90,11 @@ internal fun AgentMemoryScreen(
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
+    var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
+    // 「整理」会重新加载记忆文件并覆盖草稿（见 AgentMemoryStore.rollupMemory → refreshMemory），
+    // 与「切换目标」同理：有未保存修改时必须先确认，否则一次误触就丢了编辑。
+    var pendingRollup by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -134,8 +141,31 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
+                // **必须包一层 Column**：AnimatedVisibility 内部用 Layout 实现，
+                // 多个子元素会被测量后放在同一位置（堆叠），
+                // 结果设置卡片正好压在「长期/短期记忆」切换按钮上 —— 真机反馈「被挡住了」。
+                Column {
+                MemoryTargetSwitcher(
+                    state = state,
+                    onRequestSwitch = { target ->
+                        // P2：有未保存草稿时先确认，避免误触切换丢编辑。
+                        if (state.hasUnsavedChanges && target != state.target) {
+                            pendingTargetSwitch = target
+                        } else {
+                            onAction(AgentMemoryAction.SwitchTarget(target))
+                        }
+                    },
+                    onRollup = {
+                        if (state.hasUnsavedChanges) pendingRollup = true
+                        else onAction(AgentMemoryAction.Rollup)
+                    },
+                )
+                // v3.13.3：不再折叠（去掉 OverviewHeader 展开/收起交互），
+                // 设置区直接平铺；热力图已移除（无人使用）。
                 MemorySettingsGroup(state = state, onAction = onAction)
+                }
             }
+            MemorySearchField(state = state, mode = currentMode, onModeChange = { mode = it }, onAction = onAction)
             MemoryDocumentCard(
                 state = state,
                 mode = currentMode,
@@ -147,7 +177,7 @@ internal fun AgentMemoryScreen(
             )
             MemorySaveBar(
                 state = state,
-                onDiscard = { onAction(AgentMemoryAction.DraftChanged(state.savedContent)) },
+                onDiscard = { onAction(AgentMemoryAction.DiscardDraft) },
                 onSave = { onAction(AgentMemoryAction.Save) },
             )
             Spacer(Modifier.height(12.dp))
@@ -174,6 +204,51 @@ internal fun AgentMemoryScreen(
         }
     }
 
+    // P2（v3.11.28）：切换 long/short 目标前有未保存草稿 → 确认后丢弃并切换。
+    pendingTargetSwitch?.let { pending ->
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_switch_target_title),
+            summary = stringResource(
+                R.string.memory_switch_target_summary,
+                stringResource(
+                    if (pending == MemoryTargetUi.Short) R.string.memory_target_short
+                    else R.string.memory_target_long,
+                ),
+            ),
+            onDismissRequest = { pendingTargetSwitch = null },
+        ) {
+            MiuixDialogActions(
+                confirmText = stringResource(R.string.memory_discard_and_switch),
+                destructive = true,
+                confirmEnabled = !state.isSaving,
+                onCancel = { pendingTargetSwitch = null },
+                onConfirm = {
+                    pendingTargetSwitch = null
+                    onAction(AgentMemoryAction.SwitchTarget(pending))
+                },
+            )
+        }
+
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_tidy_title),
+            summary = stringResource(R.string.memory_tidy_summary),
+            onDismissRequest = { pendingRollup = false },
+        ) {
+            MiuixDialogActions(
+                confirmText = stringResource(R.string.memory_discard_and_tidy),
+                destructive = true,
+                confirmEnabled = !state.isSaving,
+                onCancel = { pendingRollup = false },
+                onConfirm = {
+                    pendingRollup = false
+                    onAction(AgentMemoryAction.Rollup)
+                },
+            )
+        }
+    }
+
     state.notice?.let { notice ->
         EtaWindowDialog(
             show = true,
@@ -185,6 +260,90 @@ internal fun AgentMemoryScreen(
                 text = stringResource(R.string.ui_knew_cb63c6),
                 onClick = { onAction(AgentMemoryAction.DismissNotice) },
                 modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryTargetSwitcher(
+    state: AgentMemoryUiState,
+    onRequestSwitch: (MemoryTargetUi) -> Unit,
+    onRollup: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
+            .padding(top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 与「预览 / 编辑」同一套视觉：外层容器 + 内层选中态。
+        // 之前是两个独立的胶囊 chip，与页面其他控件不是一套语言（真机反馈"布局不行"）。
+        Row(
+            modifier = Modifier
+                .squircleSurface(color = colors.surfaceContainerHigh, cornerRadius = 12.dp)
+                .padding(3.dp),
+        ) {
+            listOf(MemoryTargetUi.Long, MemoryTargetUi.Short).forEach { target ->
+                val selected = state.target == target
+                val background by animateColorAsState(
+                    if (selected) colors.surface else colors.surfaceContainerHigh,
+                    label = "memory_target_tab",
+                )
+                Box(
+                    modifier = Modifier
+                        .squircleSurface(color = background, cornerRadius = 9.dp)
+                        .clickable(enabled = !state.isLoading && !selected) {
+                            onRequestSwitch(target)
+                        }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (target == MemoryTargetUi.Long) R.string.memory_target_long
+                            else R.string.memory_target_short,
+                        ),
+                        style = MiuixTheme.textStyles.footnote1,
+                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                        color = if (selected) colors.onSurface else colors.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        if (state.target == MemoryTargetUi.Short) {
+            // 与左侧分段控件同款 squircle 胶囊，两字「整理」；不加图形符号。
+            val busy = state.isLoading || state.isSaving
+            Box(
+                modifier = Modifier
+                    .squircleSurface(
+                        color = if (busy) {
+                            colors.surfaceContainerHigh
+                        } else {
+                            colors.primary.copy(alpha = 0.12f)
+                        },
+                        cornerRadius = 12.dp,
+                    )
+                    .clickable(enabled = !busy, onClick = onRollup)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(
+                        if (state.isSaving) R.string.memory_tidying else R.string.memory_tidy,
+                    ),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = if (busy) colors.onSurfaceVariantSummary else colors.primary,
+                )
+            }
+        } else {
+            Text(
+                text = stringResource(R.string.memory_persistent_facts),
+                style = MiuixTheme.textStyles.footnote2,
+                color = colors.onSurfaceVariantSummary,
             )
         }
     }
@@ -215,6 +374,54 @@ private fun MemorySettingsGroup(
     }
 }
 
+/** 记忆搜索框：仅过滤当前 draft 的展示，不落盘（spec memory-upgrade §3.3）。 */
+@Composable
+private fun MemorySearchField(
+    state: AgentMemoryUiState,
+    mode: MemoryViewMode,
+    onModeChange: (MemoryViewMode) -> Unit,
+    onAction: (AgentMemoryAction) -> Unit,
+) {
+    top.yukonga.miuix.kmp.basic.TextField(
+        value = state.searchQuery,
+        onValueChange = { text ->
+            onAction(AgentMemoryAction.SearchChanged(text))
+            // 编辑区是输入框、不能过滤正文：输入搜索词时自动切到预览展示命中结果
+            //（草稿保留、dirty 不变，可切回继续编辑）——否则搜索在编辑模式下是死区。
+            if (text.isNotBlank() && mode == MemoryViewMode.Edit) {
+                onModeChange(MemoryViewMode.Preview)
+            }
+        },
+        label = stringResource(R.string.memory_search_label),
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = EtaPreferenceDefaults.SidePadding)
+            // 上下都要留白：只留 top 会与下面的 MEMORY.md 卡片粘连（真机反馈）。
+            .padding(
+                top = EtaPreferenceDefaults.GroupSpacing,
+                bottom = EtaPreferenceDefaults.GroupSpacing,
+            ),
+    )
+}
+
+/** 在任意文本上做「保留命中行 + 折叠其余」的过滤：搜索时定位命中行，其余行省略。 */
+private fun filterLines(text: String, query: String, gapLabel: (Int) -> String): String {
+    val lines = text.split('\n')
+    val matched = lines.indices.filter { lines[it].contains(query, ignoreCase = true) }
+    if (matched.isEmpty()) return ""
+    return buildString {
+        var last = -1
+        matched.forEach { index ->
+            if (last >= 0 && index > last + 1) append("\n" + gapLabel(index - last - 1) + "\n")
+            append(lines[index])
+            if (index != matched.last()) append('\n')
+            last = index
+        }
+    }
+}
+
 /** 文档卡片：标题栏承载文件名、体积与预览/编辑切换，正文区占满卡片剩余高度并独立滚动。 */
 @Composable
 private fun MemoryDocumentCard(
@@ -240,9 +447,24 @@ private fun MemoryDocumentCard(
                 tint = colors.primary,
             )
             Spacer(Modifier.width(8.dp))
+            // v3.13.3：色点一眼区分长期/短期（长期=主色，短期=主色容器淡色），辅助标题文字。
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        if (state.target == MemoryTargetUi.Short) colors.primaryContainer else colors.primary,
+                        CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "MEMORY.md",
+                    // P1（v3.11.28）：按 target 区分标题，避免用户分不清编辑的是长期还是短期文件。
+                    text = if (state.target == MemoryTargetUi.Short) {
+                        stringResource(R.string.memory_file_short_term)
+                    } else {
+                        "MEMORY.md"
+                    },
                     style = MiuixTheme.textStyles.body2,
                     fontWeight = FontWeight.Medium,
                     color = colors.onSurface,
@@ -270,6 +492,7 @@ private fun MemoryDocumentCard(
                     when (current) {
                         MemoryViewMode.Preview -> MemoryPreview(
                             content = state.draft,
+                            query = state.searchQuery,
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(
@@ -285,7 +508,12 @@ private fun MemoryDocumentCard(
 }
 
 @Composable
-private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
+private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
+    // **只渲染核心区**：整个 MEMORY.md 有 17 万字符（242KB），
+    // 全塞进一个可滚动 Text 会让 Compose 全量测量布局 —— 进页面白屏半秒以上。
+    // 核心区是每轮真正注入模型的部分（默认 32K 预算），也是用户最常看的；
+    // 归档区按需进「编辑」查看。
+    val slice = remember(content) { AgentMemoryPreview.slice(content) }
     if (content.isBlank()) {
         Column(
             modifier = Modifier
@@ -310,13 +538,45 @@ private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
         }
         return
     }
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        StaticMarkdown(content = content, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        val trimmedQuery = query.trim()
+        // 搜索时过滤**全文**（不限于核心区切片）：归档区内容也应能定位命中。
+        // 输出只保留命中行、数量很少，渲染量小；无搜索时仍渲染核心区切片（防全量布局白屏）。
+        // 模板走 stringResource（配置变化会重组），占位符在非 composable 里用 String.format 填，
+        // 不用 LocalContext.getString —— 那样 lint 会判 LocalContextGetResourceValueCall。
+        val gapsTemplate = stringResource(R.string.memory_search_gaps)
+        val display = remember(content, trimmedQuery, gapsTemplate) {
+            if (trimmedQuery.isEmpty()) {
+                slice.text
+            } else {
+                filterLines(content, trimmedQuery) { n -> gapsTemplate.format(n) }
+            }
+        }
+        if (trimmedQuery.isNotEmpty() && display.isBlank()) {
+            // 无命中时给明确反馈，而不是整页空白（用户感知为"没反应"）。
+            Text(
+                text = stringResource(R.string.memory_search_empty, trimmedQuery),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            StaticMarkdown(content = display, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        }
+        if (slice.truncated && trimmedQuery.isEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.memory_archive_hint, slice.archivedChars / 1024),
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
