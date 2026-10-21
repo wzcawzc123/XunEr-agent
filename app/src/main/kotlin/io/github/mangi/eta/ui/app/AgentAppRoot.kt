@@ -684,7 +684,10 @@ fun AgentAppRoot(
                             AgentMemoryAction.DismissNotice -> memory.dismissMemoryNotice()
                             is AgentMemoryAction.SwitchTarget -> memory.switchTarget(action.target)
                             is AgentMemoryAction.SearchChanged -> memory.updateSearchQuery(action.query)
-                            AgentMemoryAction.Rollup -> memory.rollupMemory()
+                            AgentMemoryAction.Rollup -> memory.proposeRollup()
+                            AgentMemoryAction.CommitRollup -> memory.commitRollup()
+                            AgentMemoryAction.DismissRollupResult -> memory.dismissRollupResult()
+                            is AgentMemoryAction.RestoreHistory -> memory.restoreHistory(action.id)
                         }
                     },
                 )

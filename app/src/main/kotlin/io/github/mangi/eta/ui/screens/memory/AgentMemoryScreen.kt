@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -28,12 +29,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,9 +95,12 @@ internal fun AgentMemoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     // P2（v3.11.28）：切换 long/short 目标若有未保存草稿，先弹确认再切换（防误触丢编辑）。
     var pendingTargetSwitch by remember { mutableStateOf<MemoryTargetUi?>(null) }
-    // 「整理」会重新加载记忆文件并覆盖草稿（见 AgentMemoryStore.rollupMemory → refreshMemory），
+    // 「整理」会重新加载记忆文件并覆盖草稿（见 AgentMemoryStore.proposeRollup → refreshMemory），
     // 与「切换目标」同理：有未保存修改时必须先确认，否则一次误触就丢了编辑。
     var pendingRollup by remember { mutableStateOf(false) }
+    // 历史快照：列表对话框 + 恢复二次确认。
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var pendingHistoryRestore by remember { mutableStateOf<String?>(null) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -109,6 +115,20 @@ internal fun AgentMemoryScreen(
         title = stringResource(R.string.ui_memory_b55ff5),
         onBack = { onAction(AgentMemoryAction.NavigateBack) },
         actions = {
+            IconButton(
+                onClick = { showHistoryDialog = true },
+                enabled = !state.isLoading,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.History,
+                    contentDescription = stringResource(R.string.memory_history_title),
+                    tint = if (!state.isLoading) {
+                        MiuixTheme.colorScheme.onSurface
+                    } else {
+                        MiuixTheme.colorScheme.disabledOnSurface
+                    },
+                )
+            }
             IconButton(
                 onClick = { showClearDialog = true },
                 enabled = !state.isLoading && !state.isSaving && state.draft.isNotEmpty(),
@@ -229,7 +249,11 @@ internal fun AgentMemoryScreen(
                 },
             )
         }
+    }
 
+    // 「整理」确认。4.0 修复：原先误嵌在上面切换目标的 let 块内，
+    // 有未保存修改时点整理不弹窗（静默失效）、切目标时双对话框叠加。必须独立显隐。
+    if (pendingRollup) {
         EtaWindowDialog(
             show = true,
             title = stringResource(R.string.memory_tidy_title),
@@ -239,11 +263,130 @@ internal fun AgentMemoryScreen(
             MiuixDialogActions(
                 confirmText = stringResource(R.string.memory_discard_and_tidy),
                 destructive = true,
-                confirmEnabled = !state.isSaving,
+                confirmEnabled = !state.isRollingUp,
                 onCancel = { pendingRollup = false },
                 onConfirm = {
                     pendingRollup = false
                     onAction(AgentMemoryAction.Rollup)
+                },
+            )
+        }
+    }
+
+    // 整理结果预览确认（S5）：LLM 提炼结果先过目，确认后才追加进长期记忆。
+    state.pendingRollupResult?.let { result ->
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_rollup_preview_title),
+            summary = stringResource(R.string.memory_rollup_preview_summary),
+            onDismissRequest = { onAction(AgentMemoryAction.DismissRollupResult) },
+        ) {
+            Column {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 280.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        text = result,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                MiuixDialogActions(
+                    confirmText = stringResource(R.string.memory_rollup_confirm),
+                    cancelText = stringResource(R.string.memory_rollup_discard),
+                    confirmEnabled = !state.isRollingUp,
+                    onCancel = { onAction(AgentMemoryAction.DismissRollupResult) },
+                    onConfirm = { onAction(AgentMemoryAction.CommitRollup) },
+                )
+            }
+        }
+    }
+
+    // 历史快照列表：恢复前当前内容会自动存入历史，回滚也可回滚。
+    if (showHistoryDialog) {
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_history_title),
+            summary = stringResource(R.string.memory_history_summary),
+            onDismissRequest = { showHistoryDialog = false },
+        ) {
+            Column {
+                if (state.history.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.memory_history_empty),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        state.history.forEach { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = formatHistoryTime(entry.savedAtMillis),
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = stringResource(
+                                            R.string.memory_history_entry_size,
+                                            formatBytes(entry.byteSize),
+                                        ),
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
+                                EtaTextButton(
+                                    text = stringResource(R.string.memory_history_restore),
+                                    onClick = {
+                                        pendingHistoryRestore = entry.id
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                EtaTextButton(
+                    text = stringResource(R.string.ui_knew_cb63c6),
+                    onClick = { showHistoryDialog = false },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+
+    // 恢复历史二次确认：明确告知「当前内容先入历史」，回滚可逆。
+    pendingHistoryRestore?.let { id ->
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_history_confirm_title),
+            summary = stringResource(R.string.memory_history_confirm_summary),
+            onDismissRequest = { pendingHistoryRestore = null },
+        ) {
+            MiuixDialogActions(
+                confirmText = stringResource(R.string.memory_history_restore),
+                confirmEnabled = !state.isSaving,
+                onCancel = { pendingHistoryRestore = null },
+                onConfirm = {
+                    pendingHistoryRestore = null
+                    showHistoryDialog = false
+                    onAction(AgentMemoryAction.RestoreHistory(id))
                 },
             )
         }
@@ -316,7 +459,8 @@ private fun MemoryTargetSwitcher(
         Spacer(modifier = Modifier.weight(1f))
         if (state.target == MemoryTargetUi.Short) {
             // 与左侧分段控件同款 squircle 胶囊，两字「整理」；不加图形符号。
-            val busy = state.isLoading || state.isSaving
+            // 忙碌态看 isRollingUp（整理进行中），不看 isSaving（保存与整理互相独立）。
+            val busy = state.isLoading || state.isRollingUp
             Box(
                 modifier = Modifier
                     .squircleSurface(
@@ -333,7 +477,7 @@ private fun MemoryTargetSwitcher(
             ) {
                 Text(
                     text = stringResource(
-                        if (state.isSaving) R.string.memory_tidying else R.string.memory_tidy,
+                        if (state.isRollingUp) R.string.memory_tidying else R.string.memory_tidy,
                     ),
                     style = MiuixTheme.textStyles.footnote1,
                     color = if (busy) colors.onSurfaceVariantSummary else colors.primary,
@@ -371,6 +515,70 @@ private fun MemorySettingsGroup(
             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
         )
+        // U6：核心注入水位——真机曾出现「预算用到 89% 无人知晓」，把占用做成一眼可见。
+        MemoryCoreUsageBar(state = state)
+    }
+}
+
+/** 核心区注入水位条：已用/预算字符，>80% 转警示色，超预算时明确提示「模型看不到」。 */
+@Composable
+private fun MemoryCoreUsageBar(state: AgentMemoryUiState) {
+    val colors = MiuixTheme.colorScheme
+    val fraction = if (state.coreBudgetChars <= 0) {
+        0f
+    } else {
+        (state.coreUsedChars.toFloat() / state.coreBudgetChars).coerceIn(0f, 1f)
+    }
+    val warning = state.coreTruncated || state.coreUsagePercent >= 80
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.memory_core_usage),
+                style = MiuixTheme.textStyles.footnote2,
+                color = colors.onSurfaceVariantSummary,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(
+                    R.string.memory_core_usage_value,
+                    formatNumber(state.coreUsedChars),
+                    formatNumber(state.coreBudgetChars),
+                    state.coreUsagePercent,
+                ),
+                style = MiuixTheme.textStyles.footnote2,
+                fontWeight = FontWeight.Medium,
+                color = if (warning) colors.error else colors.onSurface,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(colors.surfaceContainerHigh, CircleShape),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(4.dp)
+                    .background(
+                        if (warning) colors.error else colors.primary,
+                        CircleShape,
+                    ),
+            )
+        }
+        if (state.coreTruncated) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.memory_core_truncated_hint),
+                style = MiuixTheme.textStyles.footnote2,
+                color = colors.error,
+            )
+        }
     }
 }
 
@@ -433,6 +641,10 @@ private fun MemoryDocumentCard(
 ) {
     val colors = MiuixTheme.colorScheme
     val overLimit = state.draftBytes > state.maxBytes
+    // U5：大纲直达——1-3 级标题 chips，点选只看该节（含归档区），「全部」还原。
+    var outlineSection by remember { mutableStateOf<String?>(null) }
+    val outline = remember(state.draft) { AgentMemoryPreview.headings(state.draft) }
+    val searching = state.searchQuery.isNotBlank()
     EtaCard(modifier = modifier.fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier
@@ -483,6 +695,38 @@ private fun MemoryDocumentCard(
                 .height(0.5.dp)
                 .background(colors.dividerLine),
         )
+        // 大纲 chips：预览模式且无搜索时显示（编辑/搜索时正文另有呈现方式）。
+        if (outline.isNotEmpty() && mode == MemoryViewMode.Preview && !searching) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MemoryOutlineChip(
+                    label = stringResource(R.string.memory_outline_all),
+                    selected = outlineSection == null,
+                    onClick = { outlineSection = null },
+                )
+                outline.forEach { heading ->
+                    MemoryOutlineChip(
+                        label = heading.trimStart('#').trim(),
+                        selected = outlineSection == heading,
+                        onClick = {
+                            outlineSection = if (outlineSection == heading) null else heading
+                        },
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(colors.dividerLine),
+            )
+        }
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -493,6 +737,7 @@ private fun MemoryDocumentCard(
                         MemoryViewMode.Preview -> MemoryPreview(
                             content = state.draft,
                             query = state.searchQuery,
+                            sectionFilter = outlineSection,
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(
@@ -507,12 +752,45 @@ private fun MemoryDocumentCard(
     }
 }
 
+/** 大纲 chip：选中态用主色淡底，与「长期/短期」分段控件同一视觉语言。 */
 @Composable
-private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
-    // **只渲染核心区**：整个 MEMORY.md 有 17 万字符（242KB），
+private fun MemoryOutlineChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .squircleSurface(
+                color = if (selected) colors.primary.copy(alpha = 0.12f) else colors.surfaceContainerHigh,
+                cornerRadius = 9.dp,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote2,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) colors.primary else colors.onSurfaceVariantSummary,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun MemoryPreview(
+    content: String,
+    query: String,
+    sectionFilter: String?,
+    onStartEditing: () -> Unit,
+) {
+    // **默认只渲染核心区**：整个 MEMORY.md 有 17 万字符（242KB），
     // 全塞进一个可滚动 Text 会让 Compose 全量测量布局 —— 进页面白屏半秒以上。
     // 核心区是每轮真正注入模型的部分（默认 32K 预算），也是用户最常看的；
-    // 归档区按需进「编辑」查看。
+    // 归档区改走大纲 chips 直达（U5），不再只有「进编辑看」一条路。
     val slice = remember(content) { AgentMemoryPreview.slice(content) }
     if (content.isBlank()) {
         Column(
@@ -546,16 +824,28 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
     ) {
         val trimmedQuery = query.trim()
         // 搜索时过滤**全文**（不限于核心区切片）：归档区内容也应能定位命中。
-        // 输出只保留命中行、数量很少，渲染量小；无搜索时仍渲染核心区切片（防全量布局白屏）。
+        // 输出只保留命中行、数量很少，渲染量小；无搜索时优先按大纲选中节渲染，
+        // 其次是核心区切片（防全量布局白屏）。
         // 模板走 stringResource（配置变化会重组），占位符在非 composable 里用 String.format 填，
         // 不用 LocalContext.getString —— 那样 lint 会判 LocalContextGetResourceValueCall。
         val gapsTemplate = stringResource(R.string.memory_search_gaps)
-        val display = remember(content, trimmedQuery, gapsTemplate) {
-            if (trimmedQuery.isEmpty()) {
-                slice.text
-            } else {
-                filterLines(content, trimmedQuery) { n -> gapsTemplate.format(n) }
+        val display = remember(content, trimmedQuery, gapsTemplate, sectionFilter) {
+            when {
+                trimmedQuery.isNotEmpty() -> filterLines(content, trimmedQuery) { n -> gapsTemplate.format(n) }
+                sectionFilter != null -> AgentMemoryPreview.section(content, sectionFilter) ?: slice.text
+                else -> slice.text
             }
+        }
+        if (trimmedQuery.isNotEmpty()) {
+            // U4：命中计数 + 匹配加粗高亮，让用户知道「有多少、在哪」。
+            val hitCount = remember(content, trimmedQuery) { countMatches(content, trimmedQuery) }
+            Text(
+                text = stringResource(R.string.memory_search_hits, hitCount),
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
         }
         if (trimmedQuery.isNotEmpty() && display.isBlank()) {
             // 无命中时给明确反馈，而不是整页空白（用户感知为"没反应"）。
@@ -566,9 +856,10 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            StaticMarkdown(content = display, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+            val highlighted = remember(display, trimmedQuery) { highlightMatches(display, trimmedQuery) }
+            StaticMarkdown(content = highlighted, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
         }
-        if (slice.truncated && trimmedQuery.isEmpty()) {
+        if (slice.truncated && trimmedQuery.isEmpty() && sectionFilter == null) {
             Spacer(Modifier.height(14.dp))
             Text(
                 text = stringResource(R.string.memory_archive_hint, slice.archivedChars / 1024),
@@ -576,6 +867,44 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+/** 全文命中次数（搜索计数用）。 */
+private fun countMatches(text: String, query: String): Int {
+    if (query.isEmpty()) return 0
+    var count = 0
+    var index = 0
+    while (true) {
+        index = text.indexOf(query, index, ignoreCase = true)
+        if (index < 0) break
+        count++
+        index += query.length
+    }
+    return count
+}
+
+/**
+ * 把匹配文本包成 Markdown 粗体（`**…**`）做高亮。
+ * query 含 Markdown 控制字符时不高亮（避免把预览渲染搞乱），命中计数不受影响。
+ */
+private fun highlightMatches(text: String, query: String): String {
+    if (query.isBlank()) return text
+    if (query.any { it in "*_`[]\\" }) return text
+    return buildString(text.length + query.length * 4) {
+        var index = 0
+        while (true) {
+            val hit = text.indexOf(query, index, ignoreCase = true)
+            if (hit < 0) {
+                append(text, index, text.length)
+                break
+            }
+            append(text, index, hit)
+            append("**")
+            append(text, hit, hit + query.length)
+            append("**")
+            index = hit + query.length
         }
     }
 }
@@ -725,3 +1054,10 @@ private fun formatBytes(bytes: Int): String = when {
 }
 
 private fun formatNumber(value: Int): String = NumberFormat.getIntegerInstance().format(value)
+
+/** 历史快照时间展示：本地化的中等日期 + 短时间（如 2026/10/22 00:53）。 */
+private fun formatHistoryTime(savedAtMillis: Long): String =
+    java.text.DateFormat.getDateTimeInstance(
+        java.text.DateFormat.MEDIUM,
+        java.text.DateFormat.SHORT,
+    ).format(java.util.Date(savedAtMillis))
