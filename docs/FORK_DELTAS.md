@@ -183,6 +183,26 @@ v3.8.1–v3.8.4「报错诊断」系列（全角等号粘包、分支标签、�
 剩下的全部依赖 `AgentAppState` / `AgentChatBody` 的 fork 版本（懒加载、脏态守卫），
 而那正是第 7 块（界面细节，23 条）要处理的同一批文件。**合并进第 7 块，避免同一批文件改两遍。**
 
+## 四之九、第 7 块（界面细节）进展
+
+判定 33 条：上游已覆盖 9、弃用功能相关 5（planPreview / auto_task / locate / androguard / L14）、
+真正可搬 19。核心是三个千行文件，全部按「符号级对比 → 只补差异」处理。
+
+| 项 | 结论 |
+| --- | --- |
+| 记忆页（`AgentMemoryScreen` 727 vs 467、`AgentMemoryStore` 252 vs 166、`AgentMemoryUiState`） | ✅ 整份取 fork 版：**严格超集**（8 个独有符号 / 5 个独有函数，上游 0 个独有） |
+| `memory_*` 三语 16 条 | ✅ 补齐（Tidy 而非 Compact） |
+| 中断续跑入口（`8e3d24ef`） | ✅ `SYSTEM_INTERRUPTED` 标记 + `resumableInterruptedRun` + 底部提示条 + 三语 |
+| 编辑重发前缀守卫（`aa96d946`） | ✅ 前缀接近窗口上限时拦截，避免必败请求 + 重试退避 |
+| 空正文回合纠偏（`b6ef64ec`） | ✅ 三档处理 + 3 个测试；改一半会失效的两处（校验放行、工具后复位）同时处理 |
+| `messagesLoaded` 懒加载占位 | ⏭ 上游已覆盖：`isConversationLoaded` + `AgentConversationLoadState`（含失败重试）更完整 |
+| `planUi` / `planPhase` / `AgentChatScreen` 架构 | ⏭ 计划模式弃用；上游已把聊天页合并进 `AgentHomeScreen` |
+| Markdown 终态快照防闪动（`eac6fa9f`） | ⏭ 上游已覆盖：`completedStateFor` 在 fork 中已不存在，上游 10-20 的 markdown 缓存是重做版 |
+| 体检批次剩余碎片（`1dbfeb0e` 36%、`5b91014d` 49%、`aa96d946` 36%） | ⏸ 剩余部分分散在十多个文件、每条不足十行，收益低于成本，暂不做 |
+
+验收：CI #245 双 job 绿，**1771 例 / 1770 通过 / 0 失败 / 1 跳过**；
+空回合纠偏另加 3 例（#246 验证）。
+
 ## 五、恢复原则
 
 1. 每块一个提交，编译 + 对应测试通过才进下一块；失败单独回退。
