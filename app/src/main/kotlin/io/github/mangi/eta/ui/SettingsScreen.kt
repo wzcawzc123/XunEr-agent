@@ -320,6 +320,18 @@ private fun SettingsPageContent(
 
                     EtaPreferenceDivider()
                     EtaArrowPreference(
+                        title = stringResource(R.string.route_usage_stats),
+                        startAction = {
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.Dashboard,
+                                tint = EtaPreferenceColors.Orange,
+                            )
+                        },
+                        onClick = { onNavigate(AppRoute.UsageStats) },
+                    )
+
+                    EtaPreferenceDivider()
+                    EtaArrowPreference(
                         title = stringResource(R.string.route_skills),
                         startAction = {
                             EtaPreferenceIcon(
