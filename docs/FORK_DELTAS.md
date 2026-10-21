@@ -47,6 +47,17 @@
 
 | # | 功能块 | 提交 | 主要涉及目录 |
 | ---: | --- | ---: | --- |
+## 四之四、第 2 块进展与取舍
+
+| 项 | 结论 |
+| --- | --- |
+| 参数体检（v3.8.1–v3.8.4 四条） | ✅ 已落地：`validateArguments()` 挂在 `AgentLocalTools.execute()` 入口（executor 层），41 例全绿 |
+| `AgentFileToolCatalog` | ✅ 取 fork 版：`path` 补 `minLength=1`、`read_file` 补 offset_bytes/start_line 互斥 |
+| 终端 `runCommand`/`terminal` | ⏭ 不搬：上游有 `terminal` / `terminal_job` / `terminal_daemon` 新设计 |
+| 坐标新鲜度 | ⏭ 跳过：属 GUI 行为（已定 GUI 不动） |
+| `androguard_analyze` | ⏸ **推迟到第 6 块**：工具本体可搬，但安装入口在 `LinuxEnvironmentScreen`（与上游差 1376 行），没有安装 UI 的工具等于不可用，不做半成品 |
+| 能力页 `AgentToolsCatalogUi` | ⏭ 不搬：上游已有同名页面（153 行），fork 版是 188 行的增强，差异 341 行，先用上游 |
+
 | ✅ 1 | 上下文预算 / 裁剪 / 压缩（20 条，跳过 1 条上游已覆盖） | 22 | `agent/model`、`docs/releases`、`test/agent` |
 | 2 | 工具执行链路（含 工具目录、工具参数校验） | 9 | `agent/model`、`test/agent`、`agent/tool` |
 | 3 | Agent 运行时（含 Agent 循环、运行时执行） | 12 | `agent/model`、`test/agent`、`agent/runtime` |
