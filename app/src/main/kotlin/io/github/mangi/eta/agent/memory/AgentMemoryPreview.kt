@@ -20,8 +20,6 @@ package io.github.mangi.eta.agent.memory
  */
 internal object AgentMemoryPreview {
 
-    private const val CORE_HEADING = "# 核心记忆"
-
     data class Slice(
         /** 预览要渲染的文本。 */
         val text: String,
@@ -35,7 +33,7 @@ internal object AgentMemoryPreview {
         if (content.isBlank()) return Slice(content, 0, false)
 
         val lines = content.lines()
-        val coreStart = lines.indexOfFirst { it.startsWith(CORE_HEADING) }
+        val coreStart = lines.indexOfFirst { it.startsWith(MemoryText.CORE_HEADING) }
         // 没有核心区标记：不猜结构，原样返回
         if (coreStart < 0) return Slice(content, 0, false)
 
@@ -58,4 +56,50 @@ internal object AgentMemoryPreview {
         val archived = lines.subList(coreEnd, lines.size).joinToString("\n")
         return Slice(core, archived.length, true)
     }
+
+    /** 大纲：收集 1-3 级标题（与注入索引/查重同一口径），返回去重后的标题行（含 `#` 前缀）。 */
+    fun headings(content: String): List<String> =
+        content.lineSequence()
+            .map { it.trimEnd() }
+            .filter { OUTLINE_HEADING.matches(it) }
+            .distinct()
+            .toList()
+
+    /**
+     * 按标题取整节文本（大纲直达用）：匹配忽略大小写与 `#` 个数差异，取首个命中；
+     * 节的终点是下一个**同级或更高级**标题。找不到返回 null。
+     */
+    fun section(content: String, rawHeading: String): String? {
+        val lines = content.lines()
+        val wanted = headingTitle(rawHeading)
+        if (wanted.isEmpty()) return null
+        val start = lines.indexOfFirst {
+            OUTLINE_HEADING.matches(it.trimEnd()) && headingTitle(it) == wanted
+        }
+        if (start < 0) return null
+        val level = headingLevel(lines[start])
+        var end = lines.size
+        for (index in start + 1 until lines.size) {
+            val lineLevel = headingLevel(lines[index])
+            if (lineLevel in 1..level) {
+                end = index
+                break
+            }
+        }
+        return lines.subList(start, end).joinToString("\n")
+    }
+
+    private val OUTLINE_HEADING = Regex("^#{1,3}\\s+.+$")
+
+    private fun headingLevel(line: String): Int {
+        val trimmed = line.trimStart()
+        if (!trimmed.startsWith("#")) return 0
+        val hashes = trimmed.takeWhile { it == '#' }.length
+        if (hashes !in 1..6) return 0
+        if (trimmed.length <= hashes || trimmed[hashes] != ' ') return 0
+        return hashes
+    }
+
+    private fun headingTitle(line: String): String =
+        line.trimStart().trimStart('#').trim()
 }

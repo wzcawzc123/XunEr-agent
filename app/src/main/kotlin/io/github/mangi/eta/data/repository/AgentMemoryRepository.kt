@@ -2,11 +2,14 @@ package io.github.mangi.eta.data.repository
 
 import android.content.Context
 import android.util.AtomicFile
+import io.github.mangi.eta.agent.memory.MemoryText
 import io.github.mangi.eta.data.datastore.SettingsDataStore
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
-import kotlinx.coroutines.flow.Flow
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 internal data class AgentMemorySnapshot(
     val content: String,
@@ -66,6 +69,14 @@ internal sealed interface AgentMemoryWriteResult {
     data class Conflict(val snapshot: AgentMemorySnapshot) : AgentMemoryWriteResult
 }
 
+/** 写前历史快照条目（`memory/history/` 下的一份上一版内容）。 */
+internal data class AgentMemoryHistoryEntry(
+    /** 文件名，同时是 [MemoryRepository.restoreHistory] 的 id。 */
+    val id: String,
+    val savedAtMillis: Long,
+    val byteSize: Int,
+)
+
 /** 长期/短期记忆仓库的统一读写接口（memory_get/write 的 target 路由用）。 */
 internal interface MemoryRepository {
     fun snapshot(): AgentMemorySnapshot
@@ -84,6 +95,15 @@ internal interface MemoryRepository {
     fun mutate(mutation: AgentMemoryMutation): AgentMemoryWriteResult
 
     fun replaceAll(content: String): AgentMemorySnapshot
+
+    /** 整文件覆盖写，但仅当当前 revision 仍等于 [revision] 时执行（UI 编辑防吞掉 Agent 写入）。 */
+    fun replaceAllIfRevision(content: String, revision: String): AgentMemoryWriteResult
+
+    /** 写前历史快照列表，最新在前。 */
+    fun listHistory(): List<AgentMemoryHistoryEntry>
+
+    /** 按 [id] 恢复历史快照；恢复前会把当前内容再记入历史（回滚也可回滚）。 */
+    fun restoreHistory(id: String): AgentMemorySnapshot
 }
 
 internal class AgentMemoryException(
@@ -98,6 +118,7 @@ internal class AgentMemoryStore(
 ) {
     private val memoryDir = File(rootDir, DIRECTORY_NAME)
     private val atomicFile = AtomicFile(File(memoryDir, FILE_NAME))
+    private val historyDir = File(memoryDir, HISTORY_DIR_NAME)
     private val lock = Any()
 
     fun snapshot(): AgentMemorySnapshot = synchronized(lock) {
@@ -144,11 +165,13 @@ internal class AgentMemoryStore(
             is AgentMemoryMutation.Append -> append(current, mutation.content)
             is AgentMemoryMutation.Clear -> ""
         }
+        recordHistoryLocked(current.content)
         writeLocked(updated)
         AgentMemoryWriteResult.Success(snapshotOf(updated), changed = updated != current.content)
     }
 
     fun replaceAll(content: String): AgentMemorySnapshot = synchronized(lock) {
+        recordHistoryLocked(snapshotLocked().content)
         writeLocked(content)
         snapshotOf(content)
     }
@@ -156,9 +179,78 @@ internal class AgentMemoryStore(
     fun replaceAllIfRevision(content: String, revision: String): AgentMemoryWriteResult = synchronized(lock) {
         val current = snapshotLocked()
         if (current.revision != revision) return@synchronized AgentMemoryWriteResult.Conflict(current)
+        recordHistoryLocked(current.content)
         writeLocked(content)
         AgentMemoryWriteResult.Success(snapshotOf(content), changed = content != current.content)
     }
+
+    fun listHistory(): List<AgentMemoryHistoryEntry> = synchronized(lock) {
+        historyFiles()
+            .sortedByDescending { it.name }
+            .map { file ->
+                AgentMemoryHistoryEntry(
+                    id = file.name,
+                    savedAtMillis = file.lastModified(),
+                    byteSize = file.length().toInt(),
+                )
+            }
+    }
+
+    fun restoreHistory(id: String): AgentMemorySnapshot = synchronized(lock) {
+        if (!HISTORY_ID.matches(id)) {
+            throw AgentMemoryException(
+                code = "MEMORY_HISTORY_INVALID",
+                message = "非法的历史快照 id：$id",
+            )
+        }
+        val file = File(historyDir, id)
+        val bytes = try {
+            file.readBytes()
+        } catch (throwable: IOException) {
+            throw AgentMemoryException(
+                code = "MEMORY_HISTORY_NOT_FOUND",
+                message = "历史快照不存在或不可读：$id",
+                cause = throwable,
+            )
+        }
+        if (bytes.size > MAX_FILE_BYTES) {
+            throw AgentMemoryException(
+                code = "MEMORY_TOO_LARGE",
+                message = "历史快照超过 1 MiB 安全上限",
+            )
+        }
+        val content = bytes.toString(Charsets.UTF_8)
+        // 恢复本身也留快照：回滚错了还能再回滚。
+        recordHistoryLocked(snapshotLocked().content)
+        writeLocked(content)
+        snapshotOf(content)
+    }
+
+    /**
+     * 落盘前把上一版内容写进 `history/`（FIFO 上限 [MAX_HISTORY_ENTRIES]）。
+     * 历史是尽力而为的安全网：写不进去不能阻断真正的记忆保存。
+     */
+    private fun recordHistoryLocked(previousContent: String) {
+        if (previousContent.isEmpty()) return
+        try {
+            if (!historyDir.exists() && !historyDir.mkdirs() && !historyDir.isDirectory) return
+            // SimpleDateFormat 非线程安全，且长期/短期两个 store 各持自己的 lock，必须每次新建。
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val rev8 = sha256(previousContent.toByteArray(Charsets.UTF_8)).take(8)
+            File(historyDir, "$stamp-$rev8.md").writeBytes(previousContent.toByteArray(Charsets.UTF_8))
+            historyFiles()
+                .sortedByDescending { it.name }
+                .drop(MAX_HISTORY_ENTRIES)
+                .forEach { it.delete() }
+        } catch (_: IOException) {
+            // 忽略：历史写失败不影响主写入。
+        } catch (_: SecurityException) {
+            // 同上。
+        }
+    }
+
+    private fun historyFiles(): List<File> =
+        historyDir.listFiles { file -> file.isFile && HISTORY_ID.matches(file.name) }.orEmpty().toList()
 
     private fun snapshotLocked(): AgentMemorySnapshot {
         val file = atomicFile.baseFile
@@ -281,7 +373,7 @@ internal class AgentMemoryStore(
                     code = "MEMORY_DUPLICATE_HEADING",
                     message = "追加内容包含已存在的一级标题：${duplicated.joinToString("、")}。" +
                         "请改用 mode=\"replace_section\" 替换该章节，或换一个未使用过的标题。" +
-                        "（重复的 \"$CORE_HEADING\" 会让新增内容被排除在自动注入的核心记忆之外。）",
+                        "（重复的 \"${MemoryText.CORE_HEADING}\" 会让新增内容被排除在自动注入的核心记忆之外。）",
                 )
             }
         }
@@ -309,7 +401,7 @@ internal class AgentMemoryStore(
             val separatorLength = if (output.isEmpty()) 0 else 1
             if (output.isNotEmpty() && output.length + separatorLength + rendered.length > maxChars) break
             if (output.isNotEmpty()) output.append('\n')
-            output.append(safeTake(rendered, maxChars - output.length))
+            output.append(MemoryText.safeTake(rendered, maxChars - output.length))
             endIndex++
             if (output.length >= maxChars) break
         }
@@ -341,7 +433,7 @@ internal class AgentMemoryStore(
             val separatorLength = if (output.isEmpty()) 0 else 1
             if (output.isNotEmpty() && output.length + separatorLength + rendered.length > maxChars) break
             if (output.isNotEmpty()) output.append('\n')
-            output.append(safeTake(rendered, maxChars - output.length))
+            output.append(MemoryText.safeTake(rendered, maxChars - output.length))
             endIndex++
             if (output.length >= maxChars) break
         }
@@ -390,7 +482,7 @@ internal class AgentMemoryStore(
                 else -> "\n"
             }
             if (output.isNotEmpty() && output.length + gap.length + rendered.length > maxChars) break
-            output.append(gap).append(safeTake(rendered, maxChars - output.length - gap.length))
+            output.append(gap).append(MemoryText.safeTake(rendered, maxChars - output.length - gap.length))
             lastIncluded = index
             renderedCount++
             if (output.length >= maxChars) break
@@ -508,17 +600,27 @@ internal class AgentMemoryStore(
 
         private const val DIRECTORY_NAME = "memory"
         private const val FILE_NAME = "MEMORY.md"
+        private const val HISTORY_DIR_NAME = "history"
         private const val DEFAULT_START_LINE = 1
         private const val SEARCH_WINDOW_LINES = 6
         private const val MAX_SECTION_EXPANSION_LINES = 24
         private const val MAX_HEADING_LIST = 40
-        private const val CORE_HEADING = "# 核心记忆"
+
+        /** 写前历史快照保留份数（FIFO 滚动删除）。 */
+        const val MAX_HISTORY_ENTRIES = 10
+
+        /** 历史快照文件名：`yyyyMMdd-HHmmss-<rev8>.md`，字典序即时间序。 */
+        private val HISTORY_ID = Regex("[0-9]{8}-[0-9]{6}-[0-9a-f]{8}\\.md")
     }
 }
 
 internal object AgentMemoryRepository : MemoryRepository {
     @Volatile
     private lateinit var store: AgentMemoryStore
+
+    /** [isEnabledCached] 的缓存值；由 [setEnabled] 与 [warmEnabledCache] 唯二更新。 */
+    @Volatile
+    private var cachedEnabled: Boolean = true
 
     fun init(context: Context) {
         if (!::store.isInitialized) {
@@ -570,11 +672,38 @@ internal object AgentMemoryRepository : MemoryRepository {
         return store.replaceAll(content)
     }
 
-    fun enabledFlow(): Flow<Boolean> = SettingsDataStore.memoryEnabledFlow()
+    override fun replaceAllIfRevision(content: String, revision: String): AgentMemoryWriteResult {
+        ensureInitialized()
+        return store.replaceAllIfRevision(content, revision)
+    }
+
+    override fun listHistory(): List<AgentMemoryHistoryEntry> {
+        ensureInitialized()
+        return store.listHistory()
+    }
+
+    override fun restoreHistory(id: String): AgentMemorySnapshot {
+        ensureInitialized()
+        return store.restoreHistory(id)
+    }
 
     suspend fun isEnabled(): Boolean = SettingsDataStore.settings().memoryEnabled
 
-    suspend fun setEnabled(enabled: Boolean) = SettingsDataStore.setMemoryEnabled(enabled)
+    /**
+     * 非挂起读取（工具派发路径用）：读缓存值，消除该路径上的 `runBlocking { DataStore }` 阻塞。
+     * 开关只可能从 UI 的 [setEnabled] 改，缓存不会漂移。
+     */
+    fun isEnabledCached(): Boolean = cachedEnabled
+
+    suspend fun setEnabled(enabled: Boolean) {
+        cachedEnabled = enabled
+        SettingsDataStore.setMemoryEnabled(enabled)
+    }
+
+    /** 启动时把开关值读进缓存（此后工具派发路径不再碰 DataStore）。 */
+    internal suspend fun warmEnabledCache() {
+        cachedEnabled = isEnabled()
+    }
 
     private fun ensureInitialized() {
         check(::store.isInitialized) {
@@ -596,11 +725,3 @@ private fun headingLevel(line: String): Int {
 /** 去掉 `#` 前缀与首尾空白后的标题文本。 */
 private fun headingTitle(line: String): String =
     line.trimStart().trimStart('#').trim()
-
-/** 不在截断点切断 UTF-16 代理对（emoji 等）。 */
-private fun safeTake(text: String, limit: Int): String {
-    if (limit <= 0) return ""
-    if (text.length <= limit) return text
-    val end = if (Character.isHighSurrogate(text[limit - 1])) limit - 1 else limit
-    return text.substring(0, end)
-}

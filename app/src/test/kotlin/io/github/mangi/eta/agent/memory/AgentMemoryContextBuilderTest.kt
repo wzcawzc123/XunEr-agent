@@ -80,6 +80,18 @@ class AgentMemoryContextBuilderTest {
         assertEquals("# 项目", context.headingIndex)
     }
 
+    @Test
+    fun headingIndexIncludesLevel3Sections() {
+        // 口径统一（E）：`###` 小节可被 memory_get(section=…) 读写，也必须进注入索引，
+        // 不能「读写得到却看不见」。索引与查重同为 1-3 级。
+        val context = AgentMemoryContextBuilder.build(
+            snapshot("# 核心记忆\n偏好\n### 细节\n小节内容\n## 项目\nEta"),
+            128_000,
+        )
+
+        assertEquals("# 核心记忆\n### 细节\n## 项目", context.headingIndex)
+    }
+
     private fun snapshot(content: String): AgentMemorySnapshot = AgentMemorySnapshot(
         content = content,
         revision = "a".repeat(64),

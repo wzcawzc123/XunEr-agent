@@ -100,7 +100,7 @@ internal object AgentMemoryContextBuilder {
         var sectionCount = 0
         var index = 0
         while (index < lines.size) {
-            if (lines[index].trim() != CORE_HEADING) {
+            if (lines[index].trim() != MemoryText.CORE_HEADING) {
                 index++
                 continue
             }
@@ -144,7 +144,7 @@ internal object AgentMemoryContextBuilder {
             val separator = if (kept.isEmpty()) 0 else 1
             if (kept.length + separator + line.length > budget) {
                 if (kept.isEmpty()) {
-                    kept.append(safeTake(line, budget))
+                    kept.append(MemoryText.safeTake(line, budget))
                     count = 1
                     partial = true
                 }
@@ -186,7 +186,7 @@ internal object AgentMemoryContextBuilder {
             if (duplicated.isNotEmpty()) {
                 append("同名标题出现多次：")
                 append(duplicated.entries.joinToString("、") { "${it.key} ×${it.value}" })
-                append("。重复的 \"$CORE_HEADING\" 不会额外获得注入位置，建议用 ")
+                append("。重复的 \"${MemoryText.CORE_HEADING}\" 不会额外获得注入位置，建议用 ")
                 append("memory_write(mode=\"replace_section\", section=\"…\") 合并成一节。")
             }
             if (indexTruncated) {
@@ -196,8 +196,8 @@ internal object AgentMemoryContextBuilder {
         }
     }
 
-    private val HEADING = Regex("^#{1,2}\\s+.+$")
-    private const val CORE_HEADING = "# 核心记忆"
+    /** 标题索引收录 1-3 级标题（与查重口径一致；`###` 小节也进索引，不再读写得到却看不见）。 */
+    private val HEADING = Regex("^#{1,3}\\s+.+$")
     /** 窗口未知时用于按比例分配记忆、世界书等注入预算的保守基准，不参与压缩判定。 */
     const val DEFAULT_CONTEXT_WINDOW = 128_000
     private const val CONTEXT_WINDOW_DIVISOR = 16
@@ -206,12 +206,4 @@ internal object AgentMemoryContextBuilder {
     private const val MAX_HEADING_INDEX_CHARS = 4_000
     private const val EMPTY_SHA256 =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-}
-
-/** 不在截断点切断 UTF-16 代理对（emoji 等）。 */
-private fun safeTake(text: String, limit: Int): String {
-    if (limit <= 0) return ""
-    if (text.length <= limit) return text
-    val end = if (Character.isHighSurrogate(text[limit - 1])) limit - 1 else limit
-    return text.substring(0, end)
 }
