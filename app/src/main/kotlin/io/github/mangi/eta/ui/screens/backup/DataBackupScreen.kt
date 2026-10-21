@@ -90,6 +90,9 @@ internal fun DataBackupScreen(
                     Toast.LENGTH_SHORT,
                 ).show()
             } catch (throwable: Throwable) {
+                // 导出中途失败（如超过 64 MiB 上限）时清掉残留文件：流式写盘下
+                // 目标文件里可能已留下部分数据，留着会被误当成一份可用的备份。
+                runCatching { context.contentResolver.delete(uri, null, null) }
                 showFailure(throwable)
             } finally {
                 busy = false
