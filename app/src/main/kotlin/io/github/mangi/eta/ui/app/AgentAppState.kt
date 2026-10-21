@@ -1374,12 +1374,14 @@ internal class AgentAppState(
             messages = messages,
             state = if (preserveCurrentDraft) {
                 state.copy(
-                    journal = editBoundary?.journalPrefix ?: state.journal,
+                    // 截断 prefix 为空时不要回退到全量 journal（方向相反：会把未截断的历史整个带出）。
+                    journal = editBoundary?.journalPrefix?.takeIf { it.isNotEmpty() } ?: state.journal,
                     messageEdit = null,
                 )
             } else {
                 state.copy(
-                    journal = editBoundary?.journalPrefix ?: state.journal,
+                    // 截断 prefix 为空时不要回退到全量 journal（方向相反：会把未截断的历史整个带出）。
+                    journal = editBoundary?.journalPrefix?.takeIf { it.isNotEmpty() } ?: state.journal,
                     input = "",
                     pendingImages = emptyList(),
                     pendingFileReferences = emptyList(),

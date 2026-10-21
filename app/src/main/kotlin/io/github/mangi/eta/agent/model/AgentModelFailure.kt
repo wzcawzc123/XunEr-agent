@@ -36,7 +36,7 @@ internal class AgentModelFailure(
             }
             authenticationFailure(error)?.let { return it }
             if (isContextOverflow(error)) return AgentModelFailure(
-                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。",
+                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。建议先手动压缩历史，或新建会话继续当前任务。",
             )
             // 402 是 HTTP 标准的 Payment Required，服务商普遍用它表示余额/额度不足（fork）。
             val permanent = isPermanent(error, body) || status == PAYMENT_REQUIRED_STATUS
@@ -70,7 +70,7 @@ internal class AgentModelFailure(
         fun stream(error: JSONObject, message: String): AgentModelFailure {
             authenticationFailure(error)?.let { return it }
             if (isContextOverflow(error)) return AgentModelFailure(
-                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。",
+                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。建议先手动压缩历史，或新建会话继续当前任务。",
             )
             val codes = listOf(
                 error.optString("code"),
