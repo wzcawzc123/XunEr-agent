@@ -10,6 +10,73 @@ import androidx.room.Upsert
 
 @Dao
 internal interface ConversationDao : ChunkedTextDao {
+    /**
+     * 用量聚合的原始投影（Room 要求具名类，不能直接返回领域模型）。
+     * 全部用 Long：真机单会话输入已达十亿级。
+     */
+    data class TokenUsageProjection(
+        val turns: Int,
+        val inputTokens: Long,
+        val cachedTokens: Long,
+        val outputTokens: Long,
+        val reasoningTokens: Long,
+    )
+
+    /** 按模型分组的用量投影（U3，v3.13.4）：会话表的 model_id 归属到消息行。 */
+    data class TokenUsageByModelProjection(
+        val modelId: String?,
+        val turns: Int,
+        val inputTokens: Long,
+        val cachedTokens: Long,
+        val outputTokens: Long,
+        val reasoningTokens: Long,
+    )
+
+    /**
+     * 按会话聚合 token 用量。
+     *
+     * 在 SQL 里聚合而不是把消息读到内存再累加 —— 大会话有上万条消息，
+     * 只为算几个总数把整表读出来不值得。
+     */
+    @Query(
+        "SELECT COUNT(*) AS turns, " +
+            "COALESCE(SUM(input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages " +
+            "WHERE conversation_id = :conversationId AND input_tokens > 0",
+    )
+    fun tokenUsageFor(conversationId: String): TokenUsageProjection
+
+    /** 全局聚合（所有会话）。用于「总账」展示。 */
+    @Query(
+        "SELECT COUNT(*) AS turns, " +
+            "COALESCE(SUM(input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages WHERE input_tokens > 0",
+    )
+    fun tokenUsageAll(): TokenUsageProjection
+
+    /**
+     * 按模型分组聚合（U3，v3.13.4）：模型归属在会话表（conversations.model_id），
+     * 消息表没有——JOIN 会话表把 model_id 投影到每行再分组。
+     * 会话 model_id 为空（老数据/未绑定）归入 null 组，UI 显示为「未绑定模型」。
+     */
+    @Query(
+        "SELECT c.model_id AS modelId, COUNT(*) AS turns, " +
+            "COALESCE(SUM(m.input_tokens), 0) AS inputTokens, " +
+            "COALESCE(SUM(m.cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(m.output_tokens), 0) AS outputTokens, " +
+            "COALESCE(SUM(m.reasoning_tokens), 0) AS reasoningTokens " +
+            "FROM conversation_messages m " +
+            "JOIN conversations c ON c.id = m.conversation_id " +
+            "WHERE m.input_tokens > 0 " +
+            "GROUP BY c.model_id",
+    )
+    fun tokenUsageByModel(): List<TokenUsageByModelProjection>
     @Query(
         "SELECT c.id, c.title, c.reasoning_effort, c.created_at, c.updated_at, c.model_id, " +
             "(c.roleplay_json != '') AS has_roleplay, " +
