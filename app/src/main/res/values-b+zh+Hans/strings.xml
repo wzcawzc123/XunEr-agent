@@ -1161,6 +1161,7 @@
   <string name="chat_reasoning_effort">思考强度，当前为 %1$s</string>
   <string name="status_unsupported">不支持</string>
   <string name="attachment_image">图片</string>
+  <string name="attachment_camera">拍照</string>
   <string name="attachment_file">文件</string>
   <string name="attachment_folder">文件夹</string>
   <string name="attachment_enter_path">输入路径</string>

@@ -35,7 +35,12 @@ internal object AgentImageCodec {
         )
     }
 
-    /** 用户附件统一编码为模型兼容的 JPEG，并保持原始像素尺寸。 */
+    /**
+     * 用户附件统一编码为模型兼容的 JPEG，并保持原始像素尺寸。
+     *
+     * 超过 [MAX_AGENT_IMAGE_BYTES] 的附件不走这里：由 [fromReference] 按需降级
+     * （见 [AgentModelImageEncoder.userAttachment]），普通附件始终保真。
+     */
     fun fromAttachmentBytes(
         bytes: ByteArray,
         source: String,
@@ -105,7 +110,8 @@ internal object AgentImageCodec {
             if (raw.isEmpty() || raw.size > MAX_AGENT_IMAGE_BYTES) return null
             val mimeHint = trimmed.substring("data:".length).substringBefore(";")
             return if (preserveOriginal) fromScreenBytes(raw, source, mimeHint)
-            else AgentModelImageEncoder.attachment(raw, source, mimeHint)
+            else if (raw.size <= MAX_AGENT_IMAGE_BYTES) AgentModelImageEncoder.attachment(raw, source, mimeHint)
+            else AgentModelImageEncoder.userAttachment(raw, source, mimeHint)
         }
 
         if (context != null) {
@@ -147,23 +153,29 @@ internal object AgentImageCodec {
         source: String,
     ): AgentModelClient.ModelImage? {
         val resolver = context.contentResolver
+        // 用户选的图：读取上限放宽到 40MiB（见 readUserAttachmentBytes），
+        // 是否降级由体积决定 —— 超 12MiB 才降，普通附件保持原尺寸（上游契约）。
         val bytes = runCatching {
-            resolver.openInputStream(uri)?.use { it.readBytesLimited() }
+            resolver.openInputStream(uri)?.use { it.readUserAttachmentBytes() }
         }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
             ?: runCatching {
                 resolver.openTypedAssetFileDescriptor(uri, "image/*", null)?.use { descriptor ->
-                    descriptor.createInputStream().use { it.readBytesLimited() }
+                    descriptor.createInputStream().use { it.readUserAttachmentBytes() }
                 }
             }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
             ?: runCatching {
                 resolver.openFileDescriptor(uri, "r")?.let { descriptor ->
-                    ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytesLimited() }
+                    ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readUserAttachmentBytes() }
                 }
             }.getOrNull()?.takeIf(ByteArray::isNotEmpty)
             ?: return null
         val mimeHint = runCatching { resolver.getType(uri) }.getOrNull().orEmpty()
         return runCatching {
-            fromBytes(bytes, source, mimeHint)
+            if (bytes.size <= MAX_AGENT_IMAGE_BYTES) {
+                fromBytes(bytes, source, mimeHint)
+            } else {
+                AgentModelImageEncoder.userAttachment(bytes, source, mimeHint)
+            }
         }.getOrNull()
     }
 
@@ -246,6 +258,26 @@ internal object AgentImageCodec {
             source = source,
         )
     }.getOrNull()
+
+    /** 用户附件的读取上限：放宽到 [MAX_USER_ATTACHMENT_INPUT_BYTES]，超限才拒绝。 */
+    private fun File.readUserAttachmentBytes(): ByteArray {
+        require(length() <= MAX_USER_ATTACHMENT_INPUT_BYTES.toLong()) { "图片文件过大：${length()}" }
+        return readBytes()
+    }
+
+    private fun java.io.InputStream.readUserAttachmentBytes(): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= MAX_USER_ATTACHMENT_INPUT_BYTES) { "图片数据过大：$total" }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
 
     private fun File.readBytesLimited(): ByteArray {
         require(length() <= MAX_AGENT_IMAGE_BYTES.toLong()) { "图片文件过大：${length()}" }
