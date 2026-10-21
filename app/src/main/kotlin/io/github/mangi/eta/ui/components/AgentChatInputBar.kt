@@ -122,6 +122,7 @@ internal fun AgentChatInputBar(
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onSubmit: (String) -> Unit,
     onStop: () -> Unit,
     onAttachImage: (String) -> Unit,
@@ -355,6 +356,7 @@ internal fun AgentChatInputBar(
                             popupAnchorTopPx = inputContainerTopPx,
                             popupMaxHeight = thinkingPopupMaxHeight,
                             onModelSelected = onModelSelected,
+                            onVisionToggled = onVisionToggled,
                         )
 
                         IconButton(
