@@ -1044,12 +1044,12 @@ private fun AgentChatBottomBar(
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "任务被系统中断，进度已保留。点击继续任务（若已涉及发送、修改或 GUI 操作，请先确认当前状态再继续）",
+                        text = stringResource(R.string.chat_task_interrupted),
                         modifier = Modifier.weight(1f),
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                     Text(
-                        text = "继续",
+                        text = stringResource(R.string.action_continue),
                         modifier = Modifier.padding(start = 8.dp),
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -1142,7 +1142,7 @@ private fun ChatLoadingState(modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "正在加载会话…",
+                text = stringResource(R.string.conversation_loading),
                 style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -1196,7 +1196,7 @@ private fun EmptyChatState(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "故事从这里开始",
+                    text = stringResource(R.string.chat_character_story_start),
                     style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

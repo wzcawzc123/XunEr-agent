@@ -302,7 +302,7 @@ private fun ModelPickerRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (model.supportsVision) "支持图片输入" else "纯文本",
+                text = if (model.supportsVision) stringResource(R.string.model_supports_vision) else stringResource(R.string.model_text_only),
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 11.sp),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,

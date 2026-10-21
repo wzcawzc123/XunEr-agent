@@ -264,7 +264,7 @@ internal fun AgentChatInputBar(
         ) {
             Text(
                 text = if (preserveFollowingMessages) {
-                    "保存后原位更新这条消息，并保留后续对话"
+                    stringResource(R.string.chat_edit_preserve_following)
                 } else if (editHasLaterTurns) {
                     stringResource(R.string.chat_edit_replace_later)
                 } else {
@@ -466,7 +466,7 @@ internal fun AgentChatInputBar(
                                         },
                                         contentDescription = when {
                                             streaming -> stringResource(R.string.chat_stop)
-                                            isEditingMessage && preserveFollowingMessages -> "保存消息"
+                                            isEditingMessage && preserveFollowingMessages -> stringResource(R.string.chat_save_message)
                                             else -> stringResource(R.string.chat_send)
                                         },
                                         modifier = Modifier.size(

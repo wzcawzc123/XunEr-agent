@@ -181,6 +181,7 @@
   <string name="appearance_interface_scale_dialog_summary">请输入 80 至 110 之间的整数</string>
   <string name="appearance_interface_scale_input_label">百分比</string>
   <string name="conversation_unnamed">新对话</string>
+  <string name="conversation_loading">正在加载会话…</string>
   <string name="conversation_search_hint">搜索对话</string>
   <string name="conversation_empty">还没有对话</string>
   <string name="conversation_no_results">没有匹配的对话</string>
@@ -496,6 +497,9 @@
   <string name="chat_edit_character_reply">编辑角色回复</string>
   <string name="chat_previous_candidate">上一条候选回复</string>
   <string name="chat_next_candidate">下一条候选回复</string>
+  <string name="chat_save_message">保存消息</string>
+  <string name="chat_edit_preserve_following">保存后原位更新这条消息，并保留后续对话</string>
+  <string name="chat_task_interrupted">任务被系统中断，进度已保留。点击继续任务（若已涉及发送、修改或 GUI 操作，请先确认当前状态再继续）</string>
   <string name="copy_code">复制代码</string>
   <string name="copy_command">复制命令</string>
   <string name="shell_command">Shell 命令</string>
@@ -1097,6 +1101,8 @@
   <string name="browser_opening">正在打开网页</string>
   <string name="browser_opening_host">正在打开 %1$s</string>
   <string name="model_not_selected">未选择</string>
+  <string name="model_supports_vision">支持图片输入</string>
+  <string name="model_text_only">纯文本</string>
   <string name="conversation_model_unavailable">此会话原用的模型不可用，已改用 %1$s</string>
   <string name="model_switch_current">切换模型，当前为 %1$s</string>
   <string name="model_collapse_provider">收起 %1$s</string>

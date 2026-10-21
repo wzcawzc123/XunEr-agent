@@ -173,6 +173,7 @@
   <string name="appearance_interface_scale_dialog_summary">Enter an integer from 80 to 110</string>
   <string name="appearance_interface_scale_input_label">Percentage</string>
   <string name="conversation_unnamed">New conversation</string>
+  <string name="conversation_loading">Loading conversation…</string>
   <string name="conversation_search_hint">Search conversations</string>
   <string name="conversation_empty">No conversations yet</string>
   <string name="conversation_no_results">No matching conversations</string>
@@ -502,6 +503,9 @@
   <string name="chat_edit_character_reply">Edit character reply</string>
   <string name="chat_previous_candidate">Previous candidate reply</string>
   <string name="chat_next_candidate">Next candidate reply</string>
+  <string name="chat_save_message">Save message</string>
+  <string name="chat_edit_preserve_following">Saving updates this message in place and keeps the rest of the conversation</string>
+  <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
   <string name="copy_code">Copy code</string>
   <string name="copy_command">Copy command</string>
   <string name="shell_command">Shell command</string>
@@ -1117,6 +1121,8 @@
   <string name="browser_opening">Opening webpage</string>
   <string name="browser_opening_host">Opening %1$s</string>
   <string name="model_not_selected">Not selected</string>
+  <string name="model_supports_vision">Supports images</string>
+  <string name="model_text_only">Text only</string>
   <string name="conversation_model_unavailable">Model unavailable for this conversation. Using %1$s.</string>
   <string name="model_switch_current">Switch model. Current: %1$s</string>
   <string name="model_collapse_provider">Collapse %1$s</string>
