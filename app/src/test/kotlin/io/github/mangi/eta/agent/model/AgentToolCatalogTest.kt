@@ -229,6 +229,7 @@ class AgentToolCatalogTest {
     private companion object {
         val BROWSER_TOOLS = setOf("browser_use", "web_search", "fetch_url")
         val TERMINAL_TOOLS = setOf(
+            "androguard_analyze",
             "read_image",
             "terminal",
             "terminal_job",

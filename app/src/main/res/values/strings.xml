@@ -333,6 +333,18 @@
 - User name:
 - Long-term preferences:</string>
   <string name="ui_apk_analysis_95ad17">APK analysis</string>
+  <string name="ui_androguard_2b8d4f" translatable="false">Androguard</string>
+  <string name="linux_androguard_tools_ready">Androguard 4.1.4 is ready. It parses APK manifests, decodes resources, inspects code, and verifies signatures</string>
+  <string name="linux_androguard_tools_summary">Install Androguard 4.1.4 (Python reverse-engineering toolkit) into an isolated environment. It can parse APK manifest, decode resources, inspect code, and verify signatures</string>
+  <string name="linux_androguard_tools_installed">Androguard 4.1.4 installed</string>
+  <string name="linux_androguard_tools_ready_short">Androguard tools are ready</string>
+  <string name="linux_androguard_stage_failed">%1$s failed. Try again later</string>
+  <string name="linux_androguard_stage_checking">Checking the Linux base environment</string>
+  <string name="linux_androguard_stage_installing">Installing Androguard 4.1.4</string>
+  <string name="linux_androguard_stage_verifying">Verifying the Androguard command</string>
+  <string name="linux_androguard_stage_complete">Androguard tools ready</string>
+  <string name="tool_ui_androguard_analyze_7f1c33">Analyze APK</string>
+  <string name="tool_ui_androguard_analyze_7f1c33_description">Parse an APK permissions, components and structure (read-only).</string>
   <string name="ui_agent_and_local_tools_can_still_be_used_but_the_syst_b14479">Agent and local tools remain available. System assistant takeover, Gemini, and Circle to Search settings cannot be changed right now.</string>
   <string name="ui_endpoint_mode_3c8546">Endpoint mode</string>
   <string name="ui_eta_system_assistant_003e9b">Digital assistant app</string>
