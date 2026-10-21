@@ -14,6 +14,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class AgentMemoryStoreTest {
+    @org.junit.Before
+    fun requireRenameOverwriteSemantics() {
+        // AtomicFile 靠 rename 覆盖目标文件，Windows 上会静默失败（Android 设备不受影响）。
+        io.github.mangi.eta.testutil.PlatformAssumptions.requireRenameOverwrite()
+    }
+
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
@@ -92,6 +98,184 @@ class AgentMemoryStoreTest {
         assertEquals("", cleared.snapshot.content)
         assertEquals(0, cleared.snapshot.byteSize)
         assertEquals(0, cleared.snapshot.lineCount)
+    }
+
+    @Test
+    fun readsAndReplacesWholeSectionsByHeading() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好\n# 振动模块\n旧内容\n细节\n# 触控\n保留")
+
+        val section = store.readSection("振动模块")
+        assertEquals("# 振动模块", section.section?.trim())
+        assertTrue(section.content.contains("3: # 振动模块"))
+        assertTrue(section.content.contains("4: 旧内容"))
+        assertTrue(section.content.contains("5: 细节"))
+        // 章节边界在下一个同级标题处停住，不越界。
+        assertFalse(section.content.contains("触控"))
+
+        val replaced = store.mutate(
+            AgentMemoryMutation.ReplaceSection(
+                revision = initial.revision,
+                section = "振动模块",
+                content = "# 振动模块\n新内容",
+            ),
+        ) as AgentMemoryWriteResult.Success
+        assertEquals(
+            "# 核心记忆\n偏好\n# 振动模块\n新内容\n# 触控\n保留",
+            replaced.snapshot.content,
+        )
+        assertTrue(replaced.changed)
+
+        val missing = assertThrows(AgentMemoryException::class.java) {
+            store.readSection("不存在的章节")
+        }
+        assertEquals("MEMORY_SECTION_NOT_FOUND", missing.code)
+        assertTrue(missing.message!!.contains("# 振动模块"))
+    }
+
+    @Test
+    fun appendingADuplicateTopLevelHeadingIsRejected() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好")
+
+        val failure = assertThrows(AgentMemoryException::class.java) {
+            store.mutate(AgentMemoryMutation.Append(initial.revision, "# 核心记忆\n又一段"))
+        }
+
+        assertEquals("MEMORY_DUPLICATE_HEADING", failure.code)
+        // 拒绝后文件必须原封不动
+        assertEquals("# 核心记忆\n偏好", store.snapshot().content)
+        assertEquals(initial.revision, store.snapshot().revision)
+    }
+
+    @Test
+    fun unchangedWritesAreReportedAsNotChanged() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好")
+
+        val empty = store.mutate(
+            AgentMemoryMutation.Append(initial.revision, ""),
+        ) as AgentMemoryWriteResult.Success
+        assertFalse(empty.changed)
+        assertEquals(initial.revision, empty.snapshot.revision)
+
+        val identical = store.mutate(
+            AgentMemoryMutation.ReplaceRange(initial.revision, 2, 2, "偏好"),
+        ) as AgentMemoryWriteResult.Success
+        assertFalse(identical.changed)
+    }
+
+    @Test
+    fun searchExpandsSmallSectionsSoMatchesArriveWithContext() {
+        val store = store()
+        store.replaceAll("# A\n第一行\n目标关键字\n第三行\n# B\n无关内容")
+
+        val result = store.read(query = "目标关键字", maxChars = 500)
+
+        assertEquals(1, result.matchedLines)
+        assertTrue(result.content.contains("第一行"))
+        assertTrue(result.content.contains("第三行"))
+        assertFalse(result.content.contains("无关内容"))
+    }
+
+    @Test
+    fun pagingNeverSplitsSurrogatePairs() {
+        val store = store()
+        store.replaceAll("😀".repeat(40))
+
+        val page = store.read(maxChars = 6)
+
+        assertTrue(page.content.startsWith("1: "))
+        assertFalse(hasLoneSurrogate(page.content))
+    }
+
+    @Test
+    fun ambiguousSectionReferenceIsRejectedWithCandidates() {
+        val store = store()
+        store.replaceAll("# 核心记忆\n偏好\n# 振动模块 A\n一\n# 振动模块 B\n二")
+
+        val failure = assertThrows(AgentMemoryException::class.java) {
+            store.readSection("振动模块")
+        }
+
+        assertEquals("MEMORY_SECTION_AMBIGUOUS", failure.code)
+        // 报错必须给出候选，否则调用方只能盲试。
+        assertTrue(failure.message!!.contains("振动模块 A"))
+        assertTrue(failure.message!!.contains("振动模块 B"))
+    }
+
+    @Test
+    fun replacingATopLevelSectionWithoutItsHeadingIsRejected() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好\n# 振动模块\n旧内容")
+
+        val failure = assertThrows(AgentMemoryException::class.java) {
+            store.mutate(
+                AgentMemoryMutation.ReplaceSection(initial.revision, "振动模块", "没有标题的新正文"),
+            )
+        }
+
+        assertEquals("MEMORY_SECTION_HEADING_REQUIRED", failure.code)
+        // 拒绝后文件必须原封不动
+        assertEquals("# 核心记忆\n偏好\n# 振动模块\n旧内容", store.snapshot().content)
+    }
+
+    @Test
+    fun replacingATopLevelSectionWithEmptyContentDeletesIt() {
+        val store = store()
+        val initial = store.replaceAll("# 核心记忆\n偏好\n# 振动模块\n旧内容")
+
+        // 空 content 是文档化的"删除整节"用法，不能被上面那条护栏误拦。
+        val deleted = store.mutate(
+            AgentMemoryMutation.ReplaceSection(initial.revision, "振动模块", ""),
+        ) as AgentMemoryWriteResult.Success
+
+        assertEquals("# 核心记忆\n偏好", deleted.snapshot.content)
+        assertTrue(deleted.changed)
+    }
+
+    @Test
+    fun shortMemoryRepositoryIsSeparateFromLongAndKeepsOwnRevision() {
+        // spec memory-upgrade §3.1：短期记忆与长期完全隔离（独立文件 + 独立 revision）。
+        val longRoot = temporaryFolder.newFolder("long")
+        val shortRoot = temporaryFolder.newFolder("short")
+        val longStore = AgentMemoryStore(longRoot)
+        val shortStore = AgentMemoryStore(shortRoot)
+
+        val longInitial = longStore.replaceAll("# 核心记忆\n长期事实")
+        val shortInitial = shortStore.replaceAll("# 当前任务\n临时笔记")
+
+        // 两文件各自独立：长期写入不影响短期，短期写入不影响长期。
+        val longAppended = longStore.mutate(
+            AgentMemoryMutation.Append(longInitial.revision, "追加到长期"),
+        ) as AgentMemoryWriteResult.Success
+        assertEquals("# 当前任务\n临时笔记", shortStore.snapshot().content)
+
+        // revision 独立：长短期即使内容相同也有不同 revision（各自文件 SHA-256）。
+        val shortAppended = shortStore.mutate(
+            AgentMemoryMutation.Append(shortInitial.revision, "追加到短期"),
+        ) as AgentMemoryWriteResult.Success
+        assertTrue(longAppended.snapshot.revision != shortAppended.snapshot.revision)
+
+        // 清空短期不影响长期。
+        shortStore.mutate(AgentMemoryMutation.Clear(shortAppended.snapshot.revision))
+        assertEquals("", shortStore.snapshot().content)
+        assertTrue(longStore.snapshot().content.contains("长期事实"))
+    }
+
+    private fun hasLoneSurrogate(text: String): Boolean {        var index = 0
+        while (index < text.length) {
+            val char = text[index]
+            when {
+                Character.isHighSurrogate(char) -> {
+                    if (index + 1 >= text.length || !Character.isLowSurrogate(text[index + 1])) return true
+                    index += 2
+                }
+                Character.isLowSurrogate(char) -> return true
+                else -> index++
+            }
+        }
+        return false
     }
 
     private fun store(): AgentMemoryStore = AgentMemoryStore(temporaryFolder.newFolder())
