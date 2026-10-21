@@ -26,6 +26,7 @@ internal fun AgentHomeScreen(
     modelPickerState: AgentModelPickerUiState,
     conversationKey: String?,
     onAction: (AgentHomeAction) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     isLoadingConversation: Boolean = false,
     conversationLoadFailed: Boolean = false,
     /** 上次运行被系统回收中断且可续跑：聊天底部显示「继续」提示条。 */
@@ -65,6 +66,7 @@ internal fun AgentHomeScreen(
                     onCompactContext = { onAction(AgentHomeAction.CompactContext) },
                     canCompactContext = state.canCompactContext,
                     onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
+                    onVisionToggled = onVisionToggled,
                     onSubmit = { text -> onAction(AgentHomeAction.SubmitMessage(text)) },
                     onInterruptAndSubmit = { text -> onAction(AgentHomeAction.InterruptAndSubmitMessage(text)) },
                     onSteerQueuedMessage = { id -> onAction(AgentHomeAction.SteerQueuedMessage(id)) },

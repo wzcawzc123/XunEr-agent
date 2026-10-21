@@ -132,6 +132,7 @@ internal fun AgentChatInputBar(
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onSubmit: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
     onSteerQueuedMessage: (String) -> Unit = {},
@@ -380,6 +381,7 @@ internal fun AgentChatInputBar(
                             popupAnchorTopPx = inputContainerTopPx,
                             popupMaxHeight = thinkingPopupMaxHeight,
                             onModelSelected = onModelSelected,
+                            onVisionToggled = onVisionToggled,
                         )
 
                         val showStreamingSend = isStreaming && !isCompacting && canSend
