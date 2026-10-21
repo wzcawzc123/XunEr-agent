@@ -18,9 +18,14 @@ internal sealed interface AgentEvent {
         val tokensAfter: Int? = null,
         val reasonCode: String = "",
     ) : AgentEvent {
-        val displayMessage: String get() = when (phase) {
-            PHASE_STARTED -> RUNNING_DETAIL
-            PHASE_COMPLETED -> "上下文已压缩，用量将在下一次模型响应后更新。"
+        val displayMessage: String get() = when {
+            phase == PHASE_STARTED -> RUNNING_DETAIL
+            phase == PHASE_COMPLETED -> "上下文已压缩，用量将在下一次模型响应后更新。"
+            // P2-4（2026-10-16，见 docs/reviews/context-compaction-audit.md）：
+            // 区分「降幅不足未生效」与「真失败」。前者不是错误——原文仍在使用，属主动取舍
+            // （压不划算时保留原文，交熔断与裁剪兜底）；原措辞统一说「失败」会让用户误以为出了问题。
+            reasonCode == NO_REDUCTION_CODE ->
+                "本次未压缩（降幅不足，不足以抵偿开销）；原文仍在使用。"
             else -> "上下文压缩失败，原始上下文已保留。"
         }
         override fun toLogLine(): String =
@@ -29,9 +34,32 @@ internal sealed interface AgentEvent {
         companion object {
             const val PHASE_STARTED = "started"
             const val PHASE_COMPLETED = "completed"
+
+            /** 「降幅不足未生效」的 reasonCode；与 AgentContextCompactor 抛出的失败码一致。 */
+            const val NO_REDUCTION_CODE = "CONTEXT_NO_REDUCTION"
             /** 进行中的展示文案同时是 UI 判定运行态的依据，改动必须与 UI 侧同步。 */
             const val RUNNING_DETAIL = "正在压缩上下文…"
         }
+    }
+
+    /** M1.2：窗口级硬裁剪(AgentHistoryTrimmer)真的丢了历史时必须可观测。 */
+    data class HistoryTrimmed(
+        val operationId: String,
+        val droppedMessages: Int,
+    ) : AgentEvent {
+        override fun toLogLine(): String = "history_trimmed dropped=$droppedMessages"
+    }
+
+    /**
+     * 遥测：模型服务商连续未返回 usage（如 OpenRouter 显式不带 include_usage）时发出，
+     * 用于暴露"自动压缩停摆"（inputTokens 恒 null，压缩触发线不可达，只剩硬裁剪兜底）。
+     * 纯诊断事件，UI 可忽略；仅当 [missingRounds] 达到阈值后触发一次，不再重复刷屏。
+     */
+    data class CompactionUnavailable(
+        val operationId: String,
+        val missingRounds: Int,
+    ) : AgentEvent {
+        override fun toLogLine(): String = "compaction_unavailable missing_usage_rounds=$missingRounds"
     }
 
     data class RunStarted(
