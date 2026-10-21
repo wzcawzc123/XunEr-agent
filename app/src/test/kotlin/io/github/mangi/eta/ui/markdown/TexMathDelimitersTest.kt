@@ -154,4 +154,37 @@ class TexMathDelimitersTest {
 
     private fun blocks(source: String): List<MarkdownBlock> =
         StreamingGfmParserSession().parse(source, isComplete = true).document.blocks
+
+    @Test
+    fun normalizeDoesNotHangOnBlankLineInsideFence() {
+        // 上游社区报告的死循环：围栏内遇到空行时游标原地踏步。
+        val source = "```\ncode\n\n\\(x\\)\n```\n"
+        val result = withTimeoutMs(2_000) { TexMathDelimiters.normalize(source) }
+        // 围栏内的括号不应被转义为 $$。
+        assertTrue(result.contains("\\("))
+    }
+
+    /** 超过时限即视为挂起（死循环）。 */
+    private fun <T> withTimeoutMs(timeoutMs: Long, block: () -> T): T {
+        val box = java.util.concurrent.atomic.AtomicReference<T>()
+        val error = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val done = java.util.concurrent.CountDownLatch(1)
+        val thread = java.lang.Thread {
+            try {
+                box.set(block())
+            } catch (t: Throwable) {
+                error.set(t)
+            }
+            done.countDown()
+        }
+        thread.isDaemon = true
+        thread.start()
+        check(done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            "normalize 挂起（疑似死循环）"
+        }
+        error.get()?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return box.get() as T
+    }
+
 }
