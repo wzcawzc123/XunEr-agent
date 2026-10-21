@@ -380,6 +380,8 @@ fun AgentAppRoot(
                         state = agentState.homeState,
                         modelPickerState = agentState.modelPickerState,
                         conversationKey = agentState.conversationPaneState.selectedConversationId,
+                        resumableInterrupted = agentState.resumableInterrupted != null,
+                        onResumeInterrupted = agentState::resumeInterruptedRun,
                         onAction = { action ->
                             when (action) {
                                 is AgentHomeAction.ReasoningEffortChanged ->
