@@ -81,6 +81,36 @@ class MemoryRollupTest {
         assertFalse(long.snapshot().content.contains("# 过期追加"))
     }
 
+    @Test
+    fun proposeReturnsCandidatesWithoutWritingThenCommitAppends() {
+        val short = FakeMemoryRepository("# 任务\n临时想法")
+        val long = FakeMemoryRepository("# 核心记忆\n已有长期")
+        val rollup = rollup(short, long, provider = { _, _ -> response("# 用户偏好\n喜欢 Kotlin") })
+
+        val draft = rollup.propose()
+        assertEquals("# 用户偏好\n喜欢 Kotlin", draft.candidates)
+        // S5 核心语义：propose 只提炼不落盘，等用户预览确认。
+        assertEquals("# 核心记忆\n已有长期", long.snapshot().content)
+
+        val outcome = rollup.commit(draft.candidates!!)
+        assertTrue(outcome.ok)
+        assertTrue(long.snapshot().content.contains("# 用户偏好"))
+        assertTrue(long.snapshot().content.contains("已有长期"))
+    }
+
+    @Test
+    fun proposeOnNoCandidatesExplainsAndCommitIsNeverCalled() {
+        val short = FakeMemoryRepository("# 任务\n临时想法")
+        val long = FakeMemoryRepository("# 核心记忆\n已有长期")
+        val before = long.snapshot()
+        val rollup = rollup(short, long, provider = { _, _ -> response("(无)") })
+
+        val draft = rollup.propose()
+        assertEquals(null, draft.candidates)
+        assertTrue(draft.message.contains("无需整理"))
+        assertEquals(before, long.snapshot())
+    }
+
     private fun rollup(
         short: MemoryRepository,
         long: MemoryRepository,
@@ -138,6 +168,16 @@ private class FakeMemoryRepository(initial: String) : MemoryRepository {
         this.content = content
         return snapshot()
     }
+
+    override fun replaceAllIfRevision(content: String, revision: String): AgentMemoryWriteResult {
+        if (revision != snapshot().revision) return AgentMemoryWriteResult.Conflict(snapshot())
+        this.content = content
+        return AgentMemoryWriteResult.Success(snapshot(), changed = true)
+    }
+
+    override fun listHistory(): List<io.github.mangi.eta.data.repository.AgentMemoryHistoryEntry> = emptyList()
+
+    override fun restoreHistory(id: String): AgentMemorySnapshot = snapshot()
 
     private fun sha256(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))

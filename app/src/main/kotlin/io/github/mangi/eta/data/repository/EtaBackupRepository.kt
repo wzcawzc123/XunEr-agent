@@ -43,11 +43,15 @@ internal data class EtaBackupDocument(
     val contextCheckpoints: List<ConversationContextCheckpointEntity> = emptyList(),
     val conversationState: ConversationStateEntity? = null,
     val memoryMd: String = "",
+    /** 短期记忆（4.0 起随备份携带）；旧备份缺省该字段，导入时跳过。 */
+    val memoryShortMd: String? = null,
     val roleplay: CharacterBackupData? = null,
 ) {
     companion object {
         const val FORMAT = "eta-backup"
         // 旧版会把未知原生 Provider 当作 OpenAI-compatible，必须通过备份版本阻止错误恢复。
+        // 3：会话记录携带最近使用的模型；旧版本备份缺省该字段，导入后跟随默认模型。
+        // 4：携带短期记忆；旧备份缺省该字段，导入时跳过（长期记忆 1 起就有）。
         const val SCHEMA_VERSION = 4
     }
 }
@@ -88,6 +92,7 @@ internal object EtaBackupRepository {
                         EtaBackupProvider(it.provider.withoutOAuthSecrets(), it.models)
                     }
                     val memory = AgentMemoryRepository.snapshot().content
+                    val shortMemory = snapshotShortMemoryContent()
                     writer.value("format", String.serializer(), EtaBackupDocument.FORMAT)
                     writer.value("schemaVersion", Int.serializer(), EtaBackupDocument.SCHEMA_VERSION)
                     writer.value("exportedAt", Long.serializer(), System.currentTimeMillis())
@@ -97,6 +102,7 @@ internal object EtaBackupRepository {
                     writer.value("selectedModelId", String.serializer().nullable, settings.selectedModelId)
                     writer.value("conversationState", ConversationStateEntity.serializer().nullable, dao.state())
                     writer.value("memoryMd", String.serializer(), memory)
+                    writer.value("memoryShortMd", String.serializer().nullable, shortMemory)
                     val boundAvatars = linkedMapOf<String, String?>()
                     var conversationCount = 0
                     var messageCount = 0
@@ -152,6 +158,7 @@ internal object EtaBackupRepository {
                 val document = staged.header
                 val database = EtaDatabase.get(appContext)
                 val previousMemory = AgentMemoryRepository.snapshot().content
+                val previousShortMemory = snapshotShortMemoryContent()
                 val previousRoleMemories = document.roleplay?.assets.orEmpty().associate {
                     it.characterId to CharacterMemoryRepository.snapshot(appContext, it.characterId).content
                 }
@@ -204,21 +211,26 @@ internal object EtaBackupRepository {
                             cancellation.ensureActive()
                             memoryWriteStarted = true
                             AgentMemoryRepository.replaceAll(document.memoryMd)
+                            // 短期记忆随备份恢复（4.0）；旧备份无此字段时跳过。
+                            restoreShortMemoryContent(document.memoryShortMd)
                             document.roleplay?.let { CharacterBackupTransfer.restoreMemories(appContext, it) }
                             cancellation.ensureActive()
                         }
-                    } catch (failure: Throwable) {
-                        if (memoryWriteStarted) {
-                            try { AgentMemoryRepository.replaceAll(previousMemory) } catch (restoreFailure: Throwable) {
-                                failure.addSuppressed(restoreFailure)
-                            }
-                            previousRoleMemories.forEach { (id, content) ->
-                                try { CharacterMemoryRepository.replaceAll(appContext, id, content) } catch (restoreFailure: Throwable) {
+                        } catch (failure: Throwable) {
+                            if (memoryWriteStarted) {
+                                try { AgentMemoryRepository.replaceAll(previousMemory) } catch (restoreFailure: Throwable) {
                                     failure.addSuppressed(restoreFailure)
                                 }
+                                try { restoreShortMemoryContent(previousShortMemory) } catch (restoreFailure: Throwable) {
+                                    failure.addSuppressed(restoreFailure)
+                                }
+                                previousRoleMemories.forEach { (id, content) ->
+                                    try { CharacterMemoryRepository.replaceAll(appContext, id, content) } catch (restoreFailure: Throwable) {
+                                        failure.addSuppressed(restoreFailure)
+                                    }
+                                }
                             }
-                        }
-                        CharacterBackupTransfer.discardAssets(avatarPaths, failure)
+                            CharacterBackupTransfer.discardAssets(avatarPaths, failure)
                         throw failure
                     }
                     onCommitted()
@@ -283,6 +295,21 @@ internal object EtaBackupRepository {
             // 即使提交后进程中断，导入的相同 ID 也不能接上设备中尚未清除的旧授权。
             copy(authMode = ProviderAuthModes.API_KEY, apiKey = "", isEnabled = false)
         } else withoutOAuthSecrets()
+
+    /**
+     * 短期记忆内容快照（导出用）。未初始化（单测场景没走 [MemoryRepositories.init]）时返回空串，
+     * 不阻断导出；生产路径 EtaApp 已统一初始化。
+     */
+    private fun snapshotShortMemoryContent(): String =
+        runCatching { ShortMemoryRepository.snapshot().content }
+            .getOrElse { if (it is IllegalStateException) "" else throw it }
+
+    /** 恢复短期记忆内容；null（旧备份）或空串跳过。只吞「未初始化」，真实 IO 错误照常上抛。 */
+    private fun restoreShortMemoryContent(content: String?) {
+        if (content.isNullOrEmpty()) return
+        runCatching { ShortMemoryRepository.replaceAll(content) }
+            .onFailure { if (it !is IllegalStateException) throw it }
+    }
 
     private fun logFailure(operation: String, phase: String, failure: Throwable) {
         if (failure is CancellationException) return
