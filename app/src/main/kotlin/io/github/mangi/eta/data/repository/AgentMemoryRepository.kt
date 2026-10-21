@@ -121,6 +121,9 @@ internal class AgentMemoryStore(
     private val historyDir = File(memoryDir, HISTORY_DIR_NAME)
     private val lock = Any()
 
+    /** 历史文件名内嵌的进程内单调序号：同秒多次写入时既保证不互相覆盖，也保证字典序=时间序。 */
+    private var historySeq = 0L
+
     fun snapshot(): AgentMemorySnapshot = synchronized(lock) {
         snapshotLocked()
     }
@@ -186,7 +189,7 @@ internal class AgentMemoryStore(
 
     fun listHistory(): List<AgentMemoryHistoryEntry> = synchronized(lock) {
         historyFiles()
-            .sortedByDescending { it.name }
+            .sortedWith(HISTORY_ORDER)
             .map { file ->
                 AgentMemoryHistoryEntry(
                     id = file.name,
@@ -237,9 +240,13 @@ internal class AgentMemoryStore(
             // SimpleDateFormat 非线程安全，且长期/短期两个 store 各持自己的 lock，必须每次新建。
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val rev8 = sha256(previousContent.toByteArray(Charsets.UTF_8)).take(8)
-            File(historyDir, "$stamp-$rev8.md").writeBytes(previousContent.toByteArray(Charsets.UTF_8))
+            // 同一秒内可能连续写多次：内嵌单调序号保证文件名唯一（同内容也不会互相覆盖），
+            // 且保持字典序即时间序（此前只用秒级时间戳+rev8，同秒快照的先后是哈希序=随机序）。
+            val name = "$stamp-${historySeq.toString().padStart(6, '0')}-$rev8.md"
+            historySeq++
+            File(historyDir, name).writeBytes(previousContent.toByteArray(Charsets.UTF_8))
             historyFiles()
-                .sortedByDescending { it.name }
+                .sortedWith(HISTORY_ORDER)
                 .drop(MAX_HISTORY_ENTRIES)
                 .forEach { it.delete() }
         } catch (_: IOException) {
@@ -609,8 +616,11 @@ internal class AgentMemoryStore(
         /** 写前历史快照保留份数（FIFO 滚动删除）。 */
         const val MAX_HISTORY_ENTRIES = 10
 
-        /** 历史快照文件名：`yyyyMMdd-HHmmss-<rev8>.md`，字典序即时间序。 */
-        private val HISTORY_ID = Regex("[0-9]{8}-[0-9]{6}-[0-9a-f]{8}\\.md")
+        /** 历史快照文件名：`yyyyMMdd-HHmmss-<seq6>-<rev8>.md`；mtime 优先、文件名兜底的倒序=最新在前。 */
+        private val HISTORY_ID = Regex("[0-9]{8}-[0-9]{6}-[0-9]{6}-[0-9a-f]{8}\\.md")
+
+        private val HISTORY_ORDER = compareByDescending<File> { it.lastModified() }
+            .thenByDescending { it.name }
     }
 }
 
