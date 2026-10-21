@@ -1190,7 +1190,8 @@ internal class AgentAppState(
             userHistoryMessage = userHistoryMessage,
             messages = messages,
             state = homeState.copy(
-                journal = editBoundary?.journalPrefix ?: homeState.journal,
+                // 截断 prefix 为空时不要回退到全量 journal（方向相反：会把未截断的历史整个带出）。
+                journal = editBoundary?.journalPrefix?.takeIf { it.isNotEmpty() } ?: homeState.journal,
                 input = "",
                 pendingImages = emptyList(),
                 pendingFileReferences = emptyList(),

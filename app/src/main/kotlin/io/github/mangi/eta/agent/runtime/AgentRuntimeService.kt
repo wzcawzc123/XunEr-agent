@@ -185,6 +185,23 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         return false
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val wm = windowManager ?: return
+        // 横竖屏切换后旧的 glow 高度是上一方向的，不重算会只渲染半屏。
+        glowView?.let { view ->
+            glowParams?.let { lp ->
+                lp.height = runCatching {
+                    val point = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    wm.defaultDisplay.getRealSize(point)
+                    point.y
+                }.getOrDefault(WindowManager.LayoutParams.MATCH_PARENT)
+                runCatching { wm.updateViewLayout(view, lp) }
+            }
+        }
+    }
+
     override fun onDestroy() {
         startRequestGeneration++
         pendingStartRequest?.let { pending ->
