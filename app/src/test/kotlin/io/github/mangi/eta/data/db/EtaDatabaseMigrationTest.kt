@@ -11,6 +11,8 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -55,6 +57,7 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_19_20,
                 EtaDatabase.MIGRATION_20_21,
                 EtaDatabase.MIGRATION_21_22,
+                EtaDatabase.MIGRATION_22_30,
             )
             .build()
         try {
@@ -134,6 +137,83 @@ class EtaDatabaseMigrationTest {
         } finally {
             database.close()
             context.deleteDatabase(databaseName)
+        }
+    }
+
+    /**
+     * 迁移链必须覆盖所有已发布版本到当前 schema 的升级路径。
+     *
+     * 这是「漏写迁移 → fallbackToDestructiveMigration 清库」唯一的前置门：
+     * 加了 SCHEMA_VERSION 却忘了迁移，这里立刻红。（2026-10-22 修复前
+     * 旧 fork 29 → 重建版 22 的降级正是没有这条守卫才一路裸奔。）
+     */
+    @Test
+    fun migrationChainCoversAllUpgradePathsToSchemaVersion() {
+        val pairs = EtaDatabase.MIGRATIONS.map { it.startVersion to it.endVersion }
+        assertTrue("迁移链不能为空", pairs.isNotEmpty())
+        assertEquals("必须从最低支持版本 6 开始", 6, pairs.first().first)
+
+        // 主干（→ 22）连续：每段首尾相接，不允许缺口。
+        val trunk = pairs.filter { it.second < EtaDatabase.SCHEMA_VERSION }
+        trunk.zipWithNext().forEach { (prev, next) ->
+            assertEquals(
+                "迁移链出现缺口：${prev.second} 之后应接 ${prev.second}_${prev.second + 1}，" +
+                    "实际是 ${next.first}_${next.second}",
+                prev.second,
+                next.first,
+            )
+        }
+        assertEquals("主干应止于 22（4.0 重建 schema）", 22, trunk.last().second)
+
+        // 22 = 重建版自己；23-29 = 旧 fork 3.14.1 的每个已发布版本。都必须能一步到当前版本。
+        (22..29).forEach { from ->
+            assertTrue(
+                "缺少 $from → ${EtaDatabase.SCHEMA_VERSION} 迁移（漏写会让 Room 清空用户数据）",
+                pairs.any { it.first == from && it.second == EtaDatabase.SCHEMA_VERSION },
+            )
+        }
+        assertTrue(
+            "SCHEMA_VERSION 必须是链上最大值，否则会出现无人接应的高版本",
+            pairs.all { it.second <= EtaDatabase.SCHEMA_VERSION },
+        )
+    }
+
+    /** 旧 fork（23-29）升级：三张已弃用表删除，共享表不动。 */
+    @Test
+    fun legacyForkMigrationDropsOnlyDeprecatedTables() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication())
+                .name("legacy-drop-${UUID.randomUUID()}.db")
+                .callback(object : SupportSQLiteOpenHelper.Callback(1) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE conversation_todos (x INTEGER)")
+                        db.execSQL("CREATE TABLE agent_tasks (x INTEGER)")
+                        db.execSQL("CREATE TABLE conversation_plans (x INTEGER)")
+                        db.execSQL("CREATE TABLE conversations (id TEXT PRIMARY KEY)")
+                    }
+
+                    override fun onUpgrade(
+                        db: SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int,
+                    ) = Unit
+                })
+                .build(),
+        )
+        try {
+            val db = helper.writableDatabase
+            EtaDatabase.MIGRATION_29_30.migrate(db)
+            val tables = buildSet {
+                db.query("SELECT name FROM sqlite_master WHERE type='table'").use { c ->
+                    while (c.moveToNext()) add(c.getString(0))
+                }
+            }
+            assertFalse("conversation_todos 应已删除", "conversation_todos" in tables)
+            assertFalse("agent_tasks 应已删除", "agent_tasks" in tables)
+            assertFalse("conversation_plans 应已删除", "conversation_plans" in tables)
+            assertTrue("共享表必须保留", "conversations" in tables)
+        } finally {
+            helper.close()
         }
     }
 
