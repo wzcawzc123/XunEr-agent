@@ -64,6 +64,7 @@
   <string name="usage_turns">Requests</string>
   <string name="usage_by_model">By model</string>
   <string name="usage_turns_input_format">%1$s turns · %2$s input</string>
+  <string name="usage_turns_billable_format">%1$s turns · billable %2$s</string>
   <string name="usage_unit_hundred_million">%1$.2f B</string>
   <string name="usage_unit_ten_thousand">%1$.1f K</string>
   <string name="model_supports_vision">Supports images</string>  <string name="model_text_only">Text only</string>

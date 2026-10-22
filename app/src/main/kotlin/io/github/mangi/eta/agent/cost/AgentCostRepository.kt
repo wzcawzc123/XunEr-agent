@@ -43,6 +43,8 @@ internal class AgentCostRepository(private val dao: ConversationDao) {
                 cachedTokens = row.cachedTokens.coerceAtLeast(0L),
                 outputTokens = row.outputTokens.coerceAtLeast(0L),
                 reasoningTokens = row.reasoningTokens.coerceAtLeast(0L),
+                modelName = row.modelName?.takeIf { it.isNotBlank() },
+                providerName = row.providerName?.takeIf { it.isNotBlank() },
             )
         }
         // 总账 = 各模型之和（与 tokenUsageAll 同口径）；统一走纯函数，避免两处各算一遍。
