@@ -26,7 +26,7 @@ import androidx.room.migration.Migration
         CharacterEntity::class,
         UserPersonaEntity::class,
     ],
-    version = 23,
+    version = EtaDatabase.SCHEMA_VERSION,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -38,6 +38,18 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun characterDao(): CharacterDao
 
     companion object {
+        /**
+         * 单一来源：`@Database(version = ...)` 与迁移链的终点都以它为准。
+         *
+         * v31（合并上游 v23 后）：版本号必须**高于所有血统已发布过的版本**——
+         * 旧 fork 3.14.1 到 29、重建版 4.0.0 到 30、上游到 23。
+         * 低于任一条线的已发布版本，覆盖安装时 Room 视为降级，
+         * `fallbackToDestructiveMigration` 会直接清空全部表
+         * （2026-10-22 真机升级实测：3.14.1 的会话/角色被清空，用户察觉到「像清了数据」）。
+         * 22-30 各版本到 31 的迁移见 [upgradeToLatest]（幂等，兼容各血统）。
+         */
+        internal const val SCHEMA_VERSION = 31
+
         @Volatile
         private var instance: EtaDatabase? = null
 
@@ -48,25 +60,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                     EtaDatabase::class.java,
                     "eta.db",
                 )
-                    .addMigrations(
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13,
-                        MIGRATION_13_14,
-                        MIGRATION_14_15,
-                        MIGRATION_15_16,
-                        MIGRATION_16_17,
-                        MIGRATION_17_18,
-                        MIGRATION_18_19,
-                        MIGRATION_19_20,
-                        MIGRATION_20_21,
-                        MIGRATION_21_22,
-                        MIGRATION_22_23,
-                    )
+                    .addMigrations(*MIGRATIONS.toTypedArray())
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
                         override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -114,10 +108,77 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL("ALTER TABLE conversations ADD COLUMN model_id TEXT")
         }
 
-        internal val MIGRATION_22_23 = Migration(22, 23) { database ->
-            database.execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+        /**
+         * 升级到 [SCHEMA_VERSION] 的统一迁移体（22..30 各版本一步直达）。
+         *
+         * 幂等设计的原因：同一个版本号在两条血统上含义不同——
+         * 旧 fork 23 有 todos/tasks/plans 三表、没有 auth_mode 列；
+         * 上游 23 有 auth_mode 列、没有三表。用存在性检查兼容两边，
+         * 重复 ALTER 或 DROP 都不会炸。合并上游 v23（订阅登录的 auth_mode 列）后
+         * 版本号必须 > 30（4.0.0 已发布过 version=30，同版本号换 schema 会被 Room 判损坏）。
+         */
+        private fun androidx.sqlite.db.SupportSQLiteDatabase.applyLatestSchemaDelta() {
+            execSQL("DROP TABLE IF EXISTS conversation_todos")
+            execSQL("DROP TABLE IF EXISTS agent_tasks")
+            execSQL("DROP TABLE IF EXISTS conversation_plans")
+            val hasAuthMode = query("PRAGMA table_info(model_providers)").use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "auth_mode") { found = true; break }
+                }
+                found
+            }
+            if (!hasAuthMode) {
+                execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+            }
         }
 
+        internal fun upgradeToLatest(from: Int): Migration = Migration(from, SCHEMA_VERSION) {
+            it.applyLatestSchemaDelta()
+        }
+
+        internal val MIGRATION_22_31 = upgradeToLatest(22)
+        internal val MIGRATION_23_31 = upgradeToLatest(23)
+        internal val MIGRATION_24_31 = upgradeToLatest(24)
+        internal val MIGRATION_25_31 = upgradeToLatest(25)
+        internal val MIGRATION_26_31 = upgradeToLatest(26)
+        internal val MIGRATION_27_31 = upgradeToLatest(27)
+        internal val MIGRATION_28_31 = upgradeToLatest(28)
+        internal val MIGRATION_29_31 = upgradeToLatest(29)
+        internal val MIGRATION_30_31 = upgradeToLatest(30)
+
+        /**
+         * 全部迁移（单一来源）：`addMigrations` 与迁移链守卫测试都用它。
+         * 主干 6→…→22 连续（上游底座）；22-30 各有一步直达 [SCHEMA_VERSION]。
+         * by lazy：各 MIGRATION_* 定义分散在本 companion 各处，避免初始化顺序耦合。
+         */
+        internal val MIGRATIONS: List<Migration> by lazy { listOf(
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_31,
+            MIGRATION_23_31,
+            MIGRATION_24_31,
+            MIGRATION_25_31,
+            MIGRATION_26_31,
+            MIGRATION_27_31,
+            MIGRATION_28_31,
+            MIGRATION_29_31,
+            MIGRATION_30_31,
+        ) }
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
             mapOf("runtime_results" to "run_id", "runtime_archive_runs" to "archive_run_id",
                 "runtime_inflight_runs" to "run_id", "conversation_context_checkpoints" to "conversation_id",

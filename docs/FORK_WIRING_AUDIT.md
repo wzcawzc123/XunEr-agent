@@ -77,3 +77,54 @@ headingWarning 结构提醒块——且后两者成了无人消费的死数据�
 - 修复提交随本报告同批推送；CI 双 job 全绿为准入门槛。
 - 靶向测试（PromptBuilder/ToolCallValidator/ToolCatalog/LocalToolsPermission/
   ModelClientLoop/ContextBudget/ContextSession）本地全绿。
+
+---
+
+# 补全审查（2026-10-22 第二轮：其余功能域 + DB 升级路径）
+
+第一轮只覆盖了 runtime/工具/UI 三路，12 个恢复块没扫全。本轮补齐四路
+（角色、终端/Linux、Skills/MCP、语音/设备/附件），并顺藤摸瓜发现一个**比断线更严重**
+的问题：DB 降级清库。
+
+## 五、第二轮结论
+
+| 域 | 结论 |
+|---|---|
+| 角色/roleplay（角色卡/人设/剧情记忆/改写/绑定/备份） | ✅ 全链通，0 疑点 |
+| 终端/Linux（终端工具/文件工具/PRoot/共享目录/Root 链） | ✅ 全链通，🟡×2 |
+| Skills/MCP（技能工具/注册/GitHub 安装/MCP 注入/设置页） | ✅ 全链通，🟡×3 |
+| 语音/设备/附件（识别合成/设备工具三组权限/视觉链/用量） | ✅ 全链通，🟡×3 |
+
+### 🔴 本轮最重要发现：DB 降级清库（已修）
+
+新分支 `EtaDatabase.version = 22`（= 上游底座版本），而旧 fork 3.14.1 是 **29**。
+旧用户覆盖安装 4.0.0 时 Room 判为**降级**，叠加 `fallbackToDestructiveMigration
+(dropAllTables = true)` → **会话/角色/提供商/技能注册全部被清空**。
+2026-10-22 真机升级实测：3.14.1 的数据在 4.0.0 首启后消失（用户察觉「像清了数据」）。
+
+**修复**（真机验证 `user_version: 30` 且数据完好）：
+- `SCHEMA_VERSION = 30` 单一来源（高于旧 fork 29，恢复旧 fork 的防清库设计）
+- `MIGRATION_22_30`（重建版自身升级，no-op）+ `MIGRATION_23_30..29_30`（旧 fork 各版本
+  升级：schema 差异仅 todos/tasks/plans 三张已弃用表，DROP 即达 v30）
+- 恢复「迁移链覆盖所有升级路径」守卫测试（第一轮缺测试正是本坑的成因）
+
+### 🟡 处理掉的
+
+- 能力页缺 `androguard_analyze`/`read_image` 条目（展示断）→ 已补，真机确认「APK 安全分析」上屏
+- 迁移链守卫测试丢失 → 已恢复（连同 legacy-drop 功能测试）
+
+### 🟡 留档不修（有意决策/边缘竞态/设计现状）
+
+- Linux 发行版冷启动选型竞态（AgentLocalTools 构造先于 initialize 完成，极窄窗口）
+- GUI 设备工具（tap/swipe/…）不受三组权限开关控制——与旧 fork 一致的上游设计
+- 敏感工具名集在 AgentLocalTools 与 AgentSensitiveToolPolicy 双处维护（漂移风险）
+- 新 MCP 服务器默认零工具启用 + toast 文案（与旧 fork 一致）
+- 短期记忆路径套娃 `memory-short/memory/`（cosmetic）
+- 保存成功弹对话框（UX 噪音，可改轻提示）
+
+## 六、真机全页面扫测（同日）
+
+不止记忆页：聊天（发送/思考/工具/回复）、工具能力页、Skills、角色、模型、
+用量统计、MCP、Linux 工具环境、数据备份、语音、外观与主题、终端、浏览器、
+角色卡渲染——**全部截图取证通过**。记忆页 20 项全链另见当日实测记录。
+累计发现并修复：历史列表不刷新（保存/清空后）、DB 降级清库、能力页缺条目。
