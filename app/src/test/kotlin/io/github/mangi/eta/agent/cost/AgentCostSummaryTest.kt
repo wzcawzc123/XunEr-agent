@@ -104,8 +104,6 @@ class AgentCostSummaryTest {
             AgentCostSummary.ByModel("model-a", turns = 4, inputTokens = 200, cachedTokens = 60, outputTokens = 30, reasoningTokens = 0),
             AgentCostSummary.ByModel(null, turns = 2, inputTokens = 100, cachedTokens = 0, outputTokens = 20, reasoningTokens = 0),
         )
-        assertEquals("model-a", byModel[0].displayName)
-        assertEquals("未绑定模型", byModel[1].displayName)
         assertEquals(140L, byModel[0].billableInputTokens)
         assertEquals(100L, byModel[1].billableInputTokens)
 
@@ -116,6 +114,24 @@ class AgentCostSummaryTest {
         assertEquals(2, total.turns)
         assertEquals(300L, total.inputTokens)
         assertEquals(60L, total.cachedTokens)
+    }
+
+    @Test
+    fun `byModel 展示名解析提供商与模型且未解析时带短 id 兜底`() {
+        // 2026-10-22 真机反馈：用户自建模型的 modelId 是 UUID，直接显示等于没显示。
+        val resolved = AgentCostSummary.ByModel(
+            "3aed1191-88c5-4dc2-962f-171d91db426f", turns = 1,
+            inputTokens = 10, cachedTokens = 0, outputTokens = 1, reasoningTokens = 0,
+            modelName = "sensenova-6.8-flash-lite", providerName = "商汤",
+        )
+        val modelOnly = resolved.copy(providerName = null)
+        val unresolved = resolved.copy(modelName = null, providerName = null)
+        val unbound = resolved.copy(modelId = null)
+
+        assertEquals("商汤 / sensenova-6.8-flash-lite", resolved.displayName)
+        assertEquals("sensenova-6.8-flash-lite", modelOnly.displayName)
+        assertEquals("未知模型（3aed1191）", unresolved.displayName)
+        assertEquals("未绑定模型", unbound.displayName)
     }
 }
 

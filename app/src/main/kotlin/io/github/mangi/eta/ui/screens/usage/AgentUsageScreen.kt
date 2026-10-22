@@ -279,10 +279,12 @@ private fun ByModelCard(summary: AgentCostSummary) {
             Spacer(Modifier.height(10.dp))
             val models = summary.byModel
             models.forEachIndexed { index, model ->
+                // 与 hero 同口径：每行报「计费输入」而不是原始输入——
+                // 用户关心的是"这个模型花了多少钱的量"，缓存命中的部分不该再吓一次人。
                 val value = stringResource(
-                    R.string.usage_turns_input_format,
+                    R.string.usage_turns_billable_format,
                     formatCount(model.turns.toLong()),
-                    formatTokens(model.inputTokens),
+                    formatTokens(model.billableInputTokens),
                 )
                 MetricRow(
                     label = model.displayName,

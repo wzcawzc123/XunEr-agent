@@ -27,8 +27,24 @@ internal data class AgentCostSummary(
         val cachedTokens: Long,
         val outputTokens: Long,
         val reasoningTokens: Long,
+        /** provider_models.display_name，未解析（模型已删/老数据）为 null。 */
+        val modelName: String? = null,
+        /** model_providers.name，同上。 */
+        val providerName: String? = null,
     ) {
-        val displayName: String get() = modelId?.takeIf { it.isNotBlank() } ?: "未绑定模型"
+        /**
+         * 展示名：`提供商 / 模型名`。
+         *
+         * 2026-10-22 真机反馈：此前直接显示 modelId（用户自建模型是 UUID），等于没显示。
+         * 解析不到名字时宁可标「未知模型」带短 id，也不要把整串 UUID 糊在行尾。
+         */
+        val displayName: String
+            get() = when {
+                modelId.isNullOrBlank() -> "未绑定模型"
+                !modelName.isNullOrBlank() && !providerName.isNullOrBlank() -> "$providerName / $modelName"
+                !modelName.isNullOrBlank() -> modelName
+                else -> "未知模型（${modelId.take(8)}）"
+            }
         val billableInputTokens: Long get() = (inputTokens - cachedTokens).coerceAtLeast(0L)
     }
 
