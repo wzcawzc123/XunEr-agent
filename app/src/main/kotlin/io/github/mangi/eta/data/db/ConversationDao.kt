@@ -25,6 +25,10 @@ internal interface ConversationDao : ChunkedTextDao {
     /** 按模型分组的用量投影（U3，v3.13.4）：会话表的 model_id 归属到消息行。 */
     data class TokenUsageByModelProjection(
         val modelId: String?,
+        /** provider_models.display_name（模型已删/老数据为 null）。 */
+        val modelName: String?,
+        /** model_providers.name（同上可为 null）。 */
+        val providerName: String?,
         val turns: Int,
         val inputTokens: Long,
         val cachedTokens: Long,
@@ -64,15 +68,22 @@ internal interface ConversationDao : ChunkedTextDao {
      * 按模型分组聚合（U3，v3.13.4）：模型归属在会话表（conversations.model_id），
      * 消息表没有——JOIN 会话表把 model_id 投影到每行再分组。
      * 会话 model_id 为空（老数据/未绑定）归入 null 组，UI 显示为「未绑定模型」。
+     * conversations.model_id 存的是 provider_models.id（Model.id，用户自建模型为 UUID），
+     * 再 LEFT JOIN 出展示名——用量页不能拿裸 UUID 糊弄用户（2026-10-22 真机反馈）。
      */
     @Query(
-        "SELECT c.model_id AS modelId, COUNT(*) AS turns, " +
+        "SELECT c.model_id AS modelId, " +
+            "pm.display_name AS modelName, " +
+            "p.name AS providerName, " +
+            "COUNT(*) AS turns, " +
             "COALESCE(SUM(m.input_tokens), 0) AS inputTokens, " +
             "COALESCE(SUM(m.cached_tokens), 0) AS cachedTokens, " +
             "COALESCE(SUM(m.output_tokens), 0) AS outputTokens, " +
             "COALESCE(SUM(m.reasoning_tokens), 0) AS reasoningTokens " +
             "FROM conversation_messages m " +
             "JOIN conversations c ON c.id = m.conversation_id " +
+            "LEFT JOIN provider_models pm ON pm.id = c.model_id " +
+            "LEFT JOIN model_providers p ON p.id = pm.provider_id " +
             "WHERE m.input_tokens > 0 " +
             "GROUP BY c.model_id",
     )

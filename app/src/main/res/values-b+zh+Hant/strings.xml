@@ -55,6 +55,7 @@
   <string name="usage_turns">請求輪次</string>
   <string name="usage_by_model">按模型</string>
   <string name="usage_turns_input_format">%1$s 輪 · %2$s 輸入</string>
+  <string name="usage_turns_billable_format">%1$s 輪 · 計費 %2$s</string>
   <string name="usage_unit_hundred_million">%1$.2f 億</string>
   <string name="usage_unit_ten_thousand">%1$.1f 萬</string>
   <string name="model_supports_vision">支援圖片輸入</string>  <string name="model_text_only">純文字</string>
