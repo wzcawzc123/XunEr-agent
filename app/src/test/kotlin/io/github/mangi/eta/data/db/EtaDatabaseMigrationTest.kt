@@ -194,6 +194,8 @@ class EtaDatabaseMigrationTest {
                         db.execSQL("CREATE TABLE agent_tasks (x INTEGER)")
                         db.execSQL("CREATE TABLE conversation_plans (x INTEGER)")
                         db.execSQL("CREATE TABLE conversations (id TEXT PRIMARY KEY)")
+                        // 迁移体还会补上游 v23 的 auth_mode 列：共享表必须存在
+                        db.execSQL("CREATE TABLE model_providers (id TEXT PRIMARY KEY)")
                     }
 
                     override fun onUpgrade(
@@ -216,6 +218,12 @@ class EtaDatabaseMigrationTest {
             assertFalse("agent_tasks 应已删除", "agent_tasks" in tables)
             assertFalse("conversation_plans 应已删除", "conversation_plans" in tables)
             assertTrue("共享表必须保留", "conversations" in tables)
+            val providerColumns = buildSet {
+                db.query("PRAGMA table_info(model_providers)").use { c ->
+                    while (c.moveToNext()) add(c.getString(1))
+                }
+            }
+            assertTrue("应补上上游 v23 的 auth_mode 列", "auth_mode" in providerColumns)
         } finally {
             helper.close()
         }
