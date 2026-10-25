@@ -130,6 +130,7 @@ internal fun AgentChatInputBar(
     preserveFollowingMessages: Boolean,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
+    onContextHistory: () -> Unit = {},
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
     onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
@@ -365,7 +366,12 @@ internal fun AgentChatInputBar(
                         Spacer(modifier = Modifier.weight(1f))
 
                         if (showContextUsage) {
-                            AgentContextUsageButton(usage = contextUsage, onCompact = onCompactContext, canCompact = canCompactContext && !isStreaming)
+                            AgentContextUsageButton(
+                                usage = contextUsage,
+                                onCompact = onCompactContext,
+                                canCompact = canCompactContext && !isStreaming,
+                                onHistory = onContextHistory,
+                            )
 
                             Spacer(modifier = Modifier.width(2.dp))
                         }

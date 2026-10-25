@@ -391,6 +391,8 @@ fun AgentAppRoot(
                                 is AgentHomeAction.ReasoningEffortChanged ->
                                     agentState.updateReasoningEffort(action.effort)
                                 AgentHomeAction.CompactContext -> agentState.compactCurrentContext()
+                                is AgentHomeAction.EditCompactionSummary ->
+                                    agentState.editCompactionSummary(action.historyIndex, action.text)
                                 AgentHomeAction.LoadEarlierMessages -> agentState.loadEarlierMessages()
                                 is AgentHomeAction.HistoryViewportChanged -> agentState.updateHistoryViewport(action.atLatest)
                                 AgentHomeAction.RetryConversationLoad -> agentState.retryConversationLoad()

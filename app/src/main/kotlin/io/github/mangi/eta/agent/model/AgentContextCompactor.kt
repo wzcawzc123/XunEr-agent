@@ -40,7 +40,8 @@ internal class AgentContextCompactor(
         }
         val history = (systemCount until messages.length()).map { messages.getJSONObject(it) }
         val latestUser = history.indexOfLast {
-            it.optString("role") == "user" && !it.has("_eta_observation")
+            // 裁剪备忘（_eta_trim_digest）不是真实用户请求，不能当作"最新用户轮"保护边界。
+            it.optString("role") == "user" && !it.has("_eta_observation") && !it.has("_eta_trim_digest")
         }
         // 压缩范围：保留「最新用户请求之后」的进行中工具链，并按逐字预算保留一段近期历史。
         val end = compactEnd(history)
@@ -79,7 +80,10 @@ internal class AgentContextCompactor(
         // R4：摘要输入预算。超长历史全量进摘要请求既贵又可能超 provider 上限（真机单轮
         // input 曾达 75 万 tokens）；超出预算时从最旧端丢弃（protectedUser 与逐字保留尾部
         // 不在 safe 内，不受影响）。covered 只计实际进入摘要的用户轮次，跨 run 对账自洽。
-        val bounded = boundSummaryInput(safe, summaryInputBudgetChars(config.contextWindow))
+        // W1（context-compaction-v2）：进预算前先做工具结果瘦身——旧轮终端/读文件等大结果
+        // 瘦形成「结论+关键行」，同等预算覆盖更多轮次，摘要看到的是全貌而非截断片段。
+        val slimmed = AgentToolResultSlimmer.slim(safe)
+        val bounded = boundSummaryInput(slimmed, summaryInputBudgetChars(config.contextWindow))
         val truncatedInput = bounded.size < safe.size
         val summary = AgentContextSummarizer(config, provider, controller, roleplay)
             .summarize(bounded)
@@ -130,6 +134,13 @@ internal class AgentContextCompactor(
             contextSummary = true,
             compactedUserTurns = covered,
             summaryThroughUserTurn = covered + if (protectedUser != null) 1 else 0,
+            // W3（context-compaction-v2）：压缩元数据随摘要落库，面板（压缩历史）据此渲染时间线。
+            compactionMeta = JSONObject()
+                .put("at", System.currentTimeMillis())
+                .put("tokensBefore", observedInputTokens ?: -1)
+                .put("covered", covered)
+                .put("dropped", (safe.size - bounded.size).coerceAtLeast(0))
+                .toString(),
         )))
         protectedUser?.let(result::put)
         history.drop(end).forEach { message ->
@@ -232,6 +243,11 @@ internal class AgentContextCompactor(
             used += cost
             from--
         }
+        // W4b（context-compaction-v2）缓存边界：尾部至少保留最近 [CACHE_TAIL_USER_TURNS] 个用户轮
+        // 不被压缩——它们是下一轮请求的稳定前缀，动了就击穿 provider 提示缓存。
+        // 与 retain 预算取小（预算已经更小时不再放宽）。
+        val cacheTailFloor = cacheTailFloor(history)
+        if (cacheTailFloor > 0 && from > cacheTailFloor) from = cacheTailFloor
         val byBudget = (from downTo 1).firstOrNull { canSplit(history, it) }
         if (byBudget != null) return byBudget
         // 保留预算足以覆盖整段历史（历史比 retain 还小）：至少留下一条消息，
@@ -273,6 +289,24 @@ internal class AgentContextCompactor(
 
         /** 原样保留、不参与重写的检查点代数（1 = 只保最近一代，更早的合并进新摘要）。 */
         const val KEEP_RECENT_CHECKPOINTS = 1
+
+        /** W4b：压缩尾部至少保留的用户轮数（缓存友好边界）。 */
+        const val CACHE_TAIL_USER_TURNS = 2
+
+        /** 从尾部数第 N 个用户消息的下标（含）；不足 N 个返回 0（不设下限）。 */
+        private fun cacheTailFloor(history: List<JSONObject>): Int {
+            var seen = 0
+            for (index in history.indices.reversed()) {
+                val message = history[index]
+                if (message.optString("role") == "user" &&
+                    !message.has("_eta_observation") && !message.has("_eta_trim_digest")
+                ) {
+                    seen++
+                    if (seen == CACHE_TAIL_USER_TURNS) return index
+                }
+            }
+            return 0
+        }
 
         const val ANCHOR_HEADER = "[原始任务（逐字保留，勿改写）]"
 

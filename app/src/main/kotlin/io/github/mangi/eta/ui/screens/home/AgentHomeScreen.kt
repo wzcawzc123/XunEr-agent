@@ -3,7 +3,10 @@ package io.github.mangi.eta.ui.screens.home
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import io.github.mangi.eta.ui.components.AgentChatBody
 import io.github.mangi.eta.ui.components.AgentConversationLoadState
@@ -41,6 +44,7 @@ internal fun AgentHomeScreen(
 ) {
     // key 内保持完整分支，避免提前返回遗留无法转换为 DEX 的编译器标记。
     key(chatConversationCompositionKey(conversationKey)) {
+        var showContextHistory by remember { mutableStateOf(false) }
         if (!state.isConversationLoaded) {
             AgentConversationLoadState(
                 isLoading = isLoadingConversation,
@@ -56,6 +60,15 @@ internal fun AgentHomeScreen(
                 LocalRoleplayChat provides state.roleplayChatUi(),
                 LocalAgentBrowserSession provides browser,
             ) {
+        if (showContextHistory) {
+            io.github.mangi.eta.ui.components.AgentContextHistoryDialog(
+                records = io.github.mangi.eta.ui.model.AgentContextHistory.records(state.history),
+                onDismiss = { showContextHistory = false },
+                onEditSummary = { index, text ->
+                    onAction(AgentHomeAction.EditCompactionSummary(index, text))
+                },
+            )
+        }
                 AgentChatBody(
                     messages = state.messages,
                     modelPickerState = modelPickerState,
@@ -73,6 +86,7 @@ internal fun AgentHomeScreen(
                     messageEdit = state.messageEdit,
                     onReasoningEffortChange = { onAction(AgentHomeAction.ReasoningEffortChanged(it)) },
                     onCompactContext = { onAction(AgentHomeAction.CompactContext) },
+                    onContextHistory = { showContextHistory = true },
                     canCompactContext = state.canCompactContext,
                     onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
                     onVisionToggled = onVisionToggled,

@@ -380,6 +380,8 @@ internal object AgentModelClient {
         val compactedUserTurns: Int = 0,
         val summaryThroughUserTurn: Int = 0,
         val messageId: String = "",
+        /** W3（context-compaction-v2）：压缩元数据 JSON（at/tokensBefore/covered/dropped），旧数据为空串。 */
+        val compactionMeta: String = "",
     )
 
     fun interface ToolExecutor {

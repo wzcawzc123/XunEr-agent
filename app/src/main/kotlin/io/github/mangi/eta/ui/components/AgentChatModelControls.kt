@@ -1,6 +1,8 @@
 package io.github.mangi.eta.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +34,7 @@ internal fun AgentContextUsageButton(
     usage: AgentContextUsageUi,
     onCompact: () -> Unit = {},
     canCompact: Boolean = false,
+    onHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -71,12 +74,27 @@ internal fun AgentContextUsageButton(
                         style = MiuixTheme.textStyles.subtitle,
                     )
                 },
-                action = if (canCompact) {
-                    {
+                action = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (canCompact) {
+                            TextButton(
+                                text = stringResource(R.string.context_compact_action),
+                                onClick = {
+                                    onCompact()
+                                    tooltipState.dismiss()
+                                },
+                                minWidth = 0.dp,
+                                minHeight = 34.dp,
+                                cornerRadius = 17.dp,
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                            )
+                        }
+                        // W3（context-compaction-v2）：同一入口进入压缩历史面板（时间线/预览/编辑）。
                         TextButton(
-                            text = stringResource(R.string.context_compact_action),
+                            text = stringResource(R.string.context_history_open),
                             onClick = {
-                                onCompact()
+                                onHistory()
                                 tooltipState.dismiss()
                             },
                             minWidth = 0.dp,
@@ -86,8 +104,6 @@ internal fun AgentContextUsageButton(
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                         )
                     }
-                } else {
-                    null
                 },
                 colors = tooltipColors,
             ) {

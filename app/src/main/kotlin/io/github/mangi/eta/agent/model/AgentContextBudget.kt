@@ -113,6 +113,12 @@ internal class AgentContextBudget(private val window: Int?) {
             return if (ABSOLUTE_TRIGGER_CAP > 0) minOf(resolved, ABSOLUTE_TRIGGER_CAP) else resolved
         }
 
+        /** W4a：预测下一轮占用 = 当前 + max(最近增长, 输出预留)；窗口无效返回 null。 */
+        fun predictedNextTokens(before: Int, recentGrowth: Int, window: Int?): Int? {
+            val w = window?.takeIf { it > 0 } ?: return null
+            return before + maxOf(recentGrowth, outputReserveTokens(w))
+        }
+
         /** 压缩后逐字保留的近期历史预算；窗口无效时返回 null（保留全部由调用方决定）。 */
         fun retainTokens(window: Int?): Int? {
             val w = window?.takeIf { it > 0 } ?: return null
