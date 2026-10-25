@@ -23,17 +23,18 @@ class AgentContextCostGuardTest {
     @Test
     fun triggerAndRetainBudgetsFollowHarnessFormula() {
         // W = 1,048,576：reserve = min(16384, W/16) = 16384；headroom = min(65536, W/8) = 65536
-        // pressureBudget = W − 16384 − 65536 = 966,656；byRatio = W × 0.8 = 838,860 → 取小 = 838,860
-        assertEquals(838_860, AgentContextBudget.triggerTokens(1_048_576))
+        // pressureBudget = W − 16384 − 65536 = 966,656；byRatio = W × 0.85 = 891,289 → 取小 = 891,289
+        // （0.85 起 ≤256k 窗口由压力预算接管，小窗口的输出预留不变）
+        assertEquals(891_289, AgentContextBudget.triggerTokens(1_048_576))
         assertEquals(165_150, AgentContextBudget.retainTokens(1_048_576))
-        assertEquals(800_000, AgentContextBudget.triggerTokens(1_000_000))
-        assertEquals(204_800, AgentContextBudget.triggerTokens(256_000))
-        assertEquals(102_400, AgentContextBudget.triggerTokens(128_000))
-        assertEquals(64_000, AgentContextBudget.triggerTokens(80_000))
+        assertEquals(850_000, AgentContextBudget.triggerTokens(1_000_000))
+        assertEquals(208_000, AgentContextBudget.triggerTokens(256_000))
+        assertEquals(104_000, AgentContextBudget.triggerTokens(128_000))
+        assertEquals(65_000, AgentContextBudget.triggerTokens(80_000))
         assertNull(AgentContextBudget.triggerTokens(null))
         assertNull(AgentContextBudget.triggerTokens(0))
-        assertFalse(AgentContextBudget(1_048_576).shouldCompact(838_859))
-        assertTrue(AgentContextBudget(1_048_576).shouldCompact(838_860))
+        assertFalse(AgentContextBudget(1_048_576).shouldCompact(891_288))
+        assertTrue(AgentContextBudget(1_048_576).shouldCompact(891_289))
     }
 
     @Test

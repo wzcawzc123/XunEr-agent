@@ -75,13 +75,17 @@ internal class AgentContextBudget(private val window: Int?) {
         private const val MAX_CALIBRATION = 8.0
 
         /**
-         * 触发压缩的窗口占用比例（0.8，与 DeepSeek Harness 的 `thresholdRatio` 默认值一致）。
+         * 触发压缩的窗口占用比例（0.85）。
+         *
+         * 缓存取舍（2026-10-26）：从 0.8 提到 0.85——压缩本身是 100% 前缀失效（摘要替换
+         * 历史后 provider 缓存全灭），晚 6% 触发可显著减少长会话的压缩次数。安全由两层兜底：
+         * 压力预算（窗口越小越保守）与预测触发（[predictedNextTokens]，单轮暴涨提前压）。
          *
          * 阈值取两个约束的较小者：窗口比例，以及「窗口 − 输出预留 − 余量」。
-         * 参考实现：deepseek-ai/deepseek-harness `packages/compaction/compaction-basic/src/config.ts`
-         * 的 `resolveCompactSpec`（MIT）。
+         * 压力预算公式参考 deepseek-ai/deepseek-harness `resolveCompactSpec`（MIT）；
+         * 比例值与 harness 默认 0.8 不同，原因即上述缓存取舍。
          */
-        const val TRIGGER_RATIO = 0.8
+        const val TRIGGER_RATIO = 0.85
 
         /**
          * 路由请求的输出预留（tokens）。
