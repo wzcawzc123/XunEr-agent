@@ -36,9 +36,9 @@ class AgentContextRecoveryTest {
 
     @Test
     fun automaticCompactionUsesOnlyActualInputUsageAndConfiguredWindow() {
-        // 阈值 = min(900_000 × 0.8, 900_000 − 16_384 − 65_536) = min(720_000, 818_080) = 720_000
-        // （harness 口径：窗口比例与「窗口 − 输出预留 − 余量」取小）。
-        for (input in listOf(null, 400_000, 719_999, 720_000)) {
+        // 阈值 = min(900_000 × 0.85, 900_000 − 16_384 − 65_536) = min(765_000, 818_080) = 765_000
+        // （harness 口径：窗口比例与「窗口 − 输出预留 − 余量」取小；0.85 为缓存取舍后比例）。
+        for (input in listOf(null, 400_000, 764_999, 765_000)) {
             var summaries = 0
             val events = mutableListOf<AgentEvent>()
             val result = AgentModelClient.complete(config, "继续",
@@ -53,11 +53,11 @@ class AgentContextRecoveryTest {
                         response("完成")
                     }
                 })
-            assertEquals(if (input == 720_000) 1 else 0, summaries)
+            assertEquals(if (input == 765_000) 1 else 0, summaries)
             assertEquals("完成", result.content)
             val completed = events.filterIsInstance<AgentEvent.ContextCompaction>().lastOrNull()
-            if (input == 720_000) {
-                assertEquals(720_000, completed!!.tokensBefore)
+            if (input == 765_000) {
+                assertEquals(765_000, completed!!.tokensBefore)
                 assertNull(completed.tokensAfter)
             } else assertNull(completed)
         }

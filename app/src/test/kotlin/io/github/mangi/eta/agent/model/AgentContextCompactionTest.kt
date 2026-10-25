@@ -312,8 +312,9 @@ class AgentContextCompactionTest {
     @Test
     fun budgetUsesModelWindowAndUsageCalibrationWithoutCountingImageBase64() {
         val budget = AgentContextBudget(10_000)
-        assertFalse(budget.shouldCompact(7999))
-        assertTrue(budget.shouldCompact(8000))
+        // 触发线 = min(10_000 × 0.85, 10_000 − 625 − 1_250) = min(8_500, 8_125) = 8_125（压力预算接管）
+        assertFalse(budget.shouldCompact(8_124))
+        assertTrue(budget.shouldCompact(8_125))
         assertFalse(budget.shouldCompact(0))
         assertFalse(AgentContextBudget(null).shouldCompact(Int.MAX_VALUE))
         assertEquals(4, AgentContextBudget.textTokens("中文测试"))
