@@ -1509,4 +1509,15 @@
   <string name="chat_queue_remove">移除排队消息</string>
   <string name="chat_queue_images_only">[%1$d 张图片]</string>
   <string name="chat_queue_files_only">[%1$d 个文件]</string>
+  <string name="context_history_title">压缩历史</string>
+  <string name="context_history_count">共 %1$d 次压缩</string>
+  <string name="context_history_empty">还没有压缩过。</string>
+  <string name="context_history_ordinal">第 %1$d 次</string>
+  <string name="context_history_tokens_before">压缩前 %1$s token</string>
+  <string name="context_history_covered">覆盖 %1$d 个用户轮</string>
+  <string name="context_history_dropped">丢弃 %1$d 条</string>
+  <string name="context_history_expand">展开</string>
+  <string name="context_history_collapse">收起</string>
+  <string name="context_history_edit">编辑</string>
+  <string name="context_history_open">压缩历史</string>
 </resources>

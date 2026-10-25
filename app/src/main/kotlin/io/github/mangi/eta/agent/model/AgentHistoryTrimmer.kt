@@ -40,6 +40,9 @@ internal object AgentHistoryTrimmer {
     /** 工具 schema 的保守预留（实测 82 个工具约 15k token，这里按更多工具留量）。 */
     const val TOOL_SCHEMA_RESERVE_TOKENS = 24_000
 
+    /** 裁剪备忘最多收录多少条要点。 */
+    const val DIGEST_MAX_ITEMS = 6
+
     /** 空数组在 rawEstimate 口径下的固定开销，用于求单条消息的净成本。 */
     private val EMPTY_ESTIMATE = AgentContextBudget.rawEstimate(JSONArray())
 
@@ -108,7 +111,55 @@ internal object AgentHistoryTrimmer {
         // 多数服务商会直接以 400 拒绝这样的消息序列。
         while (start < history.size && history[start].optString("role") == ROLE_TOOL) start++
         if (start >= history.size) return JsonOutcome(emptyList(), history.size)
-        return JsonOutcome(history.subList(start, history.size), start)
+        // W2b（context-compaction-v2）：被丢前缀里的约束/关键句浓缩成「裁剪备忘」，
+        // 避免任务约束随时间序裁剪一起丢失（3 轮前的"必须/不要"比 1 轮前的工具输出重要）。
+        // 备忘用 _eta_trim_digest 标记，压缩侧的 latestUser 判定会跳过它。
+        val digest = buildTrimDigest(history.subList(0, start))
+        if (digest == null) return JsonOutcome(history.subList(start, history.size), start)
+        val kept = history.subList(start, history.size).toMutableList()
+        kept.add(0, digest)
+        return JsonOutcome(kept, start)
+    }
+
+    /**
+     * 从被裁剪的前缀里提取要点，生成一条「裁剪备忘」user 消息。
+     * 无要点可提取（全是没有信息量的旧消息）时返回 null，保持裁剪结果与旧行为一致。
+     */
+    internal fun buildTrimDigest(dropped: List<JSONObject>): JSONObject? {
+        val constraints = LinkedHashSet<String>()
+        val valuable = LinkedHashSet<String>()
+        for (message in dropped) {
+            val role = message.optString("role")
+            if (role != "user" && role != "assistant") continue
+            val content = message.opt("content")
+            val text = when (content) {
+                is String -> content
+                is JSONArray -> buildString {
+                    for (index in 0 until content.length()) {
+                        val part = content.optJSONObject(index) ?: continue
+                        if (part.optString("type") in setOf("text", "input_text")) appendLine(part.optString("text"))
+                    }
+                }
+                else -> continue
+            }
+            for (rawLine in text.lines()) {
+                val line = rawLine.trim()
+                if (line.isEmpty() || line.length > 300) continue
+                when {
+                    AgentContextImportance.isConstraint(line) -> constraints.add(line.take(160))
+                    AgentContextImportance.isValuable(line) -> valuable.add(line.take(160))
+                }
+            }
+        }
+        val bullets = (constraints + valuable).take(DIGEST_MAX_ITEMS)
+        if (bullets.isEmpty()) return null
+        return JSONObject()
+            .put("role", "user")
+            .put("_eta_trim_digest", true)
+            .put("content", buildString {
+                append("[历史裁剪备忘] 此前消息因超出窗口被裁剪，以下要点仍然有效：\n")
+                bullets.forEach { append("- ").append(it).append('\n') }
+            })
     }
 
     private fun costOf(message: AgentModelClient.ConversationMessage): Int {

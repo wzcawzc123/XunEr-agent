@@ -1439,4 +1439,15 @@
   <string name="chat_queue_remove">移除排隊訊息</string>
   <string name="chat_queue_images_only">[%1$d 張圖片]</string>
   <string name="chat_queue_files_only">[%1$d 個檔案]</string>
+  <string name="context_history_title">壓縮歷史</string>
+  <string name="context_history_count">共 %1$d 次壓縮</string>
+  <string name="context_history_empty">還沒有壓縮過。</string>
+  <string name="context_history_ordinal">第 %1$d 次</string>
+  <string name="context_history_tokens_before">壓縮前 %1$s token</string>
+  <string name="context_history_covered">覆蓋 %1$d 個用戶輪</string>
+  <string name="context_history_dropped">丟棄 %1$d 條</string>
+  <string name="context_history_expand">展開</string>
+  <string name="context_history_collapse">收起</string>
+  <string name="context_history_edit">編輯</string>
+  <string name="context_history_open">壓縮歷史</string>
 </resources>
