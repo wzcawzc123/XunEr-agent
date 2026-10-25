@@ -1529,4 +1529,15 @@
   <string name="chat_queue_remove">移除排队消息</string>
   <string name="chat_queue_images_only">[%1$d 张图片]</string>
   <string name="chat_queue_files_only">[%1$d 个文件]</string>
+  <string name="context_history_title">Compaction history</string>
+  <string name="context_history_count">%1$d compactions</string>
+  <string name="context_history_empty">No compaction yet.</string>
+  <string name="context_history_ordinal">#%1$d</string>
+  <string name="context_history_tokens_before">%1$s tokens before</string>
+  <string name="context_history_covered">%1$d user turns covered</string>
+  <string name="context_history_dropped">%1$d messages dropped</string>
+  <string name="context_history_expand">Expand</string>
+  <string name="context_history_collapse">Collapse</string>
+  <string name="context_history_edit">Edit</string>
+  <string name="context_history_open">Compaction history</string>
 </resources>

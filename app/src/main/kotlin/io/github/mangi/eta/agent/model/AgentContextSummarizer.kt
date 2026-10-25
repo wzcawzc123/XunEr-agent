@@ -21,13 +21,36 @@ internal class AgentContextSummarizer(
      * （后续全靠硬裁剪，损失更大）。
      */
     fun summarize(history: List<AgentModelClient.ConversationMessage>): String {
+        val keyFacts = AgentContextImportance.extractKeyFacts(history)
         val first = requestSummary(history, missingHint = null)
-        val missing = missingSections(first)
-        if (missing.isEmpty() || missing.size > MAX_RETRYABLE_MISSING) return first
-        val hint = "你上一次的输出缺少这些小节：" + missing.joinToString("、") +
-            "。请补齐全部小节并保持给定顺序；某节没有内容时写「(无)」。"
+        val missingSections = missingSections(first)
+        val missingFacts = keyFacts.filterNot { AgentContextImportance.coversFact(first, it) }
+        // 节缺失沿用旧阈值；事实缺失只要有一条约束类就必须重试——约束丢了是真事故。
+        val worthRetry = (missingSections.isNotEmpty() && missingSections.size <= MAX_RETRYABLE_MISSING) ||
+            missingFacts.any { AgentContextImportance.isConstraint(it) } ||
+            (missingFacts.isNotEmpty() && missingFacts.size <= MAX_RETRYABLE_MISSING)
+        if (!worthRetry) return first
+        val hint = buildString {
+            if (missingSections.isNotEmpty()) {
+                append("你上一次的输出缺少这些小节：").append(missingSections.joinToString("、"))
+                    .append("。请补齐全部小节并保持给定顺序；某节没有内容时写「(无)」。")
+            }
+            if (missingFacts.isNotEmpty()) {
+                if (isNotEmpty()) append('\n')
+                append("以下要点必须出现在摘要里（原样或明确复述，不要丢）：\n")
+                missingFacts.forEach { append("- ").append(it).append('\n') }
+            }
+        }
         val retry = runCatching { requestSummary(history, missingHint = hint) }.getOrNull()
-        return if (retry != null && missingSections(retry).isEmpty()) retry else first
+        return if (retry != null &&
+            missingSections(retry).isEmpty() &&
+            keyFacts.filterNot { AgentContextImportance.coversFact(retry, it) }.isEmpty()
+        ) {
+            retry
+        } else {
+            // 重试仍不合格接受首版（缺一节/漏一要点远好过压缩失败连带熔断）
+            first
+        }
     }
 
     private fun requestSummary(

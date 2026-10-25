@@ -1582,6 +1582,20 @@ internal class AgentAppState(
         )
     }
 
+    /** W3：编辑压缩摘要内容（history 下标定位，改动走会话状态通道持久化）。 */
+    fun editCompactionSummary(historyIndex: Int, text: String) {
+        val conversationId = selectedConversationId ?: return
+        if (runStore.activeRunId(conversationId) != null) return
+        val current = conversationsById[conversationId] ?: homeState
+        if (historyIndex !in current.history.indices) return
+        val target = current.history[historyIndex]
+        if (!target.contextSummary || text.isBlank()) return
+        val updated = current.history.mapIndexed { index, message ->
+            if (index == historyIndex) message.copy(content = text) else message
+        }
+        updateConversation(conversationId, current.copy(history = updated))
+    }
+
     /** 恢复后被系统中断且可续跑的 run（供 UI 展示「继续」入口）。 */
     val resumableInterrupted: ResumableInterruptedRun?
         get() = resumableInterruptedRun
