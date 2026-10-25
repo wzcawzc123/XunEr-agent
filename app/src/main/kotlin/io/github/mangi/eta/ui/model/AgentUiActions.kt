@@ -7,6 +7,9 @@ sealed interface AgentHomeAction {
     data class HistoryViewportChanged(val atLatest: Boolean) : AgentHomeAction
     data object RetryConversationLoad : AgentHomeAction
     data object CompactContext : AgentHomeAction
+
+    /** W3：编辑压缩摘要（history 下标 + 新文本）。 */
+    data class EditCompactionSummary(val historyIndex: Int, val text: String) : AgentHomeAction
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentHomeAction
     data class ModelSelected(val modelId: String) : AgentHomeAction
     /** 切换模型的图片输入能力声明。 */

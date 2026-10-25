@@ -31,6 +31,9 @@ internal class AgentContextSession(
     /** C3b：连续未收到 usage 的轮数（服务商不回 input_tokens 时自动压缩停摆的遥测）。 */
     private var missingUsageRounds = 0
 
+    /** W4a：最近一轮实测 input tokens 的增长量（预测下一轮用）。 */
+    private var recentGrowthTokens = 0
+
     /**
      * 压缩失败熔断（只在本次 run 内生效）。
      *
@@ -61,7 +64,12 @@ internal class AgentContextSession(
     val compactionBlockedForRun: Boolean get() = compactionBlocked
 
     fun observeInputTokens(tokens: Int?) {
-        inputTokens = tokens?.takeIf { it >= 0 }
+        val resolved = tokens?.takeIf { it >= 0 }
+        // W4a（context-compaction-v2）：记录最近一轮增长，预测下一轮会不会撞窗。
+        if (resolved != null && inputTokens != null) {
+            recentGrowthTokens = (resolved - inputTokens!!).coerceAtLeast(0)
+        }
+        inputTokens = resolved
         // C3b（v3.11.26）：连续多轮未收到 usage（服务商不回 input_tokens）→ 发诊断事件，
         // 暴露"自动压缩停摆"（inputTokens 恒 null，触发线不可达，只剩硬裁剪兜底）。
         // 只在达到阈值后触发一次，避免每轮刷屏。
@@ -120,7 +128,12 @@ internal class AgentContextSession(
             }
             return
         }
-        if (!force && (compactionBlocked || !config.autoCompactionEnabled || before == null || trigger == null || before < trigger)) {
+        // W4a 预测触发：单轮暴涨（大工具结果）时，等下一轮 usage 回来就已经撞窗；
+        // 在此提前压——reasonCode=PROACTIVE，与到线压缩（THRESHOLD）可区分。
+        val predicted = before?.let { AgentContextBudget.predictedNextTokens(it, recentGrowthTokens, contextWindow) }
+        val proactive = before != null && trigger != null && before < trigger &&
+            predicted != null && contextWindow != null && predicted >= contextWindow
+        if (!force && (compactionBlocked || !config.autoCompactionEnabled || before == null || trigger == null || (before < trigger && !proactive))) {
             try {
                 publishSnapshot()
             } catch (failure: Exception) {
