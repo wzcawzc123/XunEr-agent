@@ -480,7 +480,7 @@ internal class AgentAppState(
                     // 跳过，让正常 applyRunResult 处理真结果。否则会被写入失败通知并占 appliedRuntimeRunIds，
                     // 真结果到达时被幂等守卫丢弃（改写内容丢失 + 假「重新生成已中断」提示）。
                     // （4.0 重建时该守卫丢失。）
-                    if (runId == currentRunId) return@forEach
+                    if (runId == runStore.activeRunId(conversationId)) return@forEach
                     conversationsById[conversationId]?.let { state ->
                         updateConversation(conversationId, RoleplayConversationReducer.applyRewrite(state, runId,
                             AgentRuntimeWire.RunResult(runId, false, "", "重新生成已中断，原回复已保留。",
