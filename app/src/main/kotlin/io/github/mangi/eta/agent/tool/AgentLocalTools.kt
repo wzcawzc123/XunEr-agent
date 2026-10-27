@@ -19,7 +19,7 @@ import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.data.repository.AgentMemoryStore
 import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.agent.memory.AgentMemoryHeadingCheck
-import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
+import io.github.mangi.eta.agent.memory.AgentMemoryGauge
 import io.github.mangi.eta.agent.memory.AgentMemoryFreshness
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentToolCallValidator
@@ -100,6 +100,8 @@ internal class AgentLocalTools(
         AgentMemoryRepository.isEnabledCached()
     },
     private val memoryWritable: Boolean = true,
+    /** 会话模型的有效上下文窗口：memory_get 的水位口径与注入侧同源（null 走默认窗口）。 */
+    private val contextWindow: () -> Int? = { null },
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },
     private val screenObservationProvider: (
         (AgentScreenObservationContract.Options) -> RootShellDeviceController.Observation
@@ -523,19 +525,11 @@ internal class AgentLocalTools(
         // 核心区水位：把「注入了多少 / 预算多少 / 有没有被截断」一并回报。
         // 之前这些数字只存在于提示构造过程里，模型与用户都看不见 ——
         // 真机上核心区已用到 89% 而无人知晓，直到某次截断把新规则悄悄丢掉。
-        val gauge = AgentMemoryContextBuilder.build(result.snapshot, null)
-        val coreUsed = gauge.coreContent.length
-        val coreBudget = gauge.coreBudgetChars
         val payload = JSONObject()
             .put("ok", true)
-            .put("core_usage", JSONObject()
-                .put("used_chars", coreUsed)
-                .put("budget_chars", coreBudget)
-                .put("percent", if (coreBudget > 0) coreUsed * 100 / coreBudget else 0)
-                .put("truncated", gauge.coreTruncated)
-                .put("sections", gauge.coreSectionCount)
-                .put("injected_lines", gauge.coreInjectedLines)
-                .put("total_lines", gauge.coreTotalLines))
+            // 水位口径与注入侧一致：以前这里传 null（128k 默认窗口），配置窗口非 128k 时
+            // 会报出与注入完全不同的百分比（2026-10-28 修）。
+            .put("core_usage", AgentMemoryGauge.payload(result.snapshot, contextWindow()))
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
             .put("line_count", result.snapshot.lineCount)

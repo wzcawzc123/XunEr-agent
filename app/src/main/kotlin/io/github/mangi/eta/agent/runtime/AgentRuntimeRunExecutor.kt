@@ -201,6 +201,7 @@ internal class AgentRuntimeRunExecutor(
                     AgentMemoryRepository.isEnabledCached()
                 },
                 memoryWritable = roleplayContext == null,
+                contextWindow = { request.config.contextWindow },
                 screenshotExcludedPackages = {
                     entrySurfaceGuard?.consumeScreenshotExcludedPackages().orEmpty()
                 },
