@@ -41,9 +41,9 @@ android {
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
         // versionName 规则：大重构/破坏性变更进主版本（3.x → 4.0.0）；次/修订版本只用个位数
         // （4.0.x → 4.9.x），不搞双位数（禁止 4.10、3.14 这类），到 9 后进位到下一个主版本。
-        // versionCode 只增不减：4.0.2 于 2026-10-26 发布。
-        versionCode = 2026102601
-        versionName = "4.0.2"
+        // versionCode 只增不减：4.0.3 于 2026-10-28 发布。
+        versionCode = 2026102801
+        versionName = "4.0.3"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
