@@ -34,9 +34,16 @@ internal class AgentExecutionService : Service() {
         instance = this
         leases.attachOwner(owner)
         val manager = getSystemService(NotificationManager::class.java)
+        // 实时通知（Live Updates / ColorOS 流体云）实测在 OEM 上要求高于 LOW 的重要性；
+        // 通道重要性创建后不可修改，故用 v2 id：DEFAULT + 静音（观感与 LOW 一致）。
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
         )
+        manager.deleteNotificationChannel(LEGACY_CHANNEL)
         ensureForeground()
     }
 
@@ -117,8 +124,9 @@ internal class AgentExecutionService : Service() {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
-            // 请求方法从 API 36.1 才公开；标准 extra 也可供支持该协议的 API 36 系统读取。
-            builder.extras.putBoolean("android.requestPromotedOngoing", true)
+            // 请求方法从 API 36.1 才公开；标准 extra 键是 android.extra.REQUEST_PROMOTED_ONGOING
+            // （上游原先写成方法名 "android.requestPromotedOngoing"，系统不识别 → 提升无效）。
+            builder.extras.putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true)
         }
         return builder.build()
     }
@@ -133,7 +141,9 @@ internal class AgentExecutionService : Service() {
     }
 
     companion object {
-        private const val CHANNEL = "eta_execution"
+        /** v2：DEFAULT + 静音；旧 id 由 onCreate 删除，避免设置页重复条目。 */
+        private const val CHANNEL = "eta_execution_v2"
+        private const val LEGACY_CHANNEL = "eta_execution"
         private const val NOTIFICATION_ID = 1107
         private const val ACTION_STOP = "io.github.mangi.eta.action.STOP_USER_EXECUTION"
         private val leases = ExecutionLeaseRegistry()
