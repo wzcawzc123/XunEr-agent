@@ -32,6 +32,19 @@ internal object ModelRepository {
             ?.sortedBy { it.sortOrder }
             .orEmpty()
 
+    /**
+     * 按「UI 标识」查找模型：UI 里可能持有行 id（model.id）也可能持有 API 模型名（model.modelId）。
+     *
+     * 背景（2026-10-28 修 bug）：模型选择器的视觉开关一直把 modelId（API 名）当行 id 传给
+     * setModelVision，状态层只比 `it.id` → 永远匹配不上 → 开关点了没反应。两种标识都认，
+     * 同服务商内 modelId 由 saveModel 保证唯一，故无歧义。
+     */
+    fun findForUi(models: List<Model>, idOrModelId: String): Model? {
+        if (idOrModelId.isBlank()) return null
+        return models.firstOrNull { it.id == idOrModelId }
+            ?: models.firstOrNull { it.modelId == idOrModelId }
+    }
+
     suspend fun saveModel(providerId: String, draft: Model): Model = ProviderRepository.mutationMutex.withLock {
         val models = currentModels(providerId)
         val modelId = draft.modelId.trim()

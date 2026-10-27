@@ -1657,7 +1657,9 @@ internal class AgentAppState(
         scope.launch(Dispatchers.IO) {
             try {
                 val provider = ProviderRepository.providerById(providerId) ?: return@launch
-                val model = provider.models.firstOrNull { it.id == modelId } ?: return@launch
+                // UI 传的是 API 模型名（AgentModelOptionUi.modelId 来自 model.modelId），
+                // 不是行 id；findForUi 两种都认（历史 bug：按行 id 匹配导致开关静默无效）。
+                val model = ModelRepository.findForUi(provider.models, modelId) ?: return@launch
                 ModelRepository.saveModel(
                     provider.id,
                     model.copy(
