@@ -126,7 +126,7 @@ internal fun AgentModelPickerButton(
             },
         ) {
             ModelBrandMark(
-                modelId = selected?.modelId,
+                modelId = selected?.apiModelId,
                 sourceType = selected?.providerSourceType,
                 size = ChatInputActionIconSize,
             )
