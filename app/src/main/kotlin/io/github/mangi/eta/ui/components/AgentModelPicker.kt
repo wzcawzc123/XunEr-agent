@@ -192,7 +192,7 @@ private fun ModelQuickList(
                     model = model,
                     selected = model.id == selectedId,
                     onClick = { select(model.id) },
-                    onVisionToggled = { vision -> onVisionToggled(model.providerId, model.modelId, vision) },
+                    onVisionToggled = { vision -> onVisionToggled(model.providerId, model.id, vision) },
                 )
             }
         }
@@ -313,7 +313,9 @@ private fun ModelSheetContent(
                         selected = entry.model.id == selectedId,
                         onClick = { select(entry.model.id) },
                         onVisionToggled = { vision ->
-                            onVisionToggled(entry.model.providerId, entry.model.modelId, vision)
+                            // 传行 id（与 setModelVision 的 it.id 匹配）；旧选择器一直是 model.id，
+                            // 10-21 重装开关时误改成 model.modelId 导致失配（2026-10-28 修复）。
+                            onVisionToggled(entry.model.providerId, entry.model.id, vision)
                         },
                         horizontalPadding = 12.dp,
                     )
