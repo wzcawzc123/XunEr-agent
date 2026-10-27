@@ -933,6 +933,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             this,
             if (guiState.userPaused) AgentOverlayStatus.Paused else owner?.overlayState?.status,
             activeRunCount = runs.snapshots().size,
+            detail = owner?.overlayState?.streamTail.orEmpty(),
+            thought = owner?.overlayState?.thought.orEmpty(),
         )
     }
 

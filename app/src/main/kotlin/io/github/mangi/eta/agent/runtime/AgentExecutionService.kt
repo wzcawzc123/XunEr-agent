@@ -28,6 +28,9 @@ internal class AgentExecutionService : Service() {
     }
     private val owner = ownerSequence.incrementAndGet()
     private var foregroundActive = false
+    /** 上次 notify 的时间戳（节流用，见 [AgentNotificationUpdate]）。 */
+    private var lastNotifyAt = 0L
+    private var notifyScheduled = false
     @Volatile private var startRejected = false
 
     override fun onCreate() {
@@ -72,7 +75,7 @@ internal class AgentExecutionService : Service() {
             stopTasks()
         } else {
             ensureForeground()
-            refreshNotification()
+            refreshNotification(urgent = true)
         }
         return START_NOT_STICKY
     }
@@ -89,18 +92,37 @@ internal class AgentExecutionService : Service() {
     private fun stopTasks(startFailed: Boolean = false) {
         val callbacks = leases.drain(startFailed)
         stopQueue.submit(callbacks) {
-            mainHandler.post { if (instance === this) refreshNotification() }
+            mainHandler.post { if (instance === this) refreshNotification(urgent = true) }
         }
     }
 
-    private fun refreshNotification() {
+    /**
+     * @param urgent 状态切换（启动/收尾）立即发，不受节流；内容更新走节流 + 补发保证末次必达。
+     */
+    private fun refreshNotification(urgent: Boolean = false) {
         if (leases.closeOwnerIfIdle(owner)) {
             foregroundActive = false
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
-        } else {
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
+            return
         }
+        if (!urgent) {
+            val wait = AgentNotificationUpdate.delaySince(lastNotifyAt, android.os.SystemClock.uptimeMillis())
+            if (wait > 0) {
+                if (!notifyScheduled) {
+                    notifyScheduled = true
+                    // 补发不再节流：流式内容每秒上百次 delta，平台超限是静默丢弃，
+                    // 若最后一批内容被吞，通知会永远停在旧文字上。
+                    mainHandler.postDelayed({
+                        notifyScheduled = false
+                        refreshNotification(urgent = true)
+                    }, wait)
+                }
+                return
+            }
+        }
+        lastNotifyAt = android.os.SystemClock.uptimeMillis()
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
     }
 
     private fun notification(): Notification {
@@ -114,10 +136,21 @@ internal class AgentExecutionService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val taskCount = if (activeRunCount > 0) activeRunCount else leases.count()
+        // 开关打开且正在生成时，正文显示流式输出尾部片段（最近在说什么）；否则退回阶段文案。
+        val snippet = AgentNotificationUpdate.tailSnippet(
+            when (status) {
+                is AgentOverlayStatus.GeneratingAnswer -> runDetail
+                is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> runThought
+                else -> ""
+            },
+        )
+        val showOutput = io.github.mangi.eta.config.Prefs.isEnabled(
+            io.github.mangi.eta.config.Prefs.Keys.AGENT_NOTIFY_SHOW_OUTPUT,
+        )
         val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.execution_title))
-            .setContentText(executionText(this, status, taskCount))
+            .setContentText(if (showOutput && snippet.isNotEmpty()) snippet else executionText(this, status, taskCount))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -132,10 +165,12 @@ internal class AgentExecutionService : Service() {
             Build.VERSION.SDK_INT >= 36 &&
             Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
         ) {
+            // 官方语义：setShortCriticalText 空串 = 胶囊不显示文字；短文本缺失时不设置，避免占位。
+            val chip = status.shortText().takeIf { it.isNotBlank() }
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
-                .setShortCriticalText(status.shortText())
                 .setRequestPromotedOngoing(true)
+            if (chip != null) builder.setShortCriticalText(chip)
         }
         val built = builder.build()
         logPromotionDiagnostics(built)
@@ -152,7 +187,10 @@ internal class AgentExecutionService : Service() {
         if (Build.VERSION.SDK_INT < 36) return
         if (Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) return
         val promotable = notification.hasPromotableCharacteristics()
-        val allowed = getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        // 36.0 上 canPostPromotedNotifications 可能直接抛异常（生产库实测）；探测绝不能崩。
+        val allowed = runCatching {
+            getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        }.getOrDefault(false)
         AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
     }
 
@@ -179,17 +217,30 @@ internal class AgentExecutionService : Service() {
         private var runStatus: AgentOverlayStatus? = null
         private var activeRunCount = 0
         private var publishedStatusText: String? = null
+        private var runDetail: String = ""
+        private var runThought: String = ""
 
         /**
          * Agent run 的当前状态，供通知与状态栏胶囊展示；null 表示没有 Agent run 在跑。
          * 只在显示文字变化时刷新通知，避免流式事件把通知更新频率推到系统限流。
          */
-        fun updateRunStatus(context: Context, status: AgentOverlayStatus?, activeRunCount: Int) {
+        fun updateRunStatus(
+            context: Context,
+            status: AgentOverlayStatus?,
+            activeRunCount: Int,
+            detail: String = "",
+            thought: String = "",
+        ) {
             mainHandler.post {
                 runStatus = status
                 this.activeRunCount = activeRunCount
+                runDetail = detail
+                runThought = thought
                 val count = if (activeRunCount > 0) activeRunCount else leases.count()
-                val text = executionText(context, status, count)
+                // 指纹含片段：流式内容变化也要触发刷新（节流器负责控频）。
+                val text = executionText(context, status, count) +
+                    "|" + AgentNotificationUpdate.tailSnippet(detail) +
+                    "|" + AgentNotificationUpdate.tailSnippet(thought)
                 if (text == publishedStatusText) return@post
                 publishedStatusText = text
                 instance?.takeIf { it.foregroundActive }?.refreshNotification()

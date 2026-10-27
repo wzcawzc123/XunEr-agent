@@ -21,6 +21,13 @@ internal data class AgentOverlayState(
      * 只保留尾部一小段，供用户扫一眼知道 Agent 在想什么；完整推理仍在会话里。
      */
     val thought: String = "",
+
+    /**
+     * 流式输出的**尾部**窗口（最近说的话），供通知/流体云显示。
+     * 与 [detailText] 分开：detailText 是"开头预览+系统提示"混用，这里专收 TEXT delta 尾部。
+     * 只增不渲染，不改变胶囊现有行为（2026-10-28 通知显示输出）。
+     */
+    val streamTail: String = "",
 ) {
     companion object {
         val Initial = AgentOverlayState(status = AgentOverlayStatus.Reasoning)
@@ -50,7 +57,12 @@ private fun AgentOverlayState.projectEvent(event: AgentEvent): AgentOverlayState
         GuiControlStatus.Acquired -> copy(phase = AgentOverlayPhase.RUNNING, status = AgentOverlayStatus.Continuing)
         GuiControlStatus.Waiting, GuiControlStatus.Released -> this
     }
-    is AgentEvent.RunStarted -> copy(phase = AgentOverlayPhase.RUNNING, status = AgentOverlayStatus.Reasoning, detailText = "")
+    is AgentEvent.RunStarted -> copy(
+        phase = AgentOverlayPhase.RUNNING,
+        status = AgentOverlayStatus.Reasoning,
+        detailText = "",
+        streamTail = "",
+    )
     is AgentEvent.RoundStarted -> copy(round = event.round).thinkingUnlessWorking()
     is AgentEvent.ProviderRequestStarted -> copy(round = event.round).thinkingUnlessWorking()
     is AgentEvent.ModelRetryScheduled -> copy(round = event.round, detailText = event.displayMessage).thinkingUnlessWorking()
@@ -121,6 +133,7 @@ private fun AgentOverlayState.thinkingUnlessWorking(): AgentOverlayState = when 
 }
 
 private const val MaxStreamingPreviewChars = 320
+private const val MaxStreamTailChars = 160
 private const val MaxThoughtChars = 96
 
 /** 合并空白并只保留尾部，胶囊里显示的是"刚刚想到哪"，不是整段推理。 */
@@ -138,5 +151,6 @@ private fun AgentOverlayState.appendStreamingText(event: AgentEvent.AssistantBlo
         round = event.round,
         status = AgentOverlayStatus.GeneratingAnswer,
         detailText = nextPreview,
+        streamTail = (streamTail + event.delta).takeLast(MaxStreamTailChars),
     )
 }
