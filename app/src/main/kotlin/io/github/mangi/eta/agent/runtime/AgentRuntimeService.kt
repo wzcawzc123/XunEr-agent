@@ -935,6 +935,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             activeRunCount = runs.snapshots().size,
             detail = owner?.overlayState?.streamTail.orEmpty(),
             thought = owner?.overlayState?.thought.orEmpty(),
+            conversationId = owner?.conversationId.orEmpty(),
         )
     }
 

@@ -1149,6 +1149,8 @@
   <string name="context_compaction">上下文压缩</string>
   <string name="context_compact_action">压缩上下文</string>
   <string name="settings_auto_compaction">自动压缩上下文</string>
+  <string name="settings_notify_show_output">通知显示执行输出</string>
+  <string name="settings_notify_show_output_summary">把正在生成的回复片段显示在通知正文</string>
   <string name="context_usage_description">上下文用量：%1$s</string>
   <string name="memory_budget_summary">每轮最多注入 %1$s 字符，详细内容由模型按需读取</string>
   <string name="memory_archive_hint">归档区还有 %1$d KB（未在预览中渲染）· 切到「编辑」查看全文</string>

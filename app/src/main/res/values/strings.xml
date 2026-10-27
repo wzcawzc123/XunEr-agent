@@ -1292,6 +1292,8 @@
   <string name="context_compaction">Context compaction</string>
   <string name="context_compact_action">Compact context</string>
   <string name="settings_auto_compaction">Automatic context compaction</string>
+  <string name="settings_notify_show_output">Show output in notifications</string>
+  <string name="settings_notify_show_output_summary">Stream the latest reply into the notification body</string>
   <string name="voice_audio_permission">请在 Eta 应用权限中允许麦克风，然后重新唤醒；点击麦克风可打开设置</string>
   <string name="voice_no_speech">没有听清，请点击麦克风重试，或改用键盘输入</string>
   <string name="voice_use_keyboard">切换键盘输入</string>

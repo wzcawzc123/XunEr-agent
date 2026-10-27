@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Psychology
@@ -290,6 +291,17 @@ private fun SettingsPageContent(
                         title = stringResource(R.string.settings_auto_compaction),
                         key = Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED,
                         icon = Icons.Rounded.Layers,
+                        iconTint = EtaPreferenceColors.Blue,
+                    )
+
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_notify_show_output),
+                        summary = stringResource(R.string.settings_notify_show_output_summary),
+                        key = Prefs.Keys.AGENT_NOTIFY_SHOW_OUTPUT,
+                        icon = Icons.Rounded.Notifications,
                         iconTint = EtaPreferenceColors.Blue,
                     )
 

@@ -127,8 +127,15 @@ internal class AgentExecutionService : Service() {
 
     private fun notification(): Notification {
         val status = runStatus
+        // 点击直达当前会话：带 OPEN_CONVERSATION_ID 意图（MainActivity 已支持该跳转）。
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            if (runConversationId.isNotBlank()) {
+                setAction(MainActivity.ACTION_OPEN_CONVERSATION_ID)
+                putExtra(MainActivity.EXTRA_CONVERSATION_ID, runConversationId)
+            }
+        }
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            this, if (runConversationId.isNotBlank()) 2 else 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val stop = PendingIntent.getService(
@@ -144,7 +151,10 @@ internal class AgentExecutionService : Service() {
                 else -> ""
             },
         )
-        val showOutput = io.github.mangi.eta.config.Prefs.isEnabled(
+        // 锁屏自动降级：只显阶段不显内容（隐私优先），解锁后自动恢复。
+        val keyguardLocked = getSystemService(android.app.KeyguardManager::class.java)
+            ?.isKeyguardLocked == true
+        val showOutput = !keyguardLocked && io.github.mangi.eta.config.Prefs.isEnabled(
             io.github.mangi.eta.config.Prefs.Keys.AGENT_NOTIFY_SHOW_OUTPUT,
         )
         val builder = Notification.Builder(this, CHANNEL)
@@ -167,8 +177,20 @@ internal class AgentExecutionService : Service() {
         ) {
             // 官方语义：setShortCriticalText 空串 = 胶囊不显示文字；短文本缺失时不设置，避免占位。
             val chip = status.shortText().takeIf { it.isNotBlank() }
+            // 阶段进度条：思考 → 工具 → 回答 三段，里程碑点标阶段边界。
+            // 提升资格条件（ongoing/标题/无 RemoteViews/无 colorized/请求 extra）不变。
+            val stageColor = android.graphics.Color.argb(255, 74, 108, 247)
+            val pointColor = android.graphics.Color.argb(255, 154, 162, 235)
+            val style = Notification.ProgressStyle()
+                .setStyledByProgress(true)
+                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
+                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
+                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
+                .addProgressPoint(Notification.ProgressStyle.Point(STAGE_LENGTH).setColor(pointColor))
+                .addProgressPoint(Notification.ProgressStyle.Point(STAGE_LENGTH * 2).setColor(pointColor))
+                .setProgress(status.stageProgress())
             builder
-                .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
+                .setStyle(style)
                 .setRequestPromotedOngoing(true)
             if (chip != null) builder.setShortCriticalText(chip)
         }
@@ -194,6 +216,16 @@ internal class AgentExecutionService : Service() {
         AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
     }
 
+    /**
+     * 阶段进度：三段各 [STAGE_LENGTH]，取段中点表示"正在该阶段"。
+     * 思考 → 工具 → 回答；其余状态就近映射，不动进度条长度语义。
+     */
+    private fun AgentOverlayStatus.stageProgress(): Int = when (this) {
+        is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> STAGE_LENGTH * 3 / 2
+        AgentOverlayStatus.GeneratingAnswer -> STAGE_LENGTH * 5 / 2
+        else -> STAGE_LENGTH / 2
+    }
+
     /** 状态栏胶囊约 7 个字符可完整显示；更长时只取动作，工具名留在展开态。 */
     private fun AgentOverlayStatus.shortText(): String = when (this) {
         is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> getString(R.string.execution_chip_running)
@@ -209,6 +241,8 @@ internal class AgentExecutionService : Service() {
         private const val CHANNEL = "eta_execution_v2"
         private const val LEGACY_CHANNEL = "eta_execution"
         private const val NOTIFICATION_ID = 1107
+        /** 进度条每阶段长度（三段合计 = 最大进度）。 */
+        private const val STAGE_LENGTH = 100
         private const val ACTION_STOP = "io.github.mangi.eta.action.STOP_USER_EXECUTION"
         private val leases = ExecutionLeaseRegistry()
         private val ownerSequence = AtomicLong()
@@ -219,6 +253,7 @@ internal class AgentExecutionService : Service() {
         private var publishedStatusText: String? = null
         private var runDetail: String = ""
         private var runThought: String = ""
+        private var runConversationId: String = ""
 
         /**
          * Agent run 的当前状态，供通知与状态栏胶囊展示；null 表示没有 Agent run 在跑。
@@ -230,17 +265,20 @@ internal class AgentExecutionService : Service() {
             activeRunCount: Int,
             detail: String = "",
             thought: String = "",
+            conversationId: String = "",
         ) {
             mainHandler.post {
                 runStatus = status
                 this.activeRunCount = activeRunCount
                 runDetail = detail
                 runThought = thought
+                runConversationId = conversationId
                 val count = if (activeRunCount > 0) activeRunCount else leases.count()
                 // 指纹含片段：流式内容变化也要触发刷新（节流器负责控频）。
                 val text = executionText(context, status, count) +
                     "|" + AgentNotificationUpdate.tailSnippet(detail) +
-                    "|" + AgentNotificationUpdate.tailSnippet(thought)
+                    "|" + AgentNotificationUpdate.tailSnippet(thought) +
+                    "|" + conversationId
                 if (text == publishedStatusText) return@post
                 publishedStatusText = text
                 instance?.takeIf { it.foregroundActive }?.refreshNotification()
