@@ -29,7 +29,13 @@ internal data class AgentModelOptionUi(
     val providerId: String,
     val providerName: String,
     val providerSourceType: String,
-    val modelId: String,
+    /**
+     * **API 模型名**（服务商侧标识，如 sensenova-6.8-flash-lite），不是数据库行 id。
+     *
+     * 命名教训（2026-10-28 视觉开关 bug）：该字段曾叫 modelId，与全应用「modelId = 行 id」
+     * 的约定冲突，UI 把 API 名当行 id 传给状态层 → 静默失配。要行 id 请用 [id]。
+     */
+    val apiModelId: String,
     val displayName: String,
     val contextWindow: Int?,
     /** 是否接受图片输入（模型声明，或用户手动覆盖）。默认 true：上游调用点不必逐个改。 */
@@ -105,7 +111,7 @@ internal object AgentModelPickerProjector {
             providerId = id,
             providerName = name,
             providerSourceType = ProviderSourceRegistry.resolve(this),
-            modelId = model.modelId,
+            apiModelId = model.modelId,
             displayName = model.displayName.ifBlank { model.modelId },
             contextWindow = model.effectiveContextWindow,
             supportsVision = model.supportsVision,
@@ -121,7 +127,7 @@ internal fun AgentModelPickerUiState.filterGroups(query: String): List<AgentMode
     if (search.isEmpty) return providerGroups
     return providerGroups.mapNotNull { group ->
         val models = group.models.filter { model ->
-            search.matches(model.displayName, model.modelId, group.providerName)
+            search.matches(model.displayName, model.apiModelId, group.providerName)
         }
         models.takeIf(List<*>::isNotEmpty)?.let { group.copy(models = it) }
     }

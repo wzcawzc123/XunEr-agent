@@ -108,6 +108,26 @@ class AgentModelPickerProjectorTest {
     }
 
     @Test
+    fun project_keepsRowIdAndApiModelIdDistinct() {
+        // 契约（2026-10-28 视觉开关 bug 防复发）：选项的 id 必须是数据库行 id（选择/设置都用它），
+        // API 模型名只放在 apiModelId（展示/品牌图标/搜索）；两者不可混用。
+        val rowId = "3aed1191-88c5-4dc2-962f-171d91db426f"
+        val apiName = "sensenova-6.8-flash-lite"
+        val providers = listOf(
+            provider(id = "provider", name = "商汤", models = listOf(model(id = rowId, modelId = apiName))),
+        )
+        val result = AgentModelPickerProjector.project(
+            providers = providers,
+            selectedProviderId = "provider",
+            selectedModelId = rowId,
+        )
+        val option = result.providerGroups.single().models.single()
+        assertEquals("id 必须保持行 id", rowId, option.id)
+        assertEquals("apiModelId 必须是 API 模型名", apiName, option.apiModelId)
+        assertEquals("选中解析也按行 id", rowId, result.selectedModel?.id)
+    }
+
+    @Test
     fun filterGroups_matchesModelNamesIdsAndProviderNames() {
         fun option(id: String, providerId: String, providerName: String, displayName: String) =
             AgentModelOptionUi(
@@ -115,7 +135,7 @@ class AgentModelPickerProjectorTest {
                 providerId = providerId,
                 providerName = providerName,
                 providerSourceType = ProviderSourceTypes.CUSTOM,
-                modelId = id,
+                apiModelId = id,
                 displayName = displayName,
                 supportsVision = true,
                 contextWindow = null,
@@ -161,7 +181,7 @@ class AgentModelPickerProjectorTest {
             providerId = "provider",
             providerName = "Provider",
             providerSourceType = ProviderSourceTypes.CUSTOM,
-            modelId = "model",
+            apiModelId = "model",
             displayName = "Model",
             supportsVision = true,
             contextWindow = 100_000,
