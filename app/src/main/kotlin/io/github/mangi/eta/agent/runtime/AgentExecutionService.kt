@@ -120,7 +120,12 @@ internal class AgentExecutionService : Service() {
             .setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, getString(R.string.execution_stop), stop).build())
         // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于"正在进行、需要持续关注"的活动。
-        if (status != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+        // 版本判断必须内联：lint 只认调用点的内联检查（抽成函数会丢 NewApi 推断）；
+        // SDK_INT >= 36 先短路，旧运行时（含 Robolectric）根本没有 SDK_INT_FULL 字段。
+        if (status != null &&
+            Build.VERSION.SDK_INT >= 36 &&
+            Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
+        ) {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
@@ -128,7 +133,25 @@ internal class AgentExecutionService : Service() {
             // （上游原先写成方法名 "android.requestPromotedOngoing"，系统不识别 → 提升无效）。
             builder.extras.putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true)
         }
-        return builder.build()
+        val built = builder.build()
+        logPromotionDiagnostics(built)
+        return built
+    }
+
+    /**
+     * 实时通知诊断（仅在 API 36.1+ 记录）：区分"我们的通知不合规"与"用户/系统没放行"。
+     * hasPromotableCharacteristics 只看通知本身；canPostPromotedNotifications 看用户设置。
+     */
+    private fun logPromotionDiagnostics(notification: Notification) {
+        // 内联早退：lint 可推断；SDK_INT < 36 时不会触碰不存在的 SDK_INT_FULL 字段。
+        if (Build.VERSION.SDK_INT < 36) return
+        if (Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) return
+        val promotable = notification.hasPromotableCharacteristics()
+        // 36.0 上该调用可能抛异常（生产库实测）；能力探测绝不能崩。
+        val allowed = runCatching {
+            getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        }.getOrDefault(false)
+        AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
     }
 
     /** 状态栏胶囊约 7 个字符可完整显示；更长时只取动作，工具名留在展开态。 */
