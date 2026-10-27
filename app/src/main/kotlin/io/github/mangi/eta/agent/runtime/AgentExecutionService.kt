@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -34,9 +35,18 @@ internal class AgentExecutionService : Service() {
         instance = this
         leases.attachOwner(owner)
         val manager = getSystemService(NotificationManager::class.java)
+        // 实时通知（Android 16 Live Updates / ColorOS 流体云）要求通道不是 IMPORTANCE_MIN；
+        // 实测 OEM（ColorOS）还会额外要求更高重要性，LOW 会被静默拒绝提升。通道重要性创建后
+        // 不可修改，故启用新 id：DEFAULT + 静音（不出声、不震动、无角标），观感与 LOW 一致但可被提升。
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
         )
+        // 旧通道（LOW）遗留会导致设置页出现重复条目；删除后由新通道接管。
+        manager.deleteNotificationChannel(LEGACY_CHANNEL)
         ensureForeground()
     }
 
@@ -111,15 +121,44 @@ internal class AgentExecutionService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            // 提升请求无条件携带：API 36.1+ 由平台识别；OEM（ColorOS 等）把该行为回移到更低版本时，
+            // 版本门会挡住显式 API，但 extra 仍可命中（旧系统对未知 extra 直接忽略）。
+            .addExtras(Bundle().apply { putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true) })
             .addAction(Notification.Action.Builder(null, getString(R.string.execution_stop), stop).build())
         // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于"正在进行、需要持续关注"的活动。
-        if (status != null && Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1) {
+        if (status != null && supportsPromotedOngoing()) {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
                 .setRequestPromotedOngoing(true)
         }
-        return builder.build()
+        val built = builder.build()
+        logPromotionDiagnostics(built)
+        return built
+    }
+
+    /**
+     * 实时通知诊断（仅在 API 36.1+ 记录）：区分"我们的通知不合规"与"用户/系统没放行"，
+     * 避免下次再靠猜。hasPromotableCharacteristics 只看通知本身；canPostPromotedNotifications
+     * 看用户是否在设置里关闭了实时通知。
+     */
+    private fun logPromotionDiagnostics(notification: Notification) {
+        if (!supportsPromotedOngoing()) return
+        val promotable = notification.hasPromotableCharacteristics()
+        val allowed = getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
+    }
+
+    /**
+     * 是否支持实时通知（Live Updates）API：Android 16 QPR1（BAKLAVA_1）起。
+     *
+     * SDK_INT_FULL 是 Android 16 新增的静态字段——旧运行时（含 Robolectric 的 SDK 镜像）
+     * 完全没有这个字段，直接访问会抛 NoSuchFieldError，所以必须 runCatching 探测。
+     */
+    private fun supportsPromotedOngoing(): Boolean {
+        if (Build.VERSION.SDK_INT < 36) return false
+        val full = runCatching { Build.VERSION.SDK_INT_FULL }.getOrNull() ?: return false
+        return full >= Build.VERSION_CODES_FULL.BAKLAVA_1
     }
 
     /** 状态栏胶囊约 7 个字符可完整显示；更长时只取动作，工具名留在展开态。 */
@@ -132,7 +171,10 @@ internal class AgentExecutionService : Service() {
     }
 
     companion object {
-        private const val CHANNEL = "eta_execution"
+        // v2：重要性从 LOW 提到 DEFAULT（静音），满足实时通知/OEM 流体云的提升门槛；
+        // 通道重要性创建后不可修改，必须换 id 才能生效（见 onCreate 的迁移说明）。
+        private const val CHANNEL = "eta_execution_v2"
+        private const val LEGACY_CHANNEL = "eta_execution"
         private const val NOTIFICATION_ID = 1107
         private const val ACTION_STOP = "io.github.mangi.eta.action.STOP_USER_EXECUTION"
         private val leases = ExecutionLeaseRegistry()
