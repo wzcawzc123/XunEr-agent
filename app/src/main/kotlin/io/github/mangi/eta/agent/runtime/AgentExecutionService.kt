@@ -126,7 +126,12 @@ internal class AgentExecutionService : Service() {
             .addExtras(Bundle().apply { putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true) })
             .addAction(Notification.Action.Builder(null, getString(R.string.execution_stop), stop).build())
         // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于"正在进行、需要持续关注"的活动。
-        if (status != null && supportsPromotedOngoing()) {
+        // 版本判断必须内联：lint 只认调用点的内联检查（抽成函数会丢 NewApi 推断）；
+        // SDK_INT >= 36 先短路，旧运行时（含 Robolectric）根本没有 SDK_INT_FULL 字段。
+        if (status != null &&
+            Build.VERSION.SDK_INT >= 36 &&
+            Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
+        ) {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
@@ -143,22 +148,12 @@ internal class AgentExecutionService : Service() {
      * 看用户是否在设置里关闭了实时通知。
      */
     private fun logPromotionDiagnostics(notification: Notification) {
-        if (!supportsPromotedOngoing()) return
+        // 内联早退：lint 可推断；SDK_INT < 36 时不会触碰不存在的 SDK_INT_FULL 字段。
+        if (Build.VERSION.SDK_INT < 36) return
+        if (Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) return
         val promotable = notification.hasPromotableCharacteristics()
         val allowed = getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
         AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
-    }
-
-    /**
-     * 是否支持实时通知（Live Updates）API：Android 16 QPR1（BAKLAVA_1）起。
-     *
-     * SDK_INT_FULL 是 Android 16 新增的静态字段——旧运行时（含 Robolectric 的 SDK 镜像）
-     * 完全没有这个字段，直接访问会抛 NoSuchFieldError，所以必须 runCatching 探测。
-     */
-    private fun supportsPromotedOngoing(): Boolean {
-        if (Build.VERSION.SDK_INT < 36) return false
-        val full = runCatching { Build.VERSION.SDK_INT_FULL }.getOrNull() ?: return false
-        return full >= Build.VERSION_CODES_FULL.BAKLAVA_1
     }
 
     /** 状态栏胶囊约 7 个字符可完整显示；更长时只取动作，工具名留在展开态。 */
