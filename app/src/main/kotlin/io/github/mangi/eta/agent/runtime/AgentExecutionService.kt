@@ -119,18 +119,15 @@ internal class AgentExecutionService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, getString(R.string.execution_stop), stop).build())
-        // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于"正在进行、需要持续关注"的活动。
-        // 版本判断必须内联：lint 只认调用点的内联检查（抽成函数会丢 NewApi 推断）；
-        // SDK_INT >= 36 先短路，旧运行时（含 Robolectric）根本没有 SDK_INT_FULL 字段。
-        if (status != null &&
-            Build.VERSION.SDK_INT >= 36 &&
-            Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
-        ) {
+        // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于
+        // "正在进行、需要持续关注"的活动。ProgressStyle 本身 API 36 就有。
+        if (status != null && Build.VERSION.SDK_INT >= 36) {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
-            // 请求方法从 API 36.1 才公开；标准 extra 键是 android.extra.REQUEST_PROMOTED_ONGOING
-            // （上游原先写成方法名 "android.requestPromotedOngoing"，系统不识别 → 提升无效）。
+            // 提升请求用标准 extra 表达（36.0 与 OEM 回移都能命中；未知 extra 被旧系统忽略）。
+            // 官方键是 android.extra.REQUEST_PROMOTED_ONGOING —— 上游曾误写成方法名
+            // "android.requestPromotedOngoing"，系统不识别，提升实际不生效。
             builder.extras.putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true)
         }
         val built = builder.build()
