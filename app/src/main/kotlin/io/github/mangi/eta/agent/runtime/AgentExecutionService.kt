@@ -28,44 +28,6 @@ internal class AgentExecutionService : Service() {
     }
     private val owner = ownerSequence.incrementAndGet()
     private var foregroundActive = false
-    /** 上次 notify 的时间戳（节流用，见 [AgentNotificationUpdate]）。 */
-    private var lastNotifyAt = 0L
-    private var notifyScheduled = false
-    /** 阶段锚点：状态类别变化时重置，段内进度从此刻起算。 */
-    private var stageKey = ""
-    private var stageAnchorAt = 0L
-    private var tickerScheduled = false
-    /** 展开卡片的大图标（应用图标），只解码一次。 */
-    private val launcherLargeIcon: android.graphics.Bitmap? by lazy {
-        runCatching {
-            val drawable = packageManager.getApplicationIcon(packageName)
-            if (drawable is android.graphics.drawable.BitmapDrawable && drawable.bitmap != null) {
-                drawable.bitmap
-            } else {
-                val width = drawable.intrinsicWidth.coerceAtLeast(1)
-                val height = drawable.intrinsicHeight.coerceAtLeast(1)
-                android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888).also { bitmap ->
-                    val canvas = android.graphics.Canvas(bitmap)
-                    drawable.setBounds(0, 0, width, height)
-                    drawable.draw(canvas)
-                }
-            }
-        }.getOrNull()
-    }
-    /**
-     * 运行期心跳：段内进度推进 + chip 文字轮播。只在有 Agent run 时运行，
-     * 1 秒一次 notify（平台限速 5/s，留足余量）；空闲/销毁即停。
-     */
-    private val ticker = object : Runnable {
-        override fun run() {
-            if (!foregroundActive || runStatus == null) {
-                tickerScheduled = false
-                return
-            }
-            refreshNotification(urgent = true)
-            mainHandler.postDelayed(this, TICK_MS)
-        }
-    }
     @Volatile private var startRejected = false
 
     override fun onCreate() {
@@ -110,7 +72,7 @@ internal class AgentExecutionService : Service() {
             stopTasks()
         } else {
             ensureForeground()
-            refreshNotification(urgent = true)
+            refreshNotification()
         }
         return START_NOT_STICKY
     }
@@ -118,7 +80,6 @@ internal class AgentExecutionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        stopTicker()
         if (instance === this) instance = null
         // 销毁时同样收回本服务拥有的任务。回收在独立有界工作线程上完成，不阻塞 Main。
         stopQueue.close(leases.drainOwner(owner))
@@ -128,63 +89,24 @@ internal class AgentExecutionService : Service() {
     private fun stopTasks(startFailed: Boolean = false) {
         val callbacks = leases.drain(startFailed)
         stopQueue.submit(callbacks) {
-            mainHandler.post { if (instance === this) refreshNotification(urgent = true) }
+            mainHandler.post { if (instance === this) refreshNotification() }
         }
     }
 
-    /**
-     * @param urgent 状态切换（启动/收尾）立即发，不受节流；内容更新走节流 + 补发保证末次必达。
-     */
-    private fun refreshNotification(urgent: Boolean = false) {
+    private fun refreshNotification() {
         if (leases.closeOwnerIfIdle(owner)) {
-            stopTicker()
             foregroundActive = false
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
-            return
+        } else {
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
         }
-        if (runStatus != null) ensureTicker() else stopTicker()
-        if (!urgent) {
-            val wait = AgentNotificationUpdate.delaySince(lastNotifyAt, android.os.SystemClock.uptimeMillis())
-            if (wait > 0) {
-                if (!notifyScheduled) {
-                    notifyScheduled = true
-                    // 补发不再节流：流式内容每秒上百次 delta，平台超限是静默丢弃，
-                    // 若最后一批内容被吞，通知会永远停在旧文字上。
-                    mainHandler.postDelayed({
-                        notifyScheduled = false
-                        refreshNotification(urgent = true)
-                    }, wait)
-                }
-                return
-            }
-        }
-        lastNotifyAt = android.os.SystemClock.uptimeMillis()
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
-    }
-
-    private fun ensureTicker() {
-        if (tickerScheduled) return
-        tickerScheduled = true
-        mainHandler.postDelayed(ticker, TICK_MS)
-    }
-
-    private fun stopTicker() {
-        tickerScheduled = false
-        mainHandler.removeCallbacks(ticker)
     }
 
     private fun notification(): Notification {
         val status = runStatus
-        // 点击直达当前会话：带 OPEN_CONVERSATION_ID 意图（MainActivity 已支持该跳转）。
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            if (runConversationId.isNotBlank()) {
-                setAction(MainActivity.ACTION_OPEN_CONVERSATION_ID)
-                putExtra(MainActivity.EXTRA_CONVERSATION_ID, runConversationId)
-            }
-        }
         val open = PendingIntent.getActivity(
-            this, if (runConversationId.isNotBlank()) 2 else 0, openIntent,
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val stop = PendingIntent.getService(
@@ -192,24 +114,10 @@ internal class AgentExecutionService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val taskCount = if (activeRunCount > 0) activeRunCount else leases.count()
-        // 开关打开且正在生成时，正文显示流式输出尾部片段（最近在说什么）；否则退回阶段文案。
-        val snippet = AgentNotificationUpdate.tailSnippet(
-            when (status) {
-                is AgentOverlayStatus.GeneratingAnswer -> runDetail
-                is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> runThought
-                else -> ""
-            },
-        )
-        // 锁屏自动降级：只显阶段不显内容（隐私优先），解锁后自动恢复。
-        val keyguardLocked = getSystemService(android.app.KeyguardManager::class.java)
-            ?.isKeyguardLocked == true
-        val showOutput = !keyguardLocked && io.github.mangi.eta.config.Prefs.isEnabled(
-            io.github.mangi.eta.config.Prefs.Keys.AGENT_NOTIFY_SHOW_OUTPUT,
-        )
         val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.execution_title))
-            .setContentText(if (showOutput && snippet.isNotEmpty()) snippet else executionText(this, status, taskCount))
+            .setContentText(executionText(this, status, taskCount))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -217,7 +125,6 @@ internal class AgentExecutionService : Service() {
             // 版本门会挡住显式 API，但 extra 仍可命中（旧系统对未知 extra 直接忽略）。
             .addExtras(Bundle().apply { putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true) })
             .addAction(Notification.Action.Builder(null, getString(R.string.execution_stop), stop).build())
-        launcherLargeIcon?.let(builder::setLargeIcon)
         // 只有 Agent run 在跑时才申请提升为 Live Update；终端会话、Linux 启动等长驻任务不属于"正在进行、需要持续关注"的活动。
         // 版本判断必须内联：lint 只认调用点的内联检查（抽成函数会丢 NewApi 推断）；
         // SDK_INT >= 36 先短路，旧运行时（含 Robolectric）根本没有 SDK_INT_FULL 字段。
@@ -225,65 +132,10 @@ internal class AgentExecutionService : Service() {
             Build.VERSION.SDK_INT >= 36 &&
             Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
         ) {
-            // 官方语义：setShortCriticalText 空串 = 胶囊不显示文字；短文本缺失时不设置，避免占位。
-            val now = android.os.SystemClock.uptimeMillis()
-            // chip 每 3.5 秒在「阶段词 / 第 N 轮」之间轮播（OPPO 人因研究的单行最优时长）。
-            val chip = AgentNotificationMotion.chipText(
-                now,
-                listOf(
-                    status.shortText(),
-                    if (runRound > 1) getString(R.string.execution_chip_round, runRound) else "",
-                ),
-            )
-            // 阶段进度条：思考 → 工具 → 回答 三段，段内按真实工作量推进（最多 90%）。
-            // 提升资格条件（ongoing/标题/无 RemoteViews/无 colorized/请求 extra）不变。
-            val stageColor = android.graphics.Color.argb(255, 74, 108, 247)
-            val pointColor = android.graphics.Color.argb(255, 154, 162, 235)
-            val stageBase = when (status) {
-                is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> STAGE_LENGTH
-                is AgentOverlayStatus.GeneratingAnswer -> STAGE_LENGTH * 2
-                else -> 0
-            }
-            // 阶段锚点：状态类别变了就重置，避免上一段的时长算进这一段。
-            val key = status::class.java.simpleName
-            if (key != stageKey) {
-                stageKey = key
-                stageAnchorAt = now
-            }
-            val fraction = when (status) {
-                is AgentOverlayStatus.GeneratingAnswer ->
-                    runStreamChars / AgentNotificationMotion.ANSWER_CHARS_FOR_FULL
-                is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning ->
-                    AgentNotificationMotion.elapsedFraction(
-                        now - stageAnchorAt,
-                        AgentNotificationMotion.TOOL_EXPECT_MS,
-                    )
-                else ->
-                    AgentNotificationMotion.elapsedFraction(
-                        now - stageAnchorAt,
-                        AgentNotificationMotion.REASONING_EXPECT_MS,
-                    )
-            }
-            val trackerIcon = when (status) {
-                is AgentOverlayStatus.RunningTool, is AgentOverlayStatus.HostedToolRunning -> R.drawable.ic_track_tool
-                is AgentOverlayStatus.GeneratingAnswer -> R.drawable.ic_track_answer
-                else -> R.drawable.ic_track_reasoning
-            }
-            val style = Notification.ProgressStyle()
-                .setStyledByProgress(true)
-                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
-                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
-                .addProgressSegment(Notification.ProgressStyle.Segment(STAGE_LENGTH).setColor(stageColor))
-                .addProgressPoint(Notification.ProgressStyle.Point(STAGE_LENGTH).setColor(pointColor))
-                .addProgressPoint(Notification.ProgressStyle.Point(STAGE_LENGTH * 2).setColor(pointColor))
-                .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithResource(this, trackerIcon))
-                .setProgress(
-                    AgentNotificationMotion.stageProgress(stageBase, STAGE_LENGTH, fraction),
-                )
             builder
-                .setStyle(style)
+                .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
+                .setShortCriticalText(status.shortText())
                 .setRequestPromotedOngoing(true)
-            if (chip != null) builder.setShortCriticalText(chip)
         }
         val built = builder.build()
         logPromotionDiagnostics(built)
@@ -300,7 +152,7 @@ internal class AgentExecutionService : Service() {
         if (Build.VERSION.SDK_INT < 36) return
         if (Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) return
         val promotable = notification.hasPromotableCharacteristics()
-        // 36.0 上 canPostPromotedNotifications 可能直接抛异常（生产库实测）；探测绝不能崩。
+        // 36.0 上该调用可能直接抛异常（生产库实测）；能力探测绝不能崩。
         val allowed = runCatching {
             getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
         }.getOrDefault(false)
@@ -322,10 +174,6 @@ internal class AgentExecutionService : Service() {
         private const val CHANNEL = "eta_execution_v2"
         private const val LEGACY_CHANNEL = "eta_execution"
         private const val NOTIFICATION_ID = 1107
-        /** 进度条每阶段长度（三段合计 = 最大进度）。 */
-        private const val STAGE_LENGTH = 100
-        /** 运行期心跳间隔：1 秒（平台通知限速 5/s，留足余量）。 */
-        private const val TICK_MS = 1_000L
         private const val ACTION_STOP = "io.github.mangi.eta.action.STOP_USER_EXECUTION"
         private val leases = ExecutionLeaseRegistry()
         private val ownerSequence = AtomicLong()
@@ -334,40 +182,17 @@ internal class AgentExecutionService : Service() {
         private var runStatus: AgentOverlayStatus? = null
         private var activeRunCount = 0
         private var publishedStatusText: String? = null
-        private var runDetail: String = ""
-        private var runThought: String = ""
-        private var runConversationId: String = ""
-        private var runStreamChars: Int = 0
-        private var runRound: Int = 0
 
         /**
          * Agent run 的当前状态，供通知与状态栏胶囊展示；null 表示没有 Agent run 在跑。
          * 只在显示文字变化时刷新通知，避免流式事件把通知更新频率推到系统限流。
          */
-        fun updateRunStatus(
-            context: Context,
-            status: AgentOverlayStatus?,
-            activeRunCount: Int,
-            detail: String = "",
-            thought: String = "",
-            conversationId: String = "",
-            streamChars: Int = 0,
-            round: Int = 0,
-        ) {
+        fun updateRunStatus(context: Context, status: AgentOverlayStatus?, activeRunCount: Int) {
             mainHandler.post {
                 runStatus = status
                 this.activeRunCount = activeRunCount
-                runDetail = detail
-                runThought = thought
-                runConversationId = conversationId
-                runStreamChars = streamChars
-                runRound = round
                 val count = if (activeRunCount > 0) activeRunCount else leases.count()
-                // 指纹含片段：流式内容变化也要触发刷新（节流器负责控频）。
-                val text = executionText(context, status, count) +
-                    "|" + AgentNotificationUpdate.tailSnippet(detail) +
-                    "|" + AgentNotificationUpdate.tailSnippet(thought) +
-                    "|" + conversationId
+                val text = executionText(context, status, count)
                 if (text == publishedStatusText) return@post
                 publishedStatusText = text
                 instance?.takeIf { it.foregroundActive }?.refreshNotification()

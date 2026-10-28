@@ -929,11 +929,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun publishExecutionState() {
         val guiState = guiControl.state.value
         val guiOwner = guiState.ownerRunId?.let(runs::get)
-        // 通知/流体云跟随哪个 run：GUI 控制者优先（用户正看着它操作手机），
-        // 其次是胶囊已绑定的 run，最后取最近启动的活跃 run（linkedMap 插入序）。
-        // 旧实现只看 GUI 控制者——纯对话/思考的 run 不申请 GUI 控制，status 恒为 null，
-        // 通知就退化成「1 项任务正在运行」的通用文案，进度条与流式正文全都出不来
-        // （真机 2026-10-28 反馈：卡片文字不动、胶囊被标题撑到截断）。
+        // 通知跟随哪个 run：GUI 控制者优先，其次是胶囊绑定的 run，最后是最近活跃的 run。
+        // 只看 GUI 控制者会让纯对话/思考的任务没有状态，通知退化成「N 项任务正在运行」。
         val display = guiOwner
             ?: displayedRun?.takeIf { !it.session.isTerminal }
             ?: runs.all().lastOrNull { !it.session.isTerminal }
@@ -941,11 +938,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             this,
             if (guiState.userPaused) AgentOverlayStatus.Paused else display?.overlayState?.status,
             activeRunCount = runs.snapshots().size,
-            detail = display?.overlayState?.streamTail.orEmpty(),
-            thought = display?.overlayState?.thought.orEmpty(),
-            conversationId = display?.conversationId.orEmpty(),
-            streamChars = display?.overlayState?.streamChars ?: 0,
-            round = display?.overlayState?.round ?: 0,
         )
     }
 
