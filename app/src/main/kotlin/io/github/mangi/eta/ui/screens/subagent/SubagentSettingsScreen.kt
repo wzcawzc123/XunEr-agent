@@ -563,7 +563,7 @@ private fun SubagentModelPickerContent(
                     SubagentModelRow(
                         title = "跟随主模型",
                         subtitle = primaryModelName?.let { "当前：$it" } ?: "默认继承会话正在使用的主模型",
-                        modelId = pickerState.selectedModel?.modelId,
+                        modelId = pickerState.selectedModel?.apiModelId,
                         sourceType = pickerState.selectedModel?.providerSourceType,
                         selected = selectedSecondaryModelId == null,
                         onClick = { onSelectModel(null) },
@@ -604,8 +604,8 @@ private fun SubagentModelOptionRow(
 ) {
     SubagentModelRow(
         title = model.displayName,
-        subtitle = model.modelId.takeIf { !it.equals(model.displayName, ignoreCase = true) },
-        modelId = model.modelId,
+        subtitle = model.apiModelId.takeIf { !it.equals(model.displayName, ignoreCase = true) },
+        modelId = model.apiModelId,
         sourceType = model.providerSourceType,
         selected = selected,
         onClick = onClick,

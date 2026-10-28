@@ -34,7 +34,7 @@ class AgentExecutionServiceTest {
         val controller = Robolectric.buildService(AgentExecutionService::class.java).create()
         try {
             val notification = requireNotNull(shadowOf(controller.get()).lastForegroundNotification)
-            assertEquals(Build.VERSION.SDK_INT >= 36, notification.extras.getBoolean("android.requestPromotedOngoing"))
+            assertEquals(Build.VERSION.SDK_INT >= 36, notification.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
             if (Build.VERSION.SDK_INT >= 36) {
                 assertEquals(Notification.ProgressStyle::class.java.name, notification.extras.getString(Notification.EXTRA_TEMPLATE))
                 assertEquals(context.getString(R.string.overlay_reasoning), notification.extras.getString("android.shortCriticalText"))
@@ -43,7 +43,7 @@ class AgentExecutionServiceTest {
             AgentExecutionService.updateRunStatus(context, null, activeRunCount = 0)
             shadowOf(Looper.getMainLooper()).idle()
             val remaining = context.getSystemService(NotificationManager::class.java).activeNotifications.single().notification
-            assertFalse(remaining.extras.getBoolean("android.requestPromotedOngoing"))
+            assertFalse(remaining.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
             assertFalse(remaining.extras.containsKey("android.shortCriticalText"))
             assertTrue(remaining.flags and Notification.FLAG_ONGOING_EVENT != 0)
         } finally {
