@@ -28,5 +28,6 @@ internal object AgentNotificationUpdate {
         return if (flat.length <= maxChars) flat else "…" + flat.takeLast(maxChars)
     }
 
-    const val MAX_SNIPPET_CHARS = 80
+    /** 卡片正文约 2 行；中文按 24 字/行，48 字刚好一屏不截断（真机 2026-10-28 调小）。 */
+    const val MAX_SNIPPET_CHARS = 48
 }
