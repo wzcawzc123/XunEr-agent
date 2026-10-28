@@ -36,6 +36,7 @@ import io.github.mangi.eta.agent.cost.AgentCostRepository
 import io.github.mangi.eta.agent.cost.AgentCostSummary
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreferenceDefaults
 import io.github.mangi.eta.ui.components.EtaPreferenceGroupItem
 import io.github.mangi.eta.ui.components.EtaPreferenceRow
 import io.github.mangi.eta.ui.components.MiuixScaffold
@@ -108,7 +109,9 @@ internal fun AgentUsageScreen(onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(vertical = 16.dp),
+                        // 与记忆页/Subagent 页同宽：scaffold 的 sidePadding 之外再叠 16dp，
+                        // 否则卡片贴边，视觉上比其它设置页更"满"。
+                        .padding(horizontal = EtaPreferenceDefaults.SidePadding, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // 副标题只留一句；轮次放 hero/明细里，不再单独占一行解释。
