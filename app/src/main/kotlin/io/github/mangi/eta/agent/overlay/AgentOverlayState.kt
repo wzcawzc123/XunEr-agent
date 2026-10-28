@@ -28,6 +28,9 @@ internal data class AgentOverlayState(
      * 只增不渲染，不改变胶囊现有行为（2026-10-28 通知显示输出）。
      */
     val streamTail: String = "",
+
+    /** 本轮已生成的字符数（单调递增，回答段进度用）。 */
+    val streamChars: Int = 0,
 ) {
     companion object {
         val Initial = AgentOverlayState(status = AgentOverlayStatus.Reasoning)
@@ -62,6 +65,7 @@ private fun AgentOverlayState.projectEvent(event: AgentEvent): AgentOverlayState
         status = AgentOverlayStatus.Reasoning,
         detailText = "",
         streamTail = "",
+        streamChars = 0,
     )
     is AgentEvent.RoundStarted -> copy(round = event.round).thinkingUnlessWorking()
     is AgentEvent.ProviderRequestStarted -> copy(round = event.round).thinkingUnlessWorking()
@@ -152,5 +156,6 @@ private fun AgentOverlayState.appendStreamingText(event: AgentEvent.AssistantBlo
         status = AgentOverlayStatus.GeneratingAnswer,
         detailText = nextPreview,
         streamTail = (streamTail + event.delta).takeLast(MaxStreamTailChars),
+        streamChars = streamChars + event.delta.length,
     )
 }

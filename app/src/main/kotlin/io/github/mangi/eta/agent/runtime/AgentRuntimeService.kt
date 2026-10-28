@@ -944,6 +944,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             detail = display?.overlayState?.streamTail.orEmpty(),
             thought = display?.overlayState?.thought.orEmpty(),
             conversationId = display?.conversationId.orEmpty(),
+            streamChars = display?.overlayState?.streamChars ?: 0,
+            round = display?.overlayState?.round ?: 0,
         )
     }
 
