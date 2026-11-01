@@ -225,7 +225,9 @@ internal class AgentLoop(
             if (toolCalls.isNotEmpty()) {
                 val outcomes = executeToolBatch(round, toolCalls, providerResponse.stopReason)
                 outcomes.forEach { outcome ->
-                    appendMessage(AgentConversationCodec.toolResultMessage(outcome.call, outcome.result))
+                    // L0 入口压缩：结果在进历史前就瘦身，不改写已有消息 → 前缀缓存零影响。
+                    val compacted = outcome.result.copy(content = AgentToolOutputCompactor.compact(outcome.result.content))
+                    appendMessage(AgentConversationCodec.toolResultMessage(outcome.call, compacted))
                 }
                 publishTranscript()
                 appendToolImages(round, outcomes)
