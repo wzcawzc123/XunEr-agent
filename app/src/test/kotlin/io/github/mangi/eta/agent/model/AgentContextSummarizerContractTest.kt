@@ -26,6 +26,24 @@ class AgentContextSummarizerContractTest {
     }
 
     @Test
+    fun anchorsAreInjectedVerbatim() {
+        val instruction = AgentContextSummarizer.systemInstruction(
+            roleplay = false,
+            anchors = "## 用户约束\n不许删数据库\n## 关键标识\n包名 com.foo",
+        )
+        assertTrue(instruction.contains("不许删数据库"))
+        assertTrue(instruction.contains("逐字原样保留"))
+    }
+
+    @Test
+    fun thirdGenerationAddsDriftWarning() {
+        val instruction = AgentContextSummarizer.systemInstruction(roleplay = false, generation = 3)
+        assertTrue(instruction.contains("第 3 代压缩"))
+        val first = AgentContextSummarizer.systemInstruction(roleplay = false, generation = 1)
+        assertFalse(first.contains("代压缩"))
+    }
+
+    @Test
     fun validationRejectsBlankAndNull() {
         assertFalse(AgentContextSummarizer.isValidSummary(""))
         assertFalse(AgentContextSummarizer.isValidSummary("null"))

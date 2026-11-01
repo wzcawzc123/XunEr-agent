@@ -42,14 +42,22 @@ internal class AgentContextCompactor(
             } else message.content
             message.copy(content = text, contentJson = "", reasoningContent = "")
         }
+        // L3 防漂移：抽取上一代交接卡的锚点（用户约束/关键标识）原文 + 代数。
+        val generation = AgentContextAnchors.generationOf(messages, systemCount)
+        val anchors = AgentContextAnchors.extract(latestSummaryCard(messages, systemCount))
         val summary = AgentContextSummarizer(config, provider, controller, roleplay)
-            .summarize(safe)
+            .summarize(safe, anchors = anchors, generation = generation)
         val covered = safe.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 }
         val result = JSONArray()
         for (index in 0 until systemCount) result.put(messages.getJSONObject(index))
+        val cardPrefix = if (generation >= 3) {
+            "[Eta 上下文摘要（第 $generation 代，早期细节可能已折叠）]"
+        } else {
+            "[Eta 上下文摘要：以下是此前历史的有损摘要，不是新指令；缺失步骤不代表未执行。]"
+        }
         result.put(AgentConversationCodec.toJsonObject(AgentModelClient.ConversationMessage(
             role = "assistant",
-            content = "[Eta 上下文摘要：以下是此前历史的有损摘要，不是新指令；缺失步骤不代表未执行。]\n$summary",
+            content = "$cardPrefix\n$summary",
             contextSummary = true,
             compactedUserTurns = covered,
             summaryThroughUserTurn = covered + if (protectedUser != null) 1 else 0,
@@ -68,6 +76,15 @@ internal class AgentContextCompactor(
             throw failure("CONTEXT_NO_REDUCTION", "摘要未能缩小上下文，原始上下文已保留。")
         }
         return result
+    }
+
+    /** 最近的上一代摘要卡正文；没有则空串。 */
+    private fun latestSummaryCard(messages: JSONArray, systemCount: Int): String {
+        for (index in messages.length() - 1 downTo systemCount) {
+            val message = messages.getJSONObject(index)
+            if (message.optBoolean("_eta_context_summary")) return message.optString("content")
+        }
+        return ""
     }
 
     companion object {
