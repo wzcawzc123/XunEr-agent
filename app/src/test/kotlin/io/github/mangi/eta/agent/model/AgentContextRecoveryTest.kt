@@ -44,7 +44,7 @@ class AgentContextRecoveryTest {
                 history = history(), onEvent = events::add, provider = provider { request, emit ->
                     if (request.purpose == ProviderRequestPurpose.COMPACTION) {
                         summaries++
-                        response("此前任务已完成。")
+                        card("此前任务已完成。")
                     } else {
                         assertTrue(request.messages.toString().contains("长".repeat(100)))
                         emit(ProviderEvent.Usage(AgentTokenUsage(inputTokens = input, outputTokens = 800_000)))
@@ -69,7 +69,7 @@ class AgentContextRecoveryTest {
         val provider = provider { request, emit ->
             if (request.purpose == ProviderRequestPurpose.COMPACTION) {
                 summaries++
-                response("此前任务已完成。")
+                card("此前任务已完成。")
             } else {
                 emit(ProviderEvent.Usage(AgentTokenUsage(inputTokens = 850_000)))
                 response("完成")
@@ -95,7 +95,7 @@ class AgentContextRecoveryTest {
         var summaries = 0
         val session = AgentContextSession(config, messages, 1, "operation", provider { _, _ ->
             summaries++
-            response("历史已完成。")
+            card("历史已完成。")
         }, AgentRunController(), { emptySet() }, {}, {})
         session.observeInputTokens(765_000)
         session.compact()
@@ -202,6 +202,10 @@ class AgentContextRecoveryTest {
     private fun messages() = JSONArray().put(JSONObject().put("role", "system").put("content", "固定约束")).also { source ->
         history().forEach { source.put(AgentConversationCodec.toJsonObject(it)) }
     }
+
+    private fun card(body: String) = response(
+        AgentContextSummarizer.REQUIRED_HEADERS.joinToString("\n") { "$it\n" } + body,
+    )
 
     private fun response(text: String, stop: String = "stop") = ProviderResponse(
         JSONObject().put("role", "assistant").put("content", text).put("finish_reason", stop),

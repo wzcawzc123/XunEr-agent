@@ -17,7 +17,7 @@ class AgentContextCompactionTest {
         messages.put(user)
         val compacted = AgentContextCompactor(config, provider { request, _ ->
             assertFalse(request.messages.toString().contains("PRIVATE_AUTOMATIC_SCREEN_CONTENT"))
-            response("已完成此前的任务。")
+            card("已完成此前的任务。")
         }, AgentRunController()).compact(messages, 1, emptySet())
         assertFalse(AgentConversationCodec.encodeTranscriptForStorage(
             AgentConversationCodec.transcript(compacted, 1),
@@ -72,7 +72,7 @@ class AgentContextCompactionTest {
             if (request.purpose == ProviderRequestPurpose.COMPACTION) {
                 summaries++
                 assertEquals(0, request.effectiveTools.length())
-                response("已完成前面的任务，继续处理最新请求。")
+                card("已完成前面的任务，继续处理最新请求。")
             } else {
                 assertTrue(request.messages.toString().contains("最新请求必须保留"))
                 assertTrue(request.messages.toString().contains("固定约束"))
@@ -100,7 +100,7 @@ class AgentContextCompactionTest {
             config, "", AgentModelClient.ToolExecutor { error("不应执行工具") },
             history = history(), compactOnly = true, provider = provider { request, _ ->
                 assertEquals(ProviderRequestPurpose.COMPACTION, request.purpose)
-                response("历史工作已完成，保留后续问题。")
+                card("历史工作已完成，保留后续问题。")
             },
         )
         assertTrue(result.transcript.isEmpty())
@@ -129,7 +129,7 @@ class AgentContextCompactionTest {
             val controller = AgentRunController()
             val session = AgentContextSession(config, original, 1, "operation", provider { _, _ ->
                 if (cancel) controller.cancel()
-                response("有界摘要")
+                card("有界摘要")
             }, controller, { emptySet() }, {}, { throw IllegalStateException("fixture storage failure") })
             assertThrows(Exception::class.java) { session.compact(force = true) }
             assertEquals(before, original.toString())
@@ -158,7 +158,7 @@ class AgentContextCompactionTest {
             listOf("SECRET_ARGUMENT", "SECRET_RESULT", "PRIVATE_THINKING", "OPAQUE_SECRET", "PRIVATE_IMAGE").forEach {
                 assertFalse("摘要包含敏感数据 $it", text.contains(it))
             }
-            response("已读取过信息，原始敏感结果未保留。")
+            card("已读取过信息，原始敏感结果未保留。")
         }, AgentRunController()).compact(messages, 1, setOf("sensitive"))
         assertSame(pending, compacted.getJSONObject(compacted.length() - 1))
         assertFalse(compacted.toString().contains("OPAQUE_SECRET"))
@@ -229,7 +229,7 @@ class AgentContextCompactionTest {
         messages.put(AgentConversationCodec.userTextMessage("新的问题"))
 
         val compacted = AgentContextCompactor(config, provider { _, _ ->
-            response("此前任务已完成。")
+            card("此前任务已完成。")
         }, AgentRunController()).compact(messages, 1, emptySet())
 
         assertFalse(compacted.toString().contains("STALE_SIGNATURE"))
@@ -256,7 +256,7 @@ class AgentContextCompactionTest {
             history = history(), provider = provider { request, emit ->
                 if (request.purpose == ProviderRequestPurpose.COMPACTION) {
                     summaryRequests++
-                    response("之前的任务已完成。")
+                    card("之前的任务已完成。")
                 } else if (normalRequests++ == 0) {
                     emit(ProviderEvent.BlockDelta(AssistantBlockKind.THINKING, 0, "失败思考"))
                     throw AgentModelFailure("CONTEXT_OVERFLOW", false, "fixture")
@@ -292,7 +292,7 @@ class AgentContextCompactionTest {
             requests++
             val historyText = request.messages.getJSONObject(1).getString("content")
             seen += historyText
-            response("之前的工作已完成。")
+            card("之前的工作已完成。")
         }, AgentRunController()).compact(jsonHistory(), 1, emptySet())
         assertEquals(1, requests)
         for (turn in 1..4) assertTrue(seen.any { it.contains("问题 $turn") })
@@ -326,6 +326,11 @@ class AgentContextCompactionTest {
     private fun jsonHistory() = JSONArray().put(JSONObject().put("role", "system").put("content", "固定规则")).also {
         history().forEach { message -> it.put(AgentConversationCodec.toJsonObject(message)) }
     }
+
+    /** 合法交接卡：给 mock 摘要补上必需段标题，走通 v3 的格式校验。 */
+    private fun card(body: String) = response(
+        AgentContextSummarizer.REQUIRED_HEADERS.joinToString("\n") { "$it\n" } + body,
+    )
 
     private fun response(text: String, stop: String = "stop") = ProviderResponse(
         JSONObject().put("role", "assistant").put("content", text).put("finish_reason", stop),
