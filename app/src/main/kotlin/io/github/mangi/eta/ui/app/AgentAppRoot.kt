@@ -79,6 +79,7 @@ import io.github.mangi.eta.ui.screens.home.AgentHomeScreen
 import io.github.mangi.eta.ui.screens.mcp.McpServerDetailScreen
 import io.github.mangi.eta.ui.screens.mcp.McpServersScreen
 import io.github.mangi.eta.ui.screens.memory.AgentMemoryScreen
+import io.github.mangi.eta.ui.screens.usage.AgentUsageScreen
 import io.github.mangi.eta.ui.screens.permissions.PermissionHealthScreen
 import io.github.mangi.eta.ui.screens.skills.AgentSkillsScreen
 import io.github.mangi.eta.ui.screens.subagent.SubagentSettingsScreen
@@ -712,6 +713,9 @@ fun AgentAppRoot(
                         }
                     },
                 )
+            }
+            entry<AppRoute.UsageStats>(swipeDismiss = swipeDismiss) {
+                AgentUsageScreen(onBack = ::popRoute)
             }
             entry<AppRoute.LinuxEnvironment>(swipeDismiss = swipeDismiss) {
                 LinuxEnvironmentScreen(
