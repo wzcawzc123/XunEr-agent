@@ -73,6 +73,28 @@ internal object AgentMemoryPreview {
     }
 
     /**
+     * 核心区总字符数（与注入侧累加口径逐字符一致）。
+     *
+     * 注入侧是把核心行用 `\n` **连接**起来（行间一个换行，段间也只有一个），
+     * 不是每行末尾都补 `\n`——所以这里算「行长度之和 + 行数 - 1」。
+     * 用于「核心区水位」展示：用户编辑草稿时能实时看到会不会超预算，
+     * 不必等保存后再去问模型为什么没记住东西。
+     */
+    fun coreChars(content: String): Int {
+        if (content.isBlank()) return 0
+        val lines = content.lines()
+        var chars = 0
+        var lineCount = 0
+        for (range in coreRanges(lines)) {
+            for (index in range) {
+                chars += lines[index].length
+                lineCount++
+            }
+        }
+        return if (lineCount == 0) 0 else chars + lineCount - 1
+    }
+
+    /**
      * 所有核心段的行下标区间（0 起、闭区间）。
      *
      * 与注入侧同一口径：整行 trim 后等于 [MemoryText.CORE_HEADING]，段终点是下一个一级标题。

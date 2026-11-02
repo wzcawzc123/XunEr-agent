@@ -86,6 +86,28 @@ class AgentMemoryPreviewTest {
         assertEquals(0, slice.coreSectionCount)
     }
 
+    @Test
+    fun coreCharsCountsOnlyCoreSection() {
+        val content = "# 核心记忆\n- 甲\n# 归档\n- 乙乙乙\n"
+        // 核心区 = "# 核心记忆" + 一个换行 + "- 甲"
+        assertEquals(
+            "# 核心记忆".length + 1 + "- 甲".length,
+            AgentMemoryPreview.coreChars(content),
+        )
+        assertEquals(0, AgentMemoryPreview.coreChars("# 归档\n- 乙"))
+        assertEquals(0, AgentMemoryPreview.coreChars(""))
+    }
+
+    @Test
+    fun coreCharsSumsDuplicateSections() {
+        val content = "# 核心记忆\n- 一\n# 归档\nx\n# 核心记忆\n- 二\n"
+        val injected = AgentMemoryContextBuilder.build(snapshot(content), 128_000)
+        // 与注入侧长度严格一致：水位条显示的数字，就是模型实际拿到的那段字符数
+        //（包含行尾换行与末尾空行，两侧必须同口径）。
+        assertEquals(injected.coreContent.length, AgentMemoryPreview.coreChars(content))
+        assertTrue(AgentMemoryPreview.coreChars(content) > 0)
+    }
+
     /**
      * 口径一致性：预览显示的核心行，必须与注入侧交给模型的核心内容同源。
      * 两侧各写一套匹配规则是历史上真实出过的问题（预览认的行和注入认的不是同一行）。

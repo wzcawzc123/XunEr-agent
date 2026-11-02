@@ -1469,4 +1469,11 @@
   <string name="usage_unit_ten_thousand">%1$.1f 万</string>
   <string name="chat_task_interrupted">任务被系统中断，进度已保留。点击继续——若发送、编辑或界面操作已执行，请先确认当前状态。</string>
   <string name="memory_archive_hint">归档区还有 %1$d KB（未在预览中渲染）· 切到「编辑」查看全文</string>
+  <string name="memory_search_label">搜索记忆内容</string>
+  <string name="memory_search_hits">%1$d 处命中 · %2$d 行</string>
+  <string name="memory_search_empty">未找到包含「%1$s」的内容 · 试试其他关键词</string>
+  <string name="memory_search_truncated">只显示前 %1$d 行，共 %2$d 行命中</string>
+  <string name="memory_core_usage">核心区水位</string>
+  <string name="memory_core_usage_value">%1$s / %2$s · %3$d%%</string>
+  <string name="memory_core_truncated_hint">已超预算：超出部分不会被注入，建议精简核心区或把旧条目移到归档区</string>
 </resources>
