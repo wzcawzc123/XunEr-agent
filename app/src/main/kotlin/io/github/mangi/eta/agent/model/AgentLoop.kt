@@ -65,6 +65,14 @@ internal class AgentLoop(
     private var lastToolSignature: String? = null
     private var repeatToolStreak = 0
     private var pendingRepeatNudge: String? = null
+
+    /**
+     * 空回合纠偏计数：模型只产出思考、既没有正文也没有工具调用时，本回合等于什么都没做。
+     *
+     * 出现工具进展即复位——跨越正常回合累计会把「偶发空回合」误判成顽固故障。
+     */
+    private var emptyRoundStreak = 0
+    private var pendingEmptyRoundNudge: String? = null
     private val context = AgentContextSession(
         config, messages, systemCount, operationId, provider, runController,
         { sensitiveToolCallIds }, onEvent, onContextSnapshot, { transcript.length() },
@@ -130,6 +138,14 @@ internal class AgentLoop(
             // 重复调用提醒只随下一轮请求发出，不写回持久历史。
             pendingRepeatNudge?.let { nudge ->
                 pendingRepeatNudge = null
+                requestMessages = JSONArray().also { merged ->
+                    for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
+                    merged.put(AgentConversationCodec.userTextMessage(nudge))
+                }
+            }
+            // 空回合纠偏同样只随下一轮请求发出，不写回持久历史。
+            pendingEmptyRoundNudge?.let { nudge ->
+                pendingEmptyRoundNudge = null
                 requestMessages = JSONArray().also { merged ->
                     for (index in 0 until requestMessages.length()) merged.put(requestMessages.get(index))
                     merged.put(AgentConversationCodec.userTextMessage(nudge))
@@ -209,6 +225,8 @@ internal class AgentLoop(
             )
 
             if (toolCalls.isNotEmpty()) {
+                // 工具跑出了实际进展：空回合计数复位，避免跨越正常回合累计。
+                emptyRoundStreak = 0
                 val outcomes = executeToolBatch(round, toolCalls, providerResponse.stopReason)
                 outcomes.forEach { outcome ->
                     // L0 入口压缩：结果在进历史前就瘦身，不改写已有消息 → 前缀缓存零影响。
@@ -232,8 +250,22 @@ internal class AgentLoop(
 
             val content = assistantMessage.optString("content").trim()
             if (content.isBlank() || content == "null") {
-                val finishReason = assistantMessage.optString("finish_reason")
-                error("模型接口第 $round 轮返回为空${finishReason.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}")
+                // 走到这里说明「只产生了思考、没有正文也没有工具调用」（validateChatResponse 已放行）。
+                // 本回合没有任何产出：先纠偏重试；预算用尽后按「运行已完成但没有返回文字」收尾，
+                // 而不是让整次运行失败、丢掉此前已完成的工具工作。
+                emptyRoundStreak += 1
+                if (emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES) {
+                    pendingEmptyRoundNudge = EMPTY_ROUND_NUDGE
+                    round += 1
+                    continue
+                }
+                publishTranscript()
+                onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
+                return Result(
+                    content = "",
+                    reasoningContent = reasoningSnapshot(),
+                    sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
+                )
             }
 
             publishTranscript()
@@ -274,6 +306,14 @@ internal class AgentLoop(
         if (AgentConversationCodec.parseToolCalls(message).isNotEmpty()) return
         val content = message.optString("content").trim()
         if (content.isNotBlank() && content != "null") return
+        // 只有「产生了思考却没有正文」的正常结束才走纠偏预算；纯空响应（无思考）保持上游语义，
+        // 直接按 MODEL_EMPTY_RESPONSE 失败——给一个什么都没想的回合重试没有意义。
+        if (response.stopReason == AssistantStopReason.END_TURN &&
+            emptyRoundStreak <= MAX_EMPTY_ROUND_NUDGES &&
+            message.optString("reasoning_content").isNotBlank()
+        ) {
+            return
+        }
         throw when (response.stopReason) {
             AssistantStopReason.OUTPUT_LIMIT ->
                 AgentModelFailure("MODEL_OUTPUT_LIMIT", false, "模型输出额度已耗尽但未生成正文，请检查输出上限或降低思考强度。")
@@ -626,3 +666,10 @@ private const val REPEAT_NUDGE_THRESHOLD = 3
 private const val REPEAT_TOOL_NUDGE =
     "[系统提醒] 你已经连续 %2\$d 次用完全相同的参数调用 %1\$s，输出不会变化。" +
         "如果是在等状态变化，请先确认状态确实变了；否则换一种方法，或说明卡在哪里。"
+
+/** 连续空回合的纠偏上限；用尽后按「没有返回文字」自然收尾，而不是让整次运行失败。 */
+private const val MAX_EMPTY_ROUND_NUDGES = 2
+
+private const val EMPTY_ROUND_NUDGE =
+    "上一轮只产生了思考内容，既没有正文也没有工具调用。" +
+        "请直接输出给用户的答复正文；如果任务还需要继续执行，请给出工具调用。"
