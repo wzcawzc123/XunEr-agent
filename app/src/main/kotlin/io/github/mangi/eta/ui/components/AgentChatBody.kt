@@ -177,6 +177,9 @@ internal fun AgentChatBody(
     onLoadEarlierMessages: () -> Unit = {},
     onHistoryViewportChanged: (Boolean) -> Unit = {},
     isDrawerOpen: Boolean = false,
+    /** 上次运行被系统回收中断且进度已保存（展示「继续」入口）。 */
+    resumableInterrupted: Boolean = false,
+    onResumeInterrupted: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberLazyListState(initialFirstVisibleItemIndex = messages.size + if (hasEarlierMessages) 1 else 0)
@@ -299,6 +302,8 @@ internal fun AgentChatBody(
             historyLoadState = historyLoadState,
             onLoadEarlierMessages = onLoadEarlierMessages,
             onHistoryViewportChanged = onHistoryViewportChanged,
+            resumableInterrupted = resumableInterrupted,
+            onResumeInterrupted = onResumeInterrupted,
             modifier = modifier,
         )
     }
@@ -357,6 +362,8 @@ private fun AgentChatScaffold(
     historyLoadState: ConversationHistoryLoadState,
     onLoadEarlierMessages: () -> Unit,
     onHistoryViewportChanged: (Boolean) -> Unit,
+    resumableInterrupted: Boolean = false,
+    onResumeInterrupted: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val surfaceColor = MiuixTheme.colorScheme.surface
@@ -411,6 +418,8 @@ private fun AgentChatScaffold(
                 onAttachFilePath = onAttachFilePath,
                 onRemoveFileReference = onRemoveFileReference,
                 onCancelMessageEdit = onCancelMessageEdit,
+                resumableInterrupted = resumableInterrupted,
+                onResumeInterrupted = onResumeInterrupted,
             )
         },
     ) { innerPadding ->
@@ -1032,6 +1041,8 @@ private fun AgentChatBottomBar(
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
+    resumableInterrupted: Boolean,
+    onResumeInterrupted: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1091,6 +1102,28 @@ private fun AgentChatBottomBar(
                 .navigationBarsPadding()
                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
         ) {
+            if (resumableInterrupted) {
+                // 系统回收导致的断点：进度已落盘，点一下从断点继续，
+                // 不必让用户重新描述一遍任务。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable(onClick = onResumeInterrupted),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_task_interrupted),
+                        modifier = Modifier.weight(1f),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Text(
+                        text = stringResource(R.string.action_continue),
+                        modifier = Modifier.padding(start = 8.dp),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
             AgentChatInputBar(
                 input = input,
                 modelPickerState = modelPickerState,

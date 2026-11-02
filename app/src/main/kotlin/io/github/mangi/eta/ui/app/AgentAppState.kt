@@ -455,6 +455,14 @@ internal class AgentAppState(
                         checkpoint = checkpoint,
                         interrupted = true,
                     ) || stateChanged
+                    // 中断前有实际进度（transcript 或快照）→ 提供续跑入口；
+                    // 什么都没做过的 run 没必要让用户「继续」一个空任务。
+                    if (checkpoint.transcript.isNotEmpty() || checkpoint.contextSnapshot != null) {
+                        resumableInterruptedRun = ResumableInterruptedRun(
+                            runId = checkpoint.runId,
+                            conversationId = AgentUiHandoffPayload.from(checkpoint.handoff.payload).conversationId,
+                        )
+                    }
                 }
                 orphanRewrites.forEach { (conversationId, runId) ->
                     conversationsById[conversationId]?.let { state ->
@@ -733,6 +741,66 @@ internal class AgentAppState(
     }
 
     /** 聊天内切换同时改当前会话绑定与默认模型；默认模型供新会话和系统助手入口使用。 */
+    /** 恢复后待用户确认续跑的被中断 run（系统回收中断，进度已折叠进会话）。 */
+    private var resumableInterruptedRun: ResumableInterruptedRun? = null
+
+    /** 上次运行被系统回收中断且可续跑（供 UI 展示「继续」入口）。 */
+    val resumableInterrupted: ResumableInterruptedRun?
+        get() = resumableInterruptedRun
+
+    /**
+     * 续跑被系统中断的任务：进度已由恢复折叠进会话 history，这里以其为基发起新 run，
+     * 并带防重复副作用引导（GUI 动作/写操作不得重复执行）。
+     */
+    fun resumeInterruptedRun() {
+        val pending = resumableInterruptedRun ?: return
+        // 多会话：只要求「该会话」没有在跑的 run，其他会话并行不阻塞续跑。
+        if (runStore.activeRunId(pending.conversationId) != null) return
+        val state = conversationsById[pending.conversationId] ?: return
+        launchConversationRun(
+            conversationId = pending.conversationId,
+            runId = java.util.UUID.randomUUID().toString(),
+            prompt = RESUME_INTERRUPTED_PROMPT,
+            images = emptyList(),
+            history = state.history,
+            userHistoryMessage = null,
+            messages = state.messages,
+            state = state,
+            reasoningEffort = state.reasoningEffort,
+        )
+        resumableInterruptedRun = null
+    }
+
+    /**
+     * 编辑重发的前缀体积守卫：前缀 = 被编辑消息之前的历史，其后内容会被丢弃，
+     * 所以只看这一段加上固定开销是否已经装不下。用轻量 token 估算（ASCII 3 字 ≈ 1 token、
+     * 非 ASCII 1 字 ≈ 1 token），对「接近上限」的粗判足够，不必引入完整预算模型。
+     */
+    private fun guardHistoryPrefix(
+        prefix: List<AgentModelClient.ConversationMessage>,
+        entryLabel: String,
+    ): Boolean {
+        if (prefix.isEmpty()) return false
+        val guardWindow = AgentModelClient.loadConfig().contextWindow ?: GUARD_FALLBACK_WINDOW_TOKENS
+        val estimate = estimateHistoryTokens(prefix) + TOOL_SCHEMA_RESERVE_TOKENS
+        // 阈值留 5% 余量（与硬裁剪 0.95 对齐），避免在窗口边界处发出必败请求。
+        if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
+            Toast.makeText(
+                appContext,
+                "${entryLabel}的前缀历史接近上下文上限，建议先手动压缩历史或新建会话；本次未发送",
+                Toast.LENGTH_LONG,
+            ).show()
+            return true
+        }
+        return false
+    }
+
+    /** 可续跑的被中断 run 标识（进度已折叠进会话 history，续跑以会话 history 为基）。 */
+    data class ResumableInterruptedRun(
+        val runId: String,
+        val conversationId: String,
+    )
+
     /** 切换模型图片输入能力：直接改 model 的 attachment/inputModalities，supportsVision 自动随之。 */
     fun setModelVision(providerId: String, modelId: String, vision: Boolean) {
         if (homeState.isStreaming) return
@@ -1269,6 +1337,12 @@ internal class AgentAppState(
             AgentConversationRevisionReducer.boundary(homeState, it.targetMessageId)
         }
         if (edit != null && editBoundary == null) {
+            cancelMessageEdit()
+            return
+        }
+        // 编辑重发：前缀历史已接近窗口上限时直接拦截。这类请求发出去必然被 Provider 拒绝，
+        // 白烧一次失败 + 重试退避，用户还以为是网络问题。
+        if (editBoundary != null && guardHistoryPrefix(editBoundary.historyPrefix, "编辑重发")) {
             cancelMessageEdit()
             return
         }
@@ -2380,6 +2454,28 @@ internal class AgentAppState(
         const val LEGACY_STOPPED_ERROR = "已停止"
         const val SYNTHETIC_STATUS_STOPPED = "eta_status:stopped"
 
+        /** 不知道真实窗口时的保守回退值：宁可早拦，也别发出必败请求。 */
+        private const val GUARD_FALLBACK_WINDOW_TOKENS = 128_000
+
+        /**
+         * 工具 schema 的固定开销预留（token）。
+         *
+         * 前缀守卫估算只数「消息」，但请求里还有 tools 数组——常用档约 15k token。
+         * 不预留这一块，估算会系统性偏乐观，正好在窗口边界处漏放必败请求。
+         */
+        private const val TOOL_SCHEMA_RESERVE_TOKENS = 16_000
+
+        /**
+         * 续跑被中断任务时的引导话术。
+         *
+         * 关键在「不要重复已生效的 GUI 动作与写操作」：进度已折叠进历史，
+         * 模型若把已执行过的步骤再跑一遍，会造成重复发送/重复写入这类不可逆副作用。
+         */
+        const val RESUME_INTERRUPTED_PROMPT =
+            "上次任务被系统中断（Eta 后台服务被系统回收），中断前已完成并保存的进度见下方历史。" +
+                "请基于这些进度继续完成原任务；已完成并验证过的步骤不要重复执行，" +
+                "尤其不要重复已生效的 GUI 动作与写操作。"
+
         fun emptyChatState(thinkingEnabled: Boolean): AgentChatHomeUiState =
             AgentChatHomeUiState(
                 messages = emptyList(),
@@ -2414,4 +2510,29 @@ private fun String.isReadOnlyExternalArchiveConversation(): Boolean =
 
 private fun agentBooleanForUi(key: String): Boolean {
     return Prefs.isEnabled(key)
+}
+
+/**
+ * 轻量 token 估算（只看正文与推理内容，不含 tools 与结构开销）。
+ *
+ * 口径：ASCII 3 字 ≈ 1 token、非 ASCII 1 字 ≈ 1 token。用于「前缀是否已接近窗口上限」的
+ * 粗判——宁可略保守，也不引入完整预算模型（那需要 tokenizer，代价远超收益）。
+ */
+internal fun estimateHistoryTokens(messages: List<AgentModelClient.ConversationMessage>): Int {
+    var tokens = 0
+    for (message in messages) {
+        tokens += textTokens(message.content)
+        tokens += textTokens(message.reasoningContent)
+    }
+    return tokens
+}
+
+/** 单段文本的 token 估算，口径见 [estimateHistoryTokens]。 */
+internal fun textTokens(text: String): Int {
+    if (text.isEmpty()) return 0
+    var ascii = 0
+    var other = 0
+    text.codePoints().forEach { codePoint -> if (codePoint < 128) ascii++ else other++ }
+    // 向上取整：残留的 1-2 个 ASCII 也按 1 token 计，避免估算系统性偏小。
+    return (ascii + 2) / 3 + other
 }
