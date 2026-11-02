@@ -192,6 +192,9 @@ internal fun ContextUsageStatsPopoverPopup(
     detailText: String,
     canCompact: Boolean,
     onCompact: () -> Unit,
+    /** 已有压缩次数；>0 时在浮层底部给「查看压缩历史」入口。 */
+    compactionCount: Int = 0,
+    onShowCompactionHistory: () -> Unit = {},
     onDismissRequest: () -> Unit,
 ) {
     val stats = usage.sessionStats
@@ -273,6 +276,27 @@ internal fun ContextUsageStatsPopoverPopup(
                     StatsDetailRow(label = "输出速度（TPS）", value = sessionSpeed)
                 }
             }
+        }
+
+        // 压缩是静默发生的：模型忘掉某条约束时，用户需要一个地方确认
+        // 「是卡片里本来就没写」还是「模型无视了它」。
+        if (compactionCount > 0) {
+            Spacer(Modifier.height(14.dp))
+            StatsSectionHeader(
+                icon = ChatActionIcons.Database,
+                title = stringResource(R.string.context_history_title),
+                value = stringResource(R.string.context_history_count, compactionCount),
+            )
+            StatsSectionDivider()
+            Text(
+                text = stringResource(R.string.context_history_open),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onShowCompactionHistory() }
+                    .padding(vertical = 8.dp),
+            )
         }
 
         if (canCompact) {

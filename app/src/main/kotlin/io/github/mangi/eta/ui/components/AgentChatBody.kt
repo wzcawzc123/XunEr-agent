@@ -94,6 +94,7 @@ import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.markdown.StreamingMarkdownStateCache
 import io.github.mangi.eta.ui.model.ConversationHistoryLoadState
 import io.github.mangi.eta.ui.model.AgentChatMessageUi
+import io.github.mangi.eta.ui.model.AgentContextHistory
 import io.github.mangi.eta.ui.model.AgentContextUsageUi
 import io.github.mangi.eta.ui.model.AgentMessageUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
@@ -154,6 +155,8 @@ internal fun AgentChatBody(
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
+    /** 会话已有的压缩记录（>0 时浮层里出现「查看压缩历史」入口）。 */
+    compactionRecords: List<AgentContextHistory.Record> = emptyList(),
     onModelSelected: (String) -> Unit,
     onSubmit: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
@@ -198,6 +201,7 @@ internal fun AgentChatBody(
     val contextUsage = remember(messages, modelPickerState.selectedModel) {
         latestContextUsage(messages, modelPickerState.selectedModel)
     }
+    var showCompactionHistory by remember { mutableStateOf(false) }
 
     val visibleMessages = remember(messages, messageEdit?.targetMessageId, messageEdit?.preserveFollowingMessages) {
         AgentConversationRevisionReducer.visibleMessagesForEdit(
@@ -286,6 +290,8 @@ internal fun AgentChatBody(
             onReasoningEffortChange = onReasoningEffortChange,
             onCompactContext = onCompactContext,
             canCompactContext = canCompactContext,
+            compactionCount = compactionRecords.size,
+            onShowCompactionHistory = { showCompactionHistory = true },
             onModelSelected = onModelSelected,
             onStop = onStop,
             onAttachImage = onAttachImage,
@@ -314,6 +320,12 @@ internal fun AgentChatBody(
             onResumeInterrupted = onResumeInterrupted,
             modifier = modifier,
         )
+        if (showCompactionHistory) {
+            AgentContextHistoryDialog(
+                records = compactionRecords,
+                onDismiss = { showCompactionHistory = false },
+            )
+        }
     }
 }
 
@@ -348,6 +360,8 @@ private fun AgentChatScaffold(
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
+    compactionCount: Int,
+    onShowCompactionHistory: () -> Unit,
     onModelSelected: (String) -> Unit,
     onStop: () -> Unit,
     onAttachImage: (String) -> Unit,
@@ -408,6 +422,8 @@ private fun AgentChatScaffold(
                 onReasoningEffortChange = onReasoningEffortChange,
                 onCompactContext = onCompactContext,
                 canCompactContext = canCompactContext,
+                compactionCount = compactionCount,
+                onShowCompactionHistory = onShowCompactionHistory,
                 onStop = onStop,
                 onAttachImage = onAttachImage,
                 onRemoveImage = onRemoveImage,
@@ -1056,6 +1072,8 @@ private fun AgentChatBottomBar(
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
+    compactionCount: Int = 0,
+    onShowCompactionHistory: () -> Unit = {},
     onStop: () -> Unit,
     onAttachImage: (String) -> Unit,
     onRemoveImage: (String) -> Unit,
@@ -1138,6 +1156,8 @@ private fun AgentChatBottomBar(
                 onReasoningEffortChange = onReasoningEffortChange,
                 onCompactContext = onCompactContext,
                 canCompactContext = canCompactContext,
+                compactionCount = compactionCount,
+                onShowCompactionHistory = onShowCompactionHistory,
                 onStop = onStop,
                 onAttachImage = onAttachImage,
                 onRemoveImage = onRemoveImage,
