@@ -43,6 +43,7 @@ internal object AgentToolCatalog {
             if (terminalTools) {
                 AgentFileVisionToolCatalog.appendTo(tools)
                 AgentTerminalToolCatalog.appendTo(tools)
+                AgentAndroguardToolCatalog.appendTo(tools)
                 AgentFileToolCatalog.appendTo(tools)
             }
         }).let { projected ->
