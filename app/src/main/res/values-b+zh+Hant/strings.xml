@@ -1369,4 +1369,14 @@
   <string name="chat_queue_remove">移除排隊訊息</string>
   <string name="chat_queue_images_only">[%1$d 張圖片]</string>
   <string name="chat_queue_files_only">[%1$d 個檔案]</string>
+  <string name="linux_androguard_stage_checking">正在檢查 Linux 基礎環境</string>
+  <string name="linux_androguard_stage_complete">Androguard 工具已就緒</string>
+  <string name="linux_androguard_stage_failed">%1$s 失敗。請稍後重試</string>
+  <string name="linux_androguard_stage_installing">正在安裝 Androguard 4.1.4</string>
+  <string name="linux_androguard_stage_verifying">正在校驗 Androguard 命令</string>
+  <string name="linux_androguard_tools_installed">Androguard 4.1.4 已安裝</string>
+  <string name="linux_androguard_tools_ready">Androguard 4.1.4 已就緒。可解析 APK 清單、解碼資源、審閱程式碼並校驗簽名</string>
+  <string name="linux_androguard_tools_ready_short">Androguard 工具已就緒</string>
+  <string name="linux_androguard_tools_summary">在隔離環境中安裝 Androguard 4.1.4（Python 逆向工程工具集）。可解析 APK 清單、解碼資源、審閱程式碼並校驗簽名</string>
+  <string name="attachment_camera">拍照</string>
 </resources>

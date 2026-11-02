@@ -182,6 +182,17 @@
             android:exported="true"
             android:grantUriPermissions="false"
             android:permission="android.permission.MANAGE_ACCESSIBILITY" />
+
+        <!-- 拍照入口：TakePicture() 需要一个可写 Uri，由 FileProvider 发出缓存文件的内容 URI。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="io.github.mangi.eta.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>
