@@ -109,9 +109,15 @@ internal class AgentLoop(
             }
             publishTranscript()
             if (purpose.allowsTools) context.compact()
-            val requestMessages = AssistantScreenContextProjection.project(
+            val projectedMessages = AssistantScreenContextProjection.project(
                 roleplayContext?.projectMessages(messages) ?: messages,
             )
+            // 纯文本模型：出站前剥离图片块（只改出站副本，持久历史保留原图供切换模型后用）。
+            val requestMessages = if (!config.supportsVision) {
+                AgentConversationCodec.stripImagesForTextOnlyModel(projectedMessages)
+            } else {
+                projectedMessages
+            }
             var roundInputTokens: Int? = null
             val reasoningLengthBeforeRound = accumulatedReasoning.length
             val completedRound = try {

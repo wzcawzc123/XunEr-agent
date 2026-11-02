@@ -32,6 +32,16 @@ internal object ModelRepository {
             ?.sortedBy { it.sortOrder }
             .orEmpty()
 
+    /**
+     * 按 UI 传来的标识找模型：先按数据库行 id，再按 API 模型名。
+     * UI 层传的通常是 API 名，而历史 bug 曾把它当行 id 匹配，导致开关静默失效。
+     */
+    fun findForUi(models: List<Model>, idOrModelId: String): Model? {
+        if (idOrModelId.isBlank()) return null
+        return models.firstOrNull { it.id == idOrModelId }
+            ?: models.firstOrNull { it.modelId == idOrModelId }
+    }
+
     suspend fun saveModel(providerId: String, draft: Model): Model = ProviderRepository.mutationMutex.withLock {
         val models = currentModels(providerId)
         val modelId = draft.modelId.trim()

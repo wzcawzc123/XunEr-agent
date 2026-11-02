@@ -315,6 +315,8 @@ internal object AgentModelClient {
         val model: String,
         val modelDisplayName: String = "",
         val contextWindow: Int? = null,
+        /** 是否接受图片输入；默认 true，纯文本模型由 RuntimeConfig 置 false。 */
+        val supportsVision: Boolean = true,
         val systemPrompt: String,
         val anthropicVersion: String = AnthropicProviderSetting.DEFAULT_ANTHROPIC_VERSION,
         val openAiEndpointMode: String = OpenAiEndpointMode.CHAT_COMPLETIONS,

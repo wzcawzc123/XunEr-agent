@@ -69,6 +69,9 @@ internal fun AgentHomeScreen(
                     onCompactContext = { onAction(AgentHomeAction.CompactContext) },
                     canCompactContext = state.canCompactContext,
                     onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
+                    onVisionToggled = { providerId, modelId, vision ->
+                        onAction(AgentHomeAction.VisionToggled(providerId, modelId, vision))
+                    },
                     onSubmit = { text -> onAction(AgentHomeAction.SubmitMessage(text)) },
                     onInterruptAndSubmit = { text -> onAction(AgentHomeAction.InterruptAndSubmitMessage(text)) },
                     onSteerQueuedMessage = { id -> onAction(AgentHomeAction.SteerQueuedMessage(id)) },

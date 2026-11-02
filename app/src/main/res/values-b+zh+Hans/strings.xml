@@ -1448,4 +1448,6 @@
   <string name="linux_androguard_tools_ready_short">Androguard 工具已就绪</string>
   <string name="linux_androguard_tools_summary">在隔离环境中安装 Androguard 4.1.4（Python 逆向工程工具集）。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
   <string name="attachment_camera">拍照</string>
+  <string name="model_supports_vision">支持图片输入</string>
+  <string name="model_text_only">纯文本</string>
 </resources>

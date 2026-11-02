@@ -149,6 +149,8 @@ internal fun AgentChatBody(
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
+
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onSubmit: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
     onSteerQueuedMessage: (String) -> Unit = {},
@@ -274,6 +276,8 @@ internal fun AgentChatBody(
             onCompactContext = onCompactContext,
             canCompactContext = canCompactContext,
             onModelSelected = onModelSelected,
+
+            onVisionToggled = onVisionToggled,
             onStop = onStop,
             onAttachImage = onAttachImage,
             onRemoveImage = onRemoveImage,
@@ -330,6 +334,8 @@ private fun AgentChatScaffold(
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
+
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onStop: () -> Unit,
     onAttachImage: (String) -> Unit,
     onRemoveImage: (String) -> Unit,
@@ -395,6 +401,8 @@ private fun AgentChatScaffold(
                 onCompactContext = onCompactContext,
                 canCompactContext = canCompactContext,
                 onModelSelected = onModelSelected,
+
+                onVisionToggled = onVisionToggled,
                 onStop = onStop,
                 onAttachImage = onAttachImage,
                 onRemoveImage = onRemoveImage,
@@ -1014,6 +1022,8 @@ private fun AgentChatBottomBar(
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
+
+    onVisionToggled: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onStop: () -> Unit,
     onAttachImage: (String) -> Unit,
     onRemoveImage: (String) -> Unit,
@@ -1106,6 +1116,8 @@ private fun AgentChatBottomBar(
                 onCompactContext = onCompactContext,
                 canCompactContext = canCompactContext,
                 onModelSelected = onModelSelected,
+
+                onVisionToggled = onVisionToggled,
                 onStop = onStop,
                 onAttachImage = onAttachImage,
                 onRemoveImage = onRemoveImage,

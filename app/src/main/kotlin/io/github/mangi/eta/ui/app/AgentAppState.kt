@@ -49,6 +49,8 @@ import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.data.model.enabledModel
 import io.github.mangi.eta.data.repository.EtaBackupRepository
 import io.github.mangi.eta.data.repository.EtaBackupSummary
+import io.github.mangi.eta.data.model.Model
+import io.github.mangi.eta.data.repository.ModelRepository
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
@@ -731,6 +733,36 @@ internal class AgentAppState(
     }
 
     /** 聊天内切换同时改当前会话绑定与默认模型；默认模型供新会话和系统助手入口使用。 */
+    /** 切换模型图片输入能力：直接改 model 的 attachment/inputModalities，supportsVision 自动随之。 */
+    fun setModelVision(providerId: String, modelId: String, vision: Boolean) {
+        if (homeState.isStreaming) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val provider = ProviderRepository.providerById(providerId) ?: return@launch
+                // UI 传的是 API 模型名，不是行 id；findForUi 两种都认（历史 bug：按行 id 匹配导致静默无效）。
+                val model = ModelRepository.findForUi(provider.models, modelId) ?: return@launch
+                ModelRepository.saveModel(
+                    provider.id,
+                    model.copy(
+                        attachment = vision,
+                        inputModalities = if (vision) {
+                            (model.inputModalities + Model.IMAGE_MODALITY).distinct()
+                        } else {
+                            model.inputModalities.filterNot {
+                                it.equals(Model.IMAGE_MODALITY, ignoreCase = true)
+                            }
+                        },
+                    ),
+                )
+                RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // 静默：切换视觉能力失败不打断当前操作
+            }
+        }
+    }
+
     fun selectModel(modelId: String) {
         if (
             !homeState.isConversationLoaded ||

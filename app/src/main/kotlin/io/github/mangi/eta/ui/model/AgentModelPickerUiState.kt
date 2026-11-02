@@ -32,6 +32,8 @@ internal data class AgentModelOptionUi(
     val modelId: String,
     val displayName: String,
     val contextWindow: Int?,
+    /** 是否接受图片输入（模型声明，或用户手动覆盖）。默认 true：旧调用点不必逐个改。 */
+    val supportsVision: Boolean = true,
 )
 
 @Immutable
@@ -106,6 +108,7 @@ internal object AgentModelPickerProjector {
             modelId = model.modelId,
             displayName = model.displayName.ifBlank { model.modelId },
             contextWindow = model.effectiveContextWindow,
+            supportsVision = model.supportsVision,
         )
 }
 

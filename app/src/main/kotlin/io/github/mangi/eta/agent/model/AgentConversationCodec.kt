@@ -145,6 +145,49 @@ internal object AgentConversationCodec {
                 GeminiEphemeralState.copyAssistantState(source, message)
             }
 
+    /**
+     * 纯文本模型（supportsVision=false）出站前的图片剥离。
+     *
+     * 只改出站副本，不碰持久历史：模型拿不到图片就不会报 400，历史里仍保留原图供切换模型后用。
+     * 纯图片消息补一个占位符文本保住请求合法；已有文本的消息只删图片块，不追加冗余提示。
+     */
+    fun stripImagesForTextOnlyModel(messages: JSONArray): JSONArray {
+        val cleanedMessages = JSONArray()
+        var changed = false
+        for (index in 0 until messages.length()) {
+            val message = messages.optJSONObject(index) ?: continue
+            val content = message.opt("content") as? JSONArray ?: continue
+            val cleaned = JSONArray()
+            var removed = false
+            for (itemIndex in 0 until content.length()) {
+                val item = content.optJSONObject(itemIndex) ?: continue
+                if (isImageBlock(item)) {
+                    removed = true
+                    continue
+                }
+                cleaned.put(item)
+            }
+            if (removed) {
+                if (cleaned.length() == 0) {
+                    cleaned.put(
+                        JSONObject()
+                            .put("type", "text")
+                            .put("text", "[图片已忽略：当前模型不支持图片输入]"),
+                    )
+                }
+                cleanedMessages.put(JSONObject(message.toString()).put("content", cleaned))
+                changed = true
+            } else {
+                cleanedMessages.put(message)
+            }
+        }
+        return if (changed) cleanedMessages else messages
+    }
+
+    /** 统一的图片块判定：Chat image_url、Responses input_image、Anthropic image/source。 */
+    internal fun isImageBlock(item: JSONObject): Boolean =
+        item.optString("type") in setOf("image_url", "input_image", "image") || item.has("source")
+
     fun toolResultMessage(
         toolCall: AgentModelClient.ToolCall,
         result: AgentModelClient.ToolResult,
