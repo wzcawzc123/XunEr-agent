@@ -1480,4 +1480,5 @@
   <string name="linux_androguard_tools_summary">Install Androguard 4.1.4 (Python reverse-engineering toolkit) into an isolated environment. It can parse APK manifest, decode resources, inspect code, and verify signatures</string>
   <string name="ui_androguard_2b8d4f" translatable="false">Androguard</string>
   <string name="attachment_camera">Take photo</string>
+  <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
 </resources>
