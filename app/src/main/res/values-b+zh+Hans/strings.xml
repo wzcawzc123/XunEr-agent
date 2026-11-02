@@ -1461,4 +1461,11 @@
   <string name="linux_androguard_tools_summary">在隔离环境中安装 Androguard 4.1.4（Python 逆向工程工具集）。可解析 APK 清单、解码资源、审阅代码并校验签名</string>
   <string name="attachment_camera">拍照</string>
   <string name="chat_task_interrupted">任务被系统中断，进度已保留。点击继续——若发送、编辑或界面操作已执行，请先确认当前状态。</string>
+  <string name="memory_search_label">搜索记忆内容</string>
+  <string name="memory_search_hits">%1$d 处命中 · %2$d 行</string>
+  <string name="memory_search_empty">未找到包含「%1$s」的内容 · 试试其他关键词</string>
+  <string name="memory_search_truncated">只显示前 %1$d 行，共 %2$d 行命中</string>
+  <string name="memory_core_usage">核心区水位</string>
+  <string name="memory_core_usage_value">%1$s / %2$s · %3$d%%</string>
+  <string name="memory_core_truncated_hint">已超预算：超出部分不会被注入，建议精简核心区或把旧条目移到归档区</string>
 </resources>
