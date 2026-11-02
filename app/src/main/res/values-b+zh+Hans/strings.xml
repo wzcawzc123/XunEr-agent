@@ -1468,4 +1468,5 @@
   <string name="usage_unit_hundred_million">%1$.2f 亿</string>
   <string name="usage_unit_ten_thousand">%1$.1f 万</string>
   <string name="chat_task_interrupted">任务被系统中断，进度已保留。点击继续——若发送、编辑或界面操作已执行，请先确认当前状态。</string>
+  <string name="memory_archive_hint">归档区还有 %1$d KB（未在预览中渲染）· 切到「编辑」查看全文</string>
 </resources>

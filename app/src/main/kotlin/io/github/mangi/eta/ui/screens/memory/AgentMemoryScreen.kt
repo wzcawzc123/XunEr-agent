@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import io.github.mangi.eta.ui.components.EtaArrowPreference
 import io.github.mangi.eta.ui.components.EtaCard
 import io.github.mangi.eta.ui.components.EtaPreference
@@ -377,13 +378,29 @@ private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
         }
         return
     }
-    Box(
+    // 只渲染核心区：整份 MEMORY.md 可能十几万字符，全塞进一个可滚动 Text 会让 Compose
+    // 全量测量布局（真机 242KB 时白屏半秒以上）。核心区才是每轮真正注入模型的部分。
+    val slice = remember(content) { AgentMemoryPreview.slice(content) }
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        StaticMarkdown(content = content, tone = MarkdownTone.Answer, modifier = Modifier.fillMaxWidth())
+        StaticMarkdown(
+            content = slice.text,
+            tone = MarkdownTone.Answer,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (slice.truncated) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.memory_archive_hint, slice.archivedChars / 1024),
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

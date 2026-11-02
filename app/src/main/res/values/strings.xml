@@ -1488,4 +1488,5 @@
   <string name="usage_unit_hundred_million">%1$.2f B</string>
   <string name="usage_unit_ten_thousand">%1$.1f K</string>
   <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
+  <string name="memory_archive_hint">%1$d KB in the archive (not rendered in preview) · switch to Edit to see the full text</string>
 </resources>
