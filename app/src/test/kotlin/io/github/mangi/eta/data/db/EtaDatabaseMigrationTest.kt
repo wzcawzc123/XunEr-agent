@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class EtaDatabaseMigrationTest {
     @Test
-    fun migration6To23PreservesDataAndMovesCompleteConversationContext() {
+    fun migration6ToLatestPreservesDataAndMovesCompleteConversationContext() {
         val context = RuntimeEnvironment.getApplication() as Context
         val databaseName = "migration-${UUID.randomUUID()}.db"
         createVersion6Database(context, databaseName)
@@ -57,6 +57,8 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_20_21,
                 EtaDatabase.MIGRATION_21_22,
                 EtaDatabase.MIGRATION_22_23,
+                // 23 → 当前版本：结构一致的空迁移（SCHEMA_VERSION 抬到 32 后必须有这一步）
+                EtaDatabase.MIGRATION_23_32,
             )
             .build()
         try {

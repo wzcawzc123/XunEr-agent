@@ -26,7 +26,7 @@ import androidx.room.migration.Migration
         CharacterEntity::class,
         UserPersonaEntity::class,
     ],
-    version = 23,
+    version = EtaDatabase.SCHEMA_VERSION,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -38,6 +38,21 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun characterDao(): CharacterDao
 
     companion object {
+        /**
+         * 数据库版本。
+         *
+         * 32 而不是上游的 23：旧 fork 线（4.0.x–4.2.0）发布了 24–31 各版，
+         * 覆盖安装到本版时版本号若是 23 就是**降级**——Room 会抛
+         * `A migration from 31 to 23 was required but not found`，用户只能卸载重装。
+         *
+         * 逐表比对过两条血统的结构：16 张表、全部列名/类型/可空性/索引/外键**完全一致**
+         * （fork 的迁移链最终把库收敛回了上游形态：DROP 自己的三张表、补上 auth_mode 列）。
+         * 所以 31 → 32 是空迁移即可，数据无损。
+         *
+         * 以后再改 schema 从这里往上加，不要回退到 23 —— 低于 31 的号已经被旧线占用了。
+         */
+        internal const val SCHEMA_VERSION = 32
+
         @Volatile
         private var instance: EtaDatabase? = null
 
@@ -48,25 +63,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                     EtaDatabase::class.java,
                     "eta.db",
                 )
-                    .addMigrations(
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13,
-                        MIGRATION_13_14,
-                        MIGRATION_14_15,
-                        MIGRATION_15_16,
-                        MIGRATION_16_17,
-                        MIGRATION_17_18,
-                        MIGRATION_18_19,
-                        MIGRATION_19_20,
-                        MIGRATION_20_21,
-                        MIGRATION_21_22,
-                        MIGRATION_22_23,
-                    )
+                    .addMigrations(*MIGRATIONS.toTypedArray())
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
                         override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -116,6 +113,97 @@ internal abstract class EtaDatabase : RoomDatabase() {
 
         internal val MIGRATION_22_23 = Migration(22, 23) { database ->
             database.execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+        }
+
+        /**
+         * 上游血统（23）→ 当前版本：结构本来就一致，什么都不用做。
+         *
+         * 这是「刚装完 4.3.0、再升 4.3.1」的路径，以及任何仍停留在上游 3.4.0 的设备。
+         */
+        internal val MIGRATION_23_32 = Migration(23, SCHEMA_VERSION) {
+            // 无需改动：23 与 32 的表结构逐字一致（见 SCHEMA_VERSION 注释）
+        }
+
+        /**
+         * 旧 fork 血统（24–31）→ 当前版本。
+         *
+         * fork 的库结构与上游有三处偏差，全部在这里收敛掉（与 4.2.0 自己的
+         * `applyLatestSchemaDelta` 完全同源，因为它当年就是这么把库调回上游形态的）：
+         * - 三张 fork 独有表；DROP 掉，Room 校验时不会因为「多出来的表」失败
+         * - 老版本没有 auth_mode 列（22→23 才加），用存在性检查补齐，重复执行也安全
+         *
+         * 之所以要覆盖 24–31 每一个号：Room 找不到迁移路径时会走
+         * `fallbackToDestructiveMigration` → **静默清库**。那比装不上更糟。
+         */
+        private fun androidx.sqlite.db.SupportSQLiteDatabase.applyForkLegacyDelta() {
+            execSQL("DROP TABLE IF EXISTS conversation_todos")
+            execSQL("DROP TABLE IF EXISTS agent_tasks")
+            execSQL("DROP TABLE IF EXISTS conversation_plans")
+            val hasAuthMode = query("PRAGMA table_info(model_providers)").use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "auth_mode") {
+                        found = true
+                        break
+                    }
+                }
+                found
+            }
+            if (!hasAuthMode) {
+                execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+            }
+        }
+
+        internal fun upgradeForkSchemaToLatest(from: Int): Migration =
+            Migration(from, SCHEMA_VERSION) { database -> database.applyForkLegacyDelta() }
+
+        internal val MIGRATION_24_32 = upgradeForkSchemaToLatest(24)
+        internal val MIGRATION_25_32 = upgradeForkSchemaToLatest(25)
+        internal val MIGRATION_26_32 = upgradeForkSchemaToLatest(26)
+        internal val MIGRATION_27_32 = upgradeForkSchemaToLatest(27)
+        internal val MIGRATION_28_32 = upgradeForkSchemaToLatest(28)
+        internal val MIGRATION_29_32 = upgradeForkSchemaToLatest(29)
+        internal val MIGRATION_30_32 = upgradeForkSchemaToLatest(30)
+        internal val MIGRATION_31_32 = upgradeForkSchemaToLatest(31)
+
+        /**
+         * 全部迁移（单一来源）。
+         *
+         * 收在这里而不是内联在 `addMigrations(...)` 里，是为了让守卫测试能对它断言：
+         * 少了任一版本号的迁移，Room 会走 `fallbackToDestructiveMigration` **静默清库**，
+         * 而这种问题在开发期完全看不出来（新装用户的库版本永远是最新的）。
+         *
+         * by lazy：各 MIGRATION_* 定义分散在本 companion 各处，避免初始化顺序耦合。
+         */
+        internal val MIGRATIONS: List<Migration> by lazy {
+            listOf(
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14,
+                MIGRATION_14_15,
+                MIGRATION_15_16,
+                MIGRATION_16_17,
+                MIGRATION_17_18,
+                MIGRATION_18_19,
+                MIGRATION_19_20,
+                MIGRATION_20_21,
+                MIGRATION_21_22,
+                MIGRATION_22_23,
+                MIGRATION_23_32,
+                MIGRATION_24_32,
+                MIGRATION_25_32,
+                MIGRATION_26_32,
+                MIGRATION_27_32,
+                MIGRATION_28_32,
+                MIGRATION_29_32,
+                MIGRATION_30_32,
+                MIGRATION_31_32,
+            )
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
