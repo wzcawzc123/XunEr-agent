@@ -39,8 +39,10 @@ android {
         minSdk = 33
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026103101
-        versionName = "3.4.0"
+        // 4.3.0：重建线（reopt）首次发布，必须高于上游 3.4.0 的 2026103101
+        // 与已发布的 4.2.0（2026110101）——同号不同物是最难排查的问题。
+        versionCode = 2026110301
+        versionName = "4.3.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
