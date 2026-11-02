@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.EtaArrowPreference
 import io.github.mangi.eta.ui.components.EtaCard
 import io.github.mangi.eta.ui.components.EtaPreference
 import io.github.mangi.eta.ui.components.EtaPreferenceDefaults
@@ -88,6 +89,7 @@ internal fun AgentMemoryScreen(
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<MemoryViewMode?>(null) }
     // 首次读到内容前不决定模式：空记忆直接进入编辑，已有内容先给出可读的预览。
     LaunchedEffect(state.isLoading) {
@@ -134,7 +136,11 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                MemorySettingsGroup(state = state, onAction = onAction)
+                MemorySettingsGroup(
+                    state = state,
+                    onAction = onAction,
+                    onShowHistory = { showHistoryDialog = true },
+                )
             }
             MemoryDocumentCard(
                 state = state,
@@ -174,6 +180,54 @@ internal fun AgentMemoryScreen(
         }
     }
 
+    if (showHistoryDialog) {
+        EtaWindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_history_title),
+            summary = stringResource(R.string.memory_history_note),
+            onDismissRequest = { showHistoryDialog = false },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                state.history.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatTimestamp(entry.savedAtMillis),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${formatBytes(entry.byteSize)} · ${entry.revisionPrefix}",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        EtaTextButton(
+                            text = stringResource(R.string.memory_history_restore),
+                            enabled = !state.isSaving,
+                            onClick = {
+                                showHistoryDialog = false
+                                onAction(AgentMemoryAction.RestoreHistory(entry.id))
+                            },
+                            minHeight = 36.dp,
+                            cornerRadius = 18.dp,
+                            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     state.notice?.let { notice ->
         EtaWindowDialog(
             show = true,
@@ -194,6 +248,7 @@ internal fun AgentMemoryScreen(
 private fun MemorySettingsGroup(
     state: AgentMemoryUiState,
     onAction: (AgentMemoryAction) -> Unit,
+    onShowHistory: () -> Unit,
 ) {
     EtaPreferenceGroup(
         modifier = Modifier
@@ -211,6 +266,18 @@ private fun MemorySettingsGroup(
         EtaPreference(
             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
+        )
+        EtaPreferenceDivider(hasLeading = false)
+        // 模型改坏记忆是高频事故，给一条显式回滚入口，而不是让用户只能靠整机备份。
+        EtaArrowPreference(
+            title = stringResource(R.string.memory_history_title),
+            summary = if (state.history.isEmpty()) {
+                stringResource(R.string.memory_history_empty)
+            } else {
+                state.history.size.toString()
+            },
+            enabled = !state.isLoading && state.history.isNotEmpty(),
+            onClick = onShowHistory,
         )
     }
 }
@@ -463,5 +530,9 @@ private fun formatBytes(bytes: Int): String = when {
     bytes % (1_024 * 1_024) == 0 -> "${bytes / (1_024 * 1_024)} MiB"
     else -> "%.2f MiB".format(bytes / (1_024.0 * 1_024.0))
 }
+
+private fun formatTimestamp(millis: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        .format(java.util.Date(millis))
 
 private fun formatNumber(value: Int): String = NumberFormat.getIntegerInstance().format(value)

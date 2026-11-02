@@ -706,6 +706,7 @@ fun AgentAppRoot(
                             is AgentMemoryAction.DraftChanged -> memory.updateMemoryDraft(action.content)
                             AgentMemoryAction.Save -> memory.saveMemory()
                             AgentMemoryAction.Clear -> memory.clearMemory()
+                            is AgentMemoryAction.RestoreHistory -> memory.restoreHistory(action.id)
                             AgentMemoryAction.DismissNotice -> memory.dismissMemoryNotice()
                         }
                     },

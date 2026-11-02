@@ -181,10 +181,18 @@ class AgentToolCatalogTest {
         val write = enabled.function("memory_write")
         val properties = write.getJSONObject("parameters").getJSONObject("properties")
         assertEquals(3_500, properties.getJSONObject("content").getInt("maxLength"))
+        // 内容寻址（replace_text）是推荐路径，标题寻址（replace_section）次之，
+        // 行号模式保留兼容 —— 三者都在同一张枚举里，模型按稳定性从高到低选。
         assertEquals(
-            listOf("replace_range", "append", "clear"),
+            listOf("replace_text", "replace_section", "replace_range", "append", "clear"),
             properties.getJSONObject("mode").getJSONArray("enum").stringValues(),
         )
+        assertEquals(3_500, properties.getJSONObject("old_text").getInt("maxLength"))
+        assertTrue(properties.has("new_text"))
+        assertTrue(properties.has("section"))
+
+        val read = enabled.function("memory_get")
+        assertTrue(read.getJSONObject("parameters").getJSONObject("properties").has("section"))
     }
 
     private fun JSONArray.toolNames(): List<String> =

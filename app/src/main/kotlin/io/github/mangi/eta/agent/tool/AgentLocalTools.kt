@@ -55,9 +55,12 @@ import io.github.mangi.eta.agent.terminal.SharedFolderMounts
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AgentLogger
 import io.github.mangi.eta.core.HookSupport
+import io.github.mangi.eta.agent.memory.AgentMemoryGauge
+import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.data.repository.AgentMemoryException
 import io.github.mangi.eta.data.repository.AgentMemoryMutation
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
+import io.github.mangi.eta.data.repository.AgentMemoryStore
 import io.github.mangi.eta.data.repository.AgentMemoryWriteResult
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import io.github.mangi.eta.data.repository.WebToolsSettingsRepository
@@ -92,6 +95,13 @@ internal class AgentLocalTools(
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
     private val memoryWritable: Boolean = true,
+    /**
+     * 与会话注入侧**同一个**上下文窗口，用于 memory_get 回报核心区水位。
+     *
+     * 传 null 会落到 128k 默认基准 —— 真实窗口是 32k 时，注入侧报 23%、工具报 93%，
+     * 模型会据此把一个健康的记忆核心区砍掉。所以必须由调用方传入真实窗口。
+     */
+    private val memoryContextWindow: () -> Int? = { null },
     private val screenshotExcludedPackages: () -> Set<String> = { emptySet() },
     private val screenObservationProvider: (
         (AgentScreenObservationContract.Options) -> RootShellDeviceController.Observation
@@ -385,20 +395,30 @@ internal class AgentLocalTools(
     }
 
     private fun memoryGet(args: JSONObject): String = try {
-        val result = AgentMemoryRepository.read(
-            query = args.optString("query").takeIf(String::isNotBlank),
-            startLine = args.optInt("start_line", 1),
-            maxChars = args.optInt("max_chars", 12_000),
-        )
+        val maxChars = args.optInt("max_chars", 12_000)
+        val section = args.optString("section").takeIf(String::isNotBlank)
+        // section 优先：按标题取整节比"行号翻页"稳定，也不会被别处插入的行挤偏。
+        val result = if (section != null) {
+            AgentMemoryRepository.readSection(section, maxChars)
+        } else {
+            AgentMemoryRepository.read(
+                query = args.optString("query").takeIf(String::isNotBlank),
+                startLine = args.optInt("start_line", 1),
+                maxChars = maxChars,
+            )
+        }
         JSONObject()
             .put("ok", true)
             .put("revision", result.snapshot.revision)
             .put("bytes", result.snapshot.byteSize)
             .put("line_count", result.snapshot.lineCount)
+            .put("section", section ?: JSONObject.NULL)
             .put("start_line", result.startLine ?: JSONObject.NULL)
             .put("end_line", result.endLine ?: JSONObject.NULL)
             .put("matched_lines", result.matchedLines)
             .put("has_more", result.hasMore)
+            // 与注入侧同口径的核心区水位：让模型知道"核心区是不是快满了"，而不是靠猜。
+            .put("core_usage", AgentMemoryGauge.report(result.snapshot, memoryContextWindow()))
             .put("content", result.content)
             .toString()
     } catch (failure: AgentMemoryException) {
@@ -407,7 +427,18 @@ internal class AgentLocalTools(
 
     private fun memoryWrite(args: JSONObject): String = try {
         val revision = args.getString("revision")
-        val mutation = when (args.getString("mode")) {
+        val mode = args.getString("mode")
+        val mutation = when (mode) {
+            "replace_text" -> AgentMemoryMutation.ReplaceText(
+                revision = revision,
+                oldText = args.requiredText("old_text"),
+                newText = args.optString("new_text"),
+            )
+            "replace_section" -> AgentMemoryMutation.ReplaceSection(
+                revision = revision,
+                section = args.requiredText("section"),
+                content = args.optString("content"),
+            )
             "replace_range" -> AgentMemoryMutation.ReplaceRange(
                 revision = revision,
                 startLine = args.getInt("start_line"),
@@ -418,15 +449,41 @@ internal class AgentLocalTools(
                 revision = revision,
                 content = args.requiredText("content"),
             )
-            "clear" -> AgentMemoryMutation.Clear(revision)
-            else -> error("不支持的记忆写入模式")
+            "clear" -> {
+                // 清空必须显式回传确认串：一次手滑不该抹掉全部记忆。
+                val confirmation = args.optString("content")
+                if (confirmation != AgentMemoryStore.CLEAR_CONFIRMATION) {
+                    return errorResult(
+                        "MEMORY_CLEAR_UNCONFIRMED",
+                        "清空全部记忆需要在 content 传 \"${AgentMemoryStore.CLEAR_CONFIRMATION}\"；" +
+                            "只删某一节请用 mode=replace_section 且 content 留空。",
+                    )
+                }
+                AgentMemoryMutation.Clear(revision)
+            }
+            else -> return errorResult("MEMORY_MODE_INVALID", "不支持的记忆写入模式：$mode")
         }
         when (val result = AgentMemoryRepository.mutate(mutation)) {
             is AgentMemoryWriteResult.Success -> JSONObject()
                 .put("ok", true)
+                .put("changed", result.changed)
                 .put("revision", result.snapshot.revision)
                 .put("bytes", result.snapshot.byteSize)
                 .put("line_count", result.snapshot.lineCount)
+                .put("core_usage", AgentMemoryGauge.report(result.snapshot, memoryContextWindow()))
+                // 落点建议只做提示，不阻断：位置对不对最终由模型/用户判断。
+                .put(
+                    "placement_hint",
+                    args.optString("content").ifBlank { args.optString("new_text") }
+                        .let { content ->
+                            val placement = AgentMemoryPlacement.suggest(content, args.optString("section"))
+                            JSONObject()
+                                .put("suggested", placement.wire)
+                                .put("label", placement.label)
+                                .put("rationale", AgentMemoryPlacement.rationale(placement))
+                        },
+                )
+                .apply { result.warning?.let { put("warning", it) } }
                 .toString()
             is AgentMemoryWriteResult.Conflict -> JSONObject()
                 .put("ok", false)

@@ -49,6 +49,32 @@ class AgentMemoryContextBuilderTest {
         assertEquals("# 项目", context.headingIndex)
     }
 
+    @Test
+    fun gaugeReportsExactlyTheInjectionSideNumbers() {
+        val snapshot = snapshot("# 核心记忆\n长期偏好\n## 关系\n家人")
+        val context = AgentMemoryContextBuilder.build(snapshot, 32_000)
+
+        val report = AgentMemoryGauge.report(snapshot, 32_000)
+
+        // 工具层与注入侧必须同口径：分母不一致时，模型会误以为核心区快满了并去砍内容。
+        assertEquals(context.coreContent.length, report.getInt("used_chars"))
+        assertEquals(context.coreBudgetChars, report.getInt("budget_chars"))
+        assertEquals(context.coreTruncated, report.getBoolean("truncated"))
+        assertEquals(32_000, report.getInt("window"))
+    }
+
+    @Test
+    fun gaugeFallsBackToSameDefaultWindowAsInjection() {
+        val snapshot = snapshot("# 核心记忆\n" + "a".repeat(10_000))
+        val context = AgentMemoryContextBuilder.build(snapshot, null)
+
+        val report = AgentMemoryGauge.report(snapshot, null)
+
+        assertEquals(context.coreBudgetChars, report.getInt("budget_chars"))
+        assertTrue(report.getBoolean("truncated"))
+        assertEquals(AgentMemoryContextBuilder.DEFAULT_CONTEXT_WINDOW, report.getInt("window"))
+    }
+
     private fun snapshot(content: String): AgentMemorySnapshot = AgentMemorySnapshot(
         content = content,
         revision = "a".repeat(64),
