@@ -12,6 +12,7 @@ import io.github.mangi.eta.ui.components.LocalAgentBrowserSession
 import io.github.mangi.eta.agent.browser.BrowserSessionRegistry
 import io.github.mangi.eta.ui.components.chatConversationCompositionKey
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
+import io.github.mangi.eta.ui.model.AgentContextHistory
 import io.github.mangi.eta.ui.model.ConversationHistoryLoadState
 import io.github.mangi.eta.ui.model.AgentHomeAction
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
@@ -102,6 +103,10 @@ internal fun AgentHomeScreen(
                     onHistoryViewportChanged = { onAction(AgentHomeAction.HistoryViewportChanged(it)) },
                     resumableInterrupted = resumableInterrupted,
                     onResumeInterrupted = { onAction(AgentHomeAction.ResumeInterruptedRun) },
+                    // 压缩记录从 history 里的摘要消息投影：不新增落库字段也能还原每次压缩。
+                    compactionRecords = remember(state.history) {
+                        AgentContextHistory.records(state.history)
+                    },
                     isDrawerOpen = isDrawerOpen,
                     modifier = modifier,
                 )

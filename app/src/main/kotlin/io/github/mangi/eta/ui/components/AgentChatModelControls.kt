@@ -1,6 +1,10 @@
 package io.github.mangi.eta.ui.components
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +36,9 @@ internal fun AgentContextUsageButton(
     usage: AgentContextUsageUi,
     onCompact: () -> Unit = {},
     canCompact: Boolean = false,
+    /** 已有压缩次数；>0 时在浮层里给「查看压缩历史」入口。 */
+    compactionCount: Int = 0,
+    onShowHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -91,11 +98,27 @@ internal fun AgentContextUsageButton(
                 },
                 colors = tooltipColors,
             ) {
-                Text(
-                    text = detail,
-                    color = tooltipColors.contentColor,
-                    style = MiuixTheme.textStyles.body2,
-                )
+                Column {
+                    Text(
+                        text = detail,
+                        color = tooltipColors.contentColor,
+                        style = MiuixTheme.textStyles.body2,
+                    )
+                    // 压缩是静默发生的：模型忘掉某条约束时，用户需要一个地方确认
+                    // 「是卡片里本来就没写」，而不是模型无视了它。
+                    if (compactionCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.context_history_open),
+                            color = tooltipColors.contentColor,
+                            style = MiuixTheme.textStyles.footnote2,
+                            modifier = Modifier.clickable {
+                                tooltipState.dismiss()
+                                onShowHistory()
+                            },
+                        )
+                    }
+                }
             }
         },
         state = tooltipState,
