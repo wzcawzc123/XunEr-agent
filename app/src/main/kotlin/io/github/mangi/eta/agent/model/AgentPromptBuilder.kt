@@ -205,7 +205,14 @@ internal object AgentPromptBuilder {
                 appendLine("<memory_core>")
                 appendLine(context.coreContent)
                 if (context.coreTruncated) {
-                    appendLine("[核心记忆超出自动注入预算，按需调用 memory_get 读取其余内容]")
+                    // 只说"超预算"没有用：模型不知道缺什么、也不知道从哪继续读。
+                    // 给出注入进度和续读锚点，它才能自己决定要不要补读。
+                    appendLine(
+                        "[核心记忆已注入 ${context.coreInjectedLines}/${context.coreTotalLines} 行，" +
+                            "超出 ${context.coreBudgetChars} 字预算的部分未注入" +
+                            (context.coreNextLine?.let { "；需要时用 memory_get(start_line=$it) 从第 $it 行继续读" }
+                                ?: "") + "]",
+                    )
                 }
                 appendLine("</memory_core>")
             }
@@ -214,6 +221,9 @@ internal object AgentPromptBuilder {
                 appendLine("<memory_headings>")
                 appendLine(context.headingIndex)
                 appendLine("</memory_headings>")
+                if (context.headingWarning.isNotBlank()) {
+                    appendLine("[${context.headingWarning}]")
+                }
             }
         }.trim()
         return systemMessage(body)
