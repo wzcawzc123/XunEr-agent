@@ -1,0 +1,4 @@
+# Shell 脚本必须 LF：Windows 的 autocrlf 会把它们签出成 CRLF，
+# WSL/Linux 下直接执行会报 `set: pipefail: invalid option name` / `/bin/sh^M`。
+*.sh   text eol=lf
+gradlew text eol=lf
