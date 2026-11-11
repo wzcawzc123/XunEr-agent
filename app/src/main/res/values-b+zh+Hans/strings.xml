@@ -1355,6 +1355,12 @@
   <string name="memory_mode_edit">编辑</string>
   <string name="memory_discard">放弃</string>
   <string name="memory_conflict_reload">编辑期间记忆已被别处更新（可能是模型写入）。已载入最新版本，请核对你的草稿后再保存。</string>
+  <string name="memory_history_title">历史版本</string>
+  <string name="memory_history_empty">还没有历史版本。每次写入前都会自动保留一份。</string>
+  <string name="memory_history_restore">恢复</string>
+  <string name="memory_history_restored">已恢复到该版本</string>
+  <string name="memory_history_restore_failed">恢复失败</string>
+  <string name="memory_history_note">最多保留 10 个版本。恢复前会先把当前内容也存一份，所以恢复也能撤销。</string>
   <string name="chat_character_input_hint">对%1$s说点什么…</string>
   <string name="chat_character_typing">%1$s 正在回复…</string>
   <string name="speech_tts_gemini">Gemini</string>
