@@ -738,7 +738,7 @@
     <string name="model_err_mandatory_thinking">This model requires reasoning; Off or disabling reasoning is not allowed</string>
     <string name="model_err_extra_body_invalid">Invalid extra request body JSON: %1$s</string>
 
-    <string name="model_err_context_overflow">Model context exceeded the capacity limit.</string>
+    <string name="model_err_context_overflow">Model context exceeded the capacity limit. Compress history first or start a new conversation to continue.</string>
     <string name="model_err_http_400_details">Invalid model request parameters (HTTP 400; %1$s). Check the model configuration.</string>
     <string name="model_err_http_quota">Model API quota or billing limit reached (HTTP %1$d). Check your provider account.</string>
     <string name="model_err_http_400">Invalid model request parameters (HTTP 400). Check the model configuration.</string>
