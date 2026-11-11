@@ -34,9 +34,16 @@ internal class AgentExecutionService : Service() {
         instance = this
         leases.attachOwner(owner)
         val manager = getSystemService(NotificationManager::class.java)
+        // 实时通知（Live Updates / ColorOS 流体云）在 OEM 上要求高于 LOW 的重要性；
+        // 通道重要性创建后不可改，故用 v2 id：DEFAULT + 静音（观感与 LOW 一致）。
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL, getString(R.string.execution_channel), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
         )
+        manager.deleteNotificationChannel(LEGACY_CHANNEL)
         ensureForeground()
     }
 
@@ -117,10 +124,28 @@ internal class AgentExecutionService : Service() {
             builder
                 .setStyle(Notification.ProgressStyle().setProgressIndeterminate(true))
                 .setShortCriticalText(status.shortText())
-            // 请求方法从 API 36.1 才公开；标准 extra 也可供支持该协议的 API 36 系统读取。
-            builder.extras.putBoolean("android.requestPromotedOngoing", true)
+            // 官方键是 android.extra.REQUEST_PROMOTED_ONGOING（上游误写成方法名
+            // "android.requestPromotedOngoing"，系统不识别，提升实际不生效）。
+            builder.extras.putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true)
         }
-        return builder.build()
+        val built = builder.build()
+        logPromotionDiagnostics(built)
+        return built
+    }
+
+    /**
+     * 实时通知诊断（仅 API 36.1+ 记录一次）：区分「我们的通知不合规」与「用户/系统没放行」。
+     * 版本判断必须内联：lint 只认调用点内的 SDK_INT 守卫，抽成其它形式会丢 NewApi 推断。
+     */
+    private fun logPromotionDiagnostics(notification: Notification) {
+        if (Build.VERSION.SDK_INT < 36) return
+        if (Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) return
+        val promotable = notification.hasPromotableCharacteristics()
+        // 36.0 上该调用可能直接抛异常（生产库实测）；能力探测绝不能崩。
+        val allowed = runCatching {
+            getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
+        }.getOrDefault(false)
+        AndroidAgentLogger.info("Execution notification promotable=$promotable allowed=$allowed")
     }
 
     /** 状态栏胶囊约 7 个字符可完整显示；更长时只取动作，工具名留在展开态。 */
@@ -133,7 +158,9 @@ internal class AgentExecutionService : Service() {
     }
 
     companion object {
-        private const val CHANNEL = "eta_execution"
+        /** v2：DEFAULT + 静音；旧 id 在 onCreate 删除，避免设置页出现重复条目。 */
+        private const val CHANNEL = "eta_execution_v2"
+        private const val LEGACY_CHANNEL = "eta_execution"
         private const val NOTIFICATION_ID = 1107
         private const val ACTION_STOP = "io.github.mangi.eta.action.STOP_USER_EXECUTION"
         private val leases = ExecutionLeaseRegistry()
