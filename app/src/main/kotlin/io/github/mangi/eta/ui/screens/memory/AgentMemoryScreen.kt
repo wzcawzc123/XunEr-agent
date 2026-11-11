@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -60,6 +61,9 @@ import io.github.mangi.eta.ui.markdown.MarkdownTone
 import io.github.mangi.eta.ui.model.AgentMemoryAction
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -74,6 +78,7 @@ import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
 import top.yukonga.miuix.kmp.glass.GlassSegmentedTabRow
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.glass.Delete
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -86,6 +91,7 @@ internal fun AgentMemoryScreen(
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
     var retainedNotice by remember { mutableStateOf(state.notice) }
     if (state.notice != null) retainedNotice = state.notice
     var mode by rememberSaveable {
@@ -173,7 +179,7 @@ internal fun AgentMemoryScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                MemorySettingsGroup(state = state, onAction = onAction)
+                MemorySettingsGroup(state = state, onAction = onAction, onShowHistory = { showHistoryDialog = true })
             }
             MemoryDocumentCard(
                 state = state,
@@ -192,13 +198,80 @@ internal fun AgentMemoryScreen(
             Spacer(Modifier.height(12.dp))
         }
     }
+
+    if (showHistoryDialog) {
+        GlassDialog(
+            show = true,
+            title = stringResource(R.string.memory_history_title),
+            summary = stringResource(R.string.memory_history_note),
+            backdrop = currentGlassOverlayBackdrop(),
+            onDismissRequest = { showHistoryDialog = false },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                state.history.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatTimestamp(entry.savedAtMillis),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${formatBytes(entry.byteSize)} · ${entry.revisionPrefix}",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        TextButton(
+                            text = stringResource(R.string.memory_history_restore),
+                            enabled = !state.isSaving,
+                            onClick = {
+                                showHistoryDialog = false
+                                onAction(AgentMemoryAction.RestoreHistory(entry.id))
+                            },
+                            minHeight = 36.dp,
+                            cornerRadius = 18.dp,
+                            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+            GlassDialogButton(
+                onClick = { showHistoryDialog = false },
+                role = GlassDialogButtonRole.Normal,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = stringResource(R.string.action_close),
+                    style = MiuixTheme.textStyles.button,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }
 
 @Composable
 private fun MemorySettingsGroup(
     state: AgentMemoryUiState,
     onAction: (AgentMemoryAction) -> Unit,
+    onShowHistory: () -> Unit,
 ) {
+    val historyText = if (state.history.isEmpty()) {
+        stringResource(R.string.memory_history_empty)
+    } else {
+        state.history.size.toString()
+    }
     Card(
         modifier = Modifier
             .padding(horizontal = 12.dp)
@@ -214,6 +287,12 @@ private fun MemorySettingsGroup(
         BasicComponent(
             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
+        )
+        ArrowPreference(
+            title = stringResource(R.string.memory_history_title),
+            summary = historyText,
+            enabled = !state.isLoading && state.history.isNotEmpty(),
+            onClick = onShowHistory,
         )
     }
 }
@@ -458,3 +537,6 @@ private fun formatBytes(bytes: Int): String = when {
 }
 
 private fun formatNumber(value: Int): String = NumberFormat.getIntegerInstance().format(value)
+
+private fun formatTimestamp(millis: Long): String =
+    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
