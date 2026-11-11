@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.FindReplace
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Insights
