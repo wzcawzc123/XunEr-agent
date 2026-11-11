@@ -1332,6 +1332,7 @@
   <string name="memory_mode_preview">預覽</string>
   <string name="memory_mode_edit">編輯</string>
   <string name="memory_discard">放棄</string>
+  <string name="memory_conflict_reload">編輯期間記憶已被別處更新（可能是模型寫入）。已載入最新版本，請核對你的草稿後再儲存。</string>
   <string name="chat_character_input_hint">對%1$s說點什麼…</string>
   <string name="chat_character_typing">%1$s 正在回覆…</string>
   <string name="web_tools_settings_title">網頁搜尋與讀取</string>

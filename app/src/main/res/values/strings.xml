@@ -1377,6 +1377,7 @@
   <string name="memory_mode_preview">Preview</string>
   <string name="memory_mode_edit">Edit</string>
   <string name="memory_discard">Discard</string>
+  <string name="memory_conflict_reload">Memory was updated by another source while you were editing. The latest version has been loaded — review your draft, then save again.</string>
   <string name="chat_character_input_hint">Say something to %1$s…</string>
   <string name="chat_character_typing">%1$s is replying…</string>
   <string name="speech_tts_gemini">Gemini</string>
