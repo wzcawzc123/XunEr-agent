@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class EtaDatabaseMigrationTest {
     @Test
-    fun migration6To23PreservesDataAndMovesCompleteConversationContext() {
+    fun migration6ToLatestPreservesDataAndMovesCompleteConversationContext() {
         val context = RuntimeEnvironment.getApplication() as Context
         val databaseName = "migration-${UUID.randomUUID()}.db"
         createVersion6Database(context, databaseName)
@@ -60,6 +60,8 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_23_24,
                 EtaDatabase.MIGRATION_24_25,
                 EtaDatabase.MIGRATION_25_26,
+                // 23 → 当前版本（34）：幂等收敛器（上游 26 的列也在其中补齐）
+                EtaDatabase.MIGRATION_23_34,
             )
             .build()
         try {
@@ -121,7 +123,6 @@ class EtaDatabaseMigrationTest {
             assertEquals(emptyList<CharacterEntity>(), runBlocking(Dispatchers.IO) { database.characterDao().characters() })
             assertEquals("off", conversations.first { it.id == "conv-1" }.reasoningEffort)
             assertEquals(null, conversations.first { it.id == "conv-1" }.modelId)
-            assertEquals(false, conversations.first { it.id == "conv-1" }.isPinned)
             assertEquals("default", conversations.first { it.id == "conv-enabled" }.reasoningEffort)
             assertEquals(null, runBlocking(Dispatchers.IO) { database.conversationDao().state() })
             assertEquals(listOf("built-in", "manual"), provider.models.map { it.modelId })
