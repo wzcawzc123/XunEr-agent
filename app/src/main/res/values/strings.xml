@@ -1469,4 +1469,5 @@
   <string name="conversation_branch_title">%1$s · Branch</string>
   <string name="conversation_branch_unavailable">Cannot branch here: only turns with complete context and finished tool calls are supported.</string>
   <string name="conversation_branch_failed">Could not create a branch. The original conversation has been kept. Please try again.</string>
+  <string name="attachment_camera">Take photo</string>
 </resources>
