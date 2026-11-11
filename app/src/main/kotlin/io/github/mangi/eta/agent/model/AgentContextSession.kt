@@ -21,6 +21,7 @@ internal class AgentContextSession(
     private val contextWindow = config.knownContextWindow
     private var inputTokens: Int? = null
     private var compacted = false
+    private var stubbed = false
     private var consumedSupplementCount = 0
     private var consumedUserTurns = (systemCount until messages.length()).sumOf {
         val message = messages.getJSONObject(it)
@@ -66,6 +67,16 @@ internal class AgentContextSession(
                 throw SignedToolContext.compactionFailure(messages)
             }
             return
+        }
+        // L1 软水位（70%）：一次性折叠旧工具结果，无 LLM、零缓存逐轮失效；
+        // 更贵的结构化摘要留给 85% 硬水位。只做一次（stubbed 门）。
+        if (!force && !stubbed && config.autoCompactionEnabled && contextWindow != null && before != null &&
+            before >= contextWindow * STUB_RATIO && before < contextWindow * TRIGGER_RATIO
+        ) {
+            stubbed = true
+            if (AgentContextStubber.stub(messages, systemCount) > 0) {
+                inputTokens = null
+            }
         }
         if (!force && (!config.autoCompactionEnabled || contextWindow == null || before == null ||
                 before < contextWindow * TRIGGER_RATIO)
@@ -121,5 +132,6 @@ internal class AgentContextSession(
 
     private companion object {
         const val TRIGGER_RATIO = 0.85
+        const val STUB_RATIO = 0.70
     }
 }
