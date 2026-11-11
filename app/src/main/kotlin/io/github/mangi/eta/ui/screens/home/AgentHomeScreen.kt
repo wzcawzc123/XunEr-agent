@@ -37,6 +37,7 @@ internal fun AgentHomeScreen(
     isDrawerOpen: Boolean = false,
     isBranching: Boolean = false,
     topInset: Dp = 0.dp,
+    resumableInterrupted: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // key 内保持完整分支，避免提前返回遗留无法转换为 DEX 的编译器标记。
@@ -106,6 +107,8 @@ internal fun AgentHomeScreen(
                     historyLoadState = historyLoadState,
                     onLoadEarlierMessages = { onAction(AgentHomeAction.LoadEarlierMessages) },
                     onHistoryViewportChanged = { onAction(AgentHomeAction.HistoryViewportChanged(it)) },
+                    resumableInterrupted = resumableInterrupted,
+                    onResumeInterrupted = { onAction(AgentHomeAction.ResumeInterruptedRun) },
                     isDrawerOpen = isDrawerOpen,
                     modifier = modifier,
                 )
