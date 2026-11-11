@@ -26,7 +26,7 @@ import androidx.room.migration.Migration
         CharacterEntity::class,
         UserPersonaEntity::class,
     ],
-    version = 25,
+    version = EtaDatabase.SCHEMA_VERSION,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -38,6 +38,19 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun characterDao(): CharacterDao
 
     companion object {
+        /**
+         * 数据库版本。
+         *
+         * 三条血统各自占用过一批版本号，所以这里必须比它们都大：
+         * - 上游：23（3.4.0）→ 24（会话置顶）→ 25（性能统计列）
+         * - 旧 fork 线 4.0.x–4.2.0：24–31（同一批号码含义完全不同）
+         * - 我们 4.3.x：32
+         *
+         * 同一个号码在两条血统上含义不同，只能往上加、不能回退；低版本号一律走
+         * [convergeToCurrentSchema] 收敛（幂等，对任何血统都安全）。
+         */
+        internal const val SCHEMA_VERSION = 33
+
         @Volatile
         private var instance: EtaDatabase? = null
 
@@ -48,27 +61,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                     EtaDatabase::class.java,
                     "eta.db",
                 )
-                    .addMigrations(
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13,
-                        MIGRATION_13_14,
-                        MIGRATION_14_15,
-                        MIGRATION_15_16,
-                        MIGRATION_16_17,
-                        MIGRATION_17_18,
-                        MIGRATION_18_19,
-                        MIGRATION_19_20,
-                        MIGRATION_20_21,
-                        MIGRATION_21_22,
-                        MIGRATION_22_23,
-                        MIGRATION_23_24,
-                        MIGRATION_24_25,
-                    )
+                    .addMigrations(*MIGRATIONS.toTypedArray())
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
                         override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -120,18 +113,137 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
         }
 
-        internal val MIGRATION_23_24 = Migration(23, 24) { database ->
-            database.execSQL("ALTER TABLE conversations ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        /**
+         * 上游血统（23）→ 当前版本：结构本来就一致，什么都不用做。
+         *
+         * 这是「刚装完 4.3.0、再升 4.3.1」的路径，以及任何仍停留在上游 3.4.0 的设备。
+         */
+        internal val MIGRATION_23_33 = upgradeSchemaToLatest(23)
+
+        /**
+         * 旧 fork 血统（24–31）→ 当前版本。
+         *
+         * fork 的库结构与上游有三处偏差，全部在这里收敛掉（与 4.2.0 自己的
+         * `applyLatestSchemaDelta` 完全同源，因为它当年就是这么把库调回上游形态的）：
+         * - 三张 fork 独有表；DROP 掉，Room 校验时不会因为「多出来的表」失败
+         * - 老版本没有 auth_mode 列（22→23 才加），用存在性检查补齐，重复执行也安全
+         *
+         * 之所以要覆盖 24–31 每一个号：Room 找不到迁移路径时会走
+         * `fallbackToDestructiveMigration` → **静默清库**。那比装不上更糟。
+         */
+        /** 列是否存在（PRAGMA table_info）；用于幂等地补列。 */
+        private fun androidx.sqlite.db.SupportSQLiteDatabase.hasColumn(table: String, column: String): Boolean =
+            query("PRAGMA table_info($table)").use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == column) {
+                        found = true
+                        break
+                    }
+                }
+                found
+            }
+
+        private fun androidx.sqlite.db.SupportSQLiteDatabase.addColumnIfMissing(
+            table: String,
+            column: String,
+            definition: String,
+        ) {
+            if (!hasColumn(table, column)) execSQL("ALTER TABLE $table ADD COLUMN $column $definition")
         }
 
-        internal val MIGRATION_24_25 = Migration(24, 25) { database ->
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN step_count INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN llm_ms INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN tool_ms INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN ttft_ms INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN ttft_steps INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN decode_ms INTEGER")
-            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN decode_tokens INTEGER")
+        /**
+         * 幂等 schema 收敛器：把任意历史血统的库对齐到当前结构。
+         *
+         * 三处差异全部用存在性检查处理，重复执行安全：
+         * - fork 自建的三张表（旧线有、我们和上游都没有）
+         * - `auth_mode`（上游 23 才加，fork 早期版本缺）
+         * - `is_pinned` 与 7 个性能统计列（上游 24/25 才加，fork 与我们 4.3.x 都缺）
+         *
+         * 不做这一步的后果不是报错而是**静默清库**：Room 找不到迁移路径时会走
+         * `fallbackToDestructiveMigration`，用户升级后数据凭空消失。
+         */
+        private fun androidx.sqlite.db.SupportSQLiteDatabase.convergeToCurrentSchema() {
+            execSQL("DROP TABLE IF EXISTS conversation_todos")
+            execSQL("DROP TABLE IF EXISTS agent_tasks")
+            execSQL("DROP TABLE IF EXISTS conversation_plans")
+            val hasAuthMode = query("PRAGMA table_info(model_providers)").use { cursor ->
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "auth_mode") {
+                        found = true
+                        break
+                    }
+                }
+                found
+            }
+            if (!hasAuthMode) {
+                execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+            }
+            // 上游 24：会话置顶
+            addColumnIfMissing("conversations", "is_pinned", "INTEGER NOT NULL DEFAULT 0")
+            // 上游 25：单轮性能统计（TTFT / 模型用时 / 工具用时 / 输出速度）
+            addColumnIfMissing("conversation_messages", "step_count", "INTEGER")
+            addColumnIfMissing("conversation_messages", "llm_ms", "INTEGER")
+            addColumnIfMissing("conversation_messages", "tool_ms", "INTEGER")
+            addColumnIfMissing("conversation_messages", "ttft_ms", "INTEGER")
+            addColumnIfMissing("conversation_messages", "ttft_steps", "INTEGER")
+            addColumnIfMissing("conversation_messages", "decode_ms", "INTEGER")
+            addColumnIfMissing("conversation_messages", "decode_tokens", "INTEGER")
+        }
+
+        internal fun upgradeSchemaToLatest(from: Int): Migration =
+            Migration(from, SCHEMA_VERSION) { database -> database.convergeToCurrentSchema() }
+
+        internal val MIGRATION_24_33 = upgradeSchemaToLatest(24)
+        internal val MIGRATION_25_33 = upgradeSchemaToLatest(25)
+        internal val MIGRATION_26_33 = upgradeSchemaToLatest(26)
+        internal val MIGRATION_27_33 = upgradeSchemaToLatest(27)
+        internal val MIGRATION_28_33 = upgradeSchemaToLatest(28)
+        internal val MIGRATION_29_33 = upgradeSchemaToLatest(29)
+        internal val MIGRATION_30_33 = upgradeSchemaToLatest(30)
+        internal val MIGRATION_31_33 = upgradeSchemaToLatest(31)
+        internal val MIGRATION_32_33 = upgradeSchemaToLatest(32)
+
+        /**
+         * 全部迁移（单一来源）。
+         *
+         * 收在这里而不是内联在 `addMigrations(...)` 里，是为了让守卫测试能对它断言：
+         * 少了任一版本号的迁移，Room 会走 `fallbackToDestructiveMigration` **静默清库**，
+         * 而这种问题在开发期完全看不出来（新装用户的库版本永远是最新的）。
+         *
+         * by lazy：各 MIGRATION_* 定义分散在本 companion 各处，避免初始化顺序耦合。
+         */
+        internal val MIGRATIONS: List<Migration> by lazy {
+            listOf(
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14,
+                MIGRATION_14_15,
+                MIGRATION_15_16,
+                MIGRATION_16_17,
+                MIGRATION_17_18,
+                MIGRATION_18_19,
+                MIGRATION_19_20,
+                MIGRATION_20_21,
+                MIGRATION_21_22,
+                MIGRATION_22_23,
+                MIGRATION_23_33,
+                MIGRATION_24_33,
+                MIGRATION_25_33,
+                MIGRATION_26_33,
+                MIGRATION_27_33,
+                MIGRATION_28_33,
+                MIGRATION_29_33,
+                MIGRATION_30_33,
+                MIGRATION_31_33,
+                MIGRATION_32_33,
+            )
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
