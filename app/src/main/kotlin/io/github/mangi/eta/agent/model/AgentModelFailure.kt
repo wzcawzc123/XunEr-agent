@@ -34,7 +34,7 @@ internal class AgentModelFailure(
             }
             authenticationFailure(error)?.let { return it }
             if (isContextOverflow(error)) return AgentModelFailure(
-                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。",
+                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。建议先手动压缩历史，或新建会话继续当前任务。",
             )
             val permanent = isPermanent(error, body)
             if (status == 400 && includeParameterDetails && !permanent) {
@@ -60,7 +60,7 @@ internal class AgentModelFailure(
         fun stream(error: JSONObject, message: String): AgentModelFailure {
             authenticationFailure(error)?.let { return it }
             if (isContextOverflow(error)) return AgentModelFailure(
-                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。",
+                "CONTEXT_OVERFLOW", false, "模型上下文超过容量限制。建议先手动压缩历史，或新建会话继续当前任务。",
             )
             val codes = listOf(
                 error.optString("code"),

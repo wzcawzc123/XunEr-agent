@@ -28,8 +28,13 @@ internal object AgentConversationRevisionReducer {
         if (targetUserOrdinal < 0) return null
         val turnsFromEnd = userMessageIndices.size - targetUserOrdinal
 
-        val historySlice = sliceBeforeTurnFromTail(state.history, turnsFromEnd)
-        val journalSlice = sliceBeforeTurnFromTail(state.journal, turnsFromEnd)
+        // 编辑点的 UI 用户消息 id（由近及远）。真机实证：5050 条会话压缩后 UI 与 journal 条数不等，
+        // 纯差值法会算偏、把整段历史带出（CONTEXT_OVERFLOW）；有 id 时必须按 id 精确定位。
+        val uiUserIds = (targetUserOrdinal downTo 0)
+            .mapNotNull { ordinal -> userMessageIndices.getOrNull(ordinal)?.let { state.messages[it].id } }
+
+        val historySlice = sliceBeforeTurnFromTail(state.history, turnsFromEnd, uiUserIds)
+        val journalSlice = sliceBeforeTurnFromTail(state.journal, turnsFromEnd, uiUserIds)
 
         // 优先保留已压缩的活跃 history；只有目标轮次已被折叠或使摘要失效时，才从原始 journal 重建。
         val (historyPrefix, compacted) = when {
@@ -71,12 +76,18 @@ internal object AgentConversationRevisionReducer {
     private fun sliceBeforeTurnFromTail(
         source: List<AgentModelClient.ConversationMessage>,
         turnsFromEnd: Int,
+        uiUserIds: List<String> = emptyList(),
     ): PrefixSlice? {
         if (source.isEmpty()) return null
         val userIndices = source.indices.filter { source[it].role == "user" }
         // 旧版本可能已经丢失前缀；只能对已有记录做尾部对齐，不能伪造恢复。
-        val retainedUserOrdinal = userIndices.size - turnsFromEnd
-        val cutIndex = userIndices.getOrNull(retainedUserOrdinal) ?: return null
+        val ordinalCut = userIndices.getOrNull(userIndices.size - turnsFromEnd)
+        // 优先按 messageId 精确定位：压缩后 UI 与 journal 条数可能不等，差值法会算偏。
+        // 新消息写入时已带 messageId；旧数据没有 id 时退化为上面的尾部对齐。
+        val idCut = uiUserIds.firstNotNullOfOrNull { uiId ->
+            userIndices.lastOrNull { source[it].messageId == uiId }
+        }
+        val cutIndex = idCut ?: ordinalCut ?: return null
         val prefix = source.take(cutIndex)
         val targetTurn = prefix.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 } + 1
         val invalidatesSummary = prefix.any { it.contextSummary && it.summaryThroughUserTurn >= targetTurn }
