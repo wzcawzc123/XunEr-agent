@@ -26,6 +26,9 @@ internal fun AgentContextUsageButton(
     usage: AgentContextUsageUi,
     onCompact: () -> Unit = {},
     canCompact: Boolean = false,
+    /** 已有压缩次数；>0 时在浮层里给「查看压缩历史」入口。 */
+    compactionCount: Int = 0,
+    onShowHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val progress = usage.progress
@@ -84,6 +87,11 @@ internal fun AgentContextUsageButton(
                 detailText = detail,
                 canCompact = canCompact,
                 onCompact = onCompact,
+                compactionCount = compactionCount,
+                onShowCompactionHistory = {
+                    showPopover = false
+                    onShowHistory()
+                },
                 onDismissRequest = { showPopover = false },
             )
         }

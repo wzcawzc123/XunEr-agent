@@ -155,6 +155,8 @@ internal fun AgentChatInputBar(
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
     canCompactContext: Boolean,
+    compactionCount: Int = 0,
+    onShowCompactionHistory: () -> Unit = {},
     onSubmit: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
     onSteerQueuedMessage: (String) -> Unit = {},
@@ -458,6 +460,8 @@ internal fun AgentChatInputBar(
                                 usage = contextUsage,
                                 onCompact = onCompactContext,
                                 canCompact = canCompactContext && !isStreaming,
+                                compactionCount = compactionCount,
+                                onShowHistory = onShowCompactionHistory,
                             )
                             Spacer(modifier = Modifier.width(2.dp))
                         }
