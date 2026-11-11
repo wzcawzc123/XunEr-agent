@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -74,6 +75,9 @@ import io.github.mangi.eta.ui.markdown.MarkdownTone
 import io.github.mangi.eta.ui.model.AgentMemoryAction
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -82,6 +86,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -96,6 +101,8 @@ internal fun AgentMemoryScreen(
     onAction: (AgentMemoryAction) -> Unit,
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    // 记忆 v2 写前快照：给一条显式回滚入口，模型改坏记忆时不必靠整机备份。
+    var showHistoryDialog by remember { mutableStateOf(false) }
     var mode by rememberSaveable {
         mutableStateOf(
             if (!state.isLoading && state.savedContent.isBlank()) MemoryViewMode.Edit else MemoryViewMode.Preview,
@@ -142,7 +149,7 @@ internal fun AgentMemoryScreen(
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically(),
                     ) {
-                        MemorySettingsGroup(state = state, onAction = onAction)
+                        MemorySettingsGroup(state = state, onAction = onAction, onShowHistory = { showHistoryDialog = true })
                     }
                     MemoryDocumentCard(
                         state = state,
@@ -199,7 +206,7 @@ internal fun AgentMemoryScreen(
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically(),
                     ) {
-                        MemorySettingsGroup(state = state, onAction = onAction)
+                        MemorySettingsGroup(state = state, onAction = onAction, onShowHistory = { showHistoryDialog = true })
                     }
                     MemoryDocumentCard(
                         state = state,
@@ -285,13 +292,75 @@ internal fun AgentMemoryScreen(
             }
         }
     }
+
+    if (showHistoryDialog) {
+        // 两套样式共用 Miuix 弹窗：COUI 的 CouiNoticeDialog 只能摆纯文本，
+        // 承载不了「每条快照一个恢复按钮」的列表。
+        WindowDialog(
+            show = true,
+            title = stringResource(R.string.memory_history_title),
+            summary = stringResource(R.string.memory_history_note),
+            onDismissRequest = { showHistoryDialog = false },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                state.history.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatTimestamp(entry.savedAtMillis),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${formatBytes(entry.byteSize)} · ${entry.revisionPrefix}",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        TextButton(
+                            text = stringResource(R.string.memory_history_restore),
+                            enabled = !state.isSaving,
+                            onClick = {
+                                showHistoryDialog = false
+                                onAction(AgentMemoryAction.RestoreHistory(entry.id))
+                            },
+                            minHeight = 36.dp,
+                            cornerRadius = 18.dp,
+                            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+            TextButton(
+                text = stringResource(R.string.action_close),
+                onClick = { showHistoryDialog = false },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }
 
 @Composable
 private fun MemorySettingsGroup(
     state: AgentMemoryUiState,
     onAction: (AgentMemoryAction) -> Unit,
+    onShowHistory: () -> Unit,
 ) {
+    val historyText = if (state.history.isEmpty()) {
+        stringResource(R.string.memory_history_empty)
+    } else {
+        state.history.size.toString()
+    }
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
             Group {
@@ -307,6 +376,13 @@ private fun MemorySettingsGroup(
                     title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
                     summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
                     showChevron = false,
+                )
+                Divider()
+                CouiPreference(
+                    title = stringResource(R.string.memory_history_title),
+                    summary = historyText,
+                    enabled = !state.isLoading && state.history.isNotEmpty(),
+                    onClick = onShowHistory,
                 )
             }
         }
@@ -326,6 +402,12 @@ private fun MemorySettingsGroup(
                 BasicComponent(
                     title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
                     summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.memory_history_title),
+                    summary = historyText,
+                    enabled = !state.isLoading && state.history.isNotEmpty(),
+                    onClick = onShowHistory,
                 )
             }
         }
@@ -628,3 +710,7 @@ private fun formatBytes(bytes: Int): String = when {
 }
 
 private fun formatNumber(value: Int): String = NumberFormat.getIntegerInstance().format(value)
+
+/** 历史快照时间：本地时区，精确到分钟（秒级差异对「选哪一版」没有帮助）。 */
+private fun formatTimestamp(millis: Long): String =
+    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
