@@ -1383,4 +1383,8 @@
   <string name="conversation_branch_failed">建立分支失敗，原對話已保留，請重試。</string>
   <string name="attachment_camera">拍照</string>
   <string name="chat_task_interrupted">任務被系統中斷，進度已保留。點擊繼續——若傳送、編輯或介面操作已執行，請先確認目前狀態。</string>
+  <string name="memory_search_label">搜尋記憶內容</string>
+  <string name="memory_search_hits">%1$d 處命中 · %2$d 行</string>
+  <string name="memory_search_empty">找不到包含「%1$s」的內容 · 試試其他關鍵字</string>
+  <string name="memory_search_truncated">只顯示前 %1$d 行，共 %2$d 行命中</string>
 </resources>

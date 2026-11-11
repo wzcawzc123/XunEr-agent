@@ -1471,4 +1471,8 @@
   <string name="conversation_branch_failed">Could not create a branch. The original conversation has been kept. Please try again.</string>
   <string name="attachment_camera">Take photo</string>
   <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
+  <string name="memory_search_label">Search memory</string>
+  <string name="memory_search_hits">%1$d matches · %2$d lines</string>
+  <string name="memory_search_empty">No matches for “%1$s” · try other keywords</string>
+  <string name="memory_search_truncated">Showing first %1$d lines of %2$d matched lines</string>
 </resources>
