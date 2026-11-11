@@ -681,6 +681,7 @@
 
     <string name="model_err_context_overflow">模型上下文超過容量限制。建議先手動壓縮歷史，或新建會話繼續目前任務。</string>
     <string name="model_err_http_400_details">模型請求參數無效（HTTP 400；%1$s），請檢查模型設定。</string>
+    <string name="model_err_http_402">模型介面餘額或額度不足（HTTP 402）。請到服務商帳戶加值，或更換可用的 API Key。</string>
     <string name="model_err_http_quota">模型介面額度或計費受限（HTTP %1$d），請檢查供應商帳號。</string>
     <string name="model_err_http_400">模型請求參數無效（HTTP 400），請檢查模型設定。</string>
     <string name="model_err_http_401">模型介面驗證失敗（HTTP 401），請檢查 API Key。</string>

@@ -681,6 +681,7 @@
 
     <string name="model_err_context_overflow">模型上下文超过容量限制。建议先手动压缩历史，或新建会话继续当前任务。</string>
     <string name="model_err_http_400_details">模型请求参数无效（HTTP 400；%1$s），请检查模型配置。</string>
+    <string name="model_err_http_402">模型接口余额或额度不足（HTTP 402）。请到服务商账户充值，或更换可用的 API Key。</string>
     <string name="model_err_http_quota">模型接口额度或计费受限（HTTP %1$d），请检查服务商账户。</string>
     <string name="model_err_http_400">模型请求参数无效（HTTP 400），请检查模型配置。</string>
     <string name="model_err_http_401">模型接口认证失败（HTTP 401），请检查 API Key。</string>
