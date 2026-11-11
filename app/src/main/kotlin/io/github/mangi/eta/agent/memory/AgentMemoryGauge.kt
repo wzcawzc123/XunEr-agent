@@ -31,11 +31,17 @@ internal object AgentMemoryGauge {
             .put("budget_chars", budget)
             .put("percent", percent)
             .put("truncated", context.coreTruncated)
+            // 行维度的进度：字符百分比看不出"还差几行没注入"，模型据此才知道要不要续读。
+            .put("injected_lines", context.coreInjectedLines)
+            .put("total_lines", context.coreTotalLines)
+            .put("section_count", context.coreSectionCount)
+            .put("next_line", context.coreNextLine ?: JSONObject.NULL)
             .put("window", contextWindow ?: AgentMemoryContextBuilder.DEFAULT_CONTEXT_WINDOW)
             .put("note", NOTE)
     }
 
     private const val NOTE =
-        "used/budget 的口径与自动注入完全一致。percent 接近 100 或 truncated=true 时，" +
-            "核心区超出部分不会被注入，应把长期不用的内容移出「# 核心记忆」或精简措辞。"
+        "used/budget 与注入侧口径完全一致。truncated=true 时，超出部分不会被注入：" +
+            "把长期不用的内容移出「# 核心记忆」，或用 next_line 续读。文档里的多段同名" +
+            "「# 核心记忆」会自动合并注入，但建议合并成一节。"
 }
