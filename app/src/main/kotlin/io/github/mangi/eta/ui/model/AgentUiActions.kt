@@ -72,5 +72,7 @@ sealed interface AgentMemoryAction {
     data class DraftChanged(val content: String) : AgentMemoryAction
     data object Save : AgentMemoryAction
     data object Clear : AgentMemoryAction
+    /** 回滚到某份写前快照；恢复本身也会先备份当前内容。 */
+    data class RestoreHistory(val id: String) : AgentMemoryAction
     data object DismissNotice : AgentMemoryAction
 }
