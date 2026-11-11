@@ -58,6 +58,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.memory.AgentMemoryPreview
 import io.github.mangi.eta.agent.memory.AgentMemorySearch
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
@@ -440,6 +441,9 @@ private fun MemorySettingsGroup(
                     )
                 }
                 item {
+                    MemoryCoreUsageBar(state = state)
+                }
+                item {
                     CouiPreference(
                         title = stringResource(R.string.memory_history_title),
                         summary = historyText,
@@ -467,6 +471,7 @@ private fun MemorySettingsGroup(
                     title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
                     summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
                 )
+                MemoryCoreUsageBar(state = state)
                 ArrowPreference(
                     title = stringResource(R.string.memory_history_title),
                     summary = historyText,
@@ -684,6 +689,70 @@ private fun highlightHit(hit: AgentMemorySearch.Hit, color: androidx.compose.ui.
         }
         if (cursor < hit.text.length) append(hit.text, cursor, hit.text.length)
     }
+
+/**
+ * 核心区水位：用草稿实时算，不是加载时的一次性快照——用户改完立刻能看出会不会超预算。
+ *
+ * 超预算的部分不会被注入（AgentMemoryPreview.coreChars 与注入侧同口径），
+ * 所以超了要显式告警，而不是让进度条安静地停在满格。
+ */
+@Composable
+private fun MemoryCoreUsageBar(state: AgentMemoryUiState) {
+    val scheme = MiuixTheme.colorScheme
+    val coreChars = remember(state.draft) { AgentMemoryPreview.coreChars(state.draft) }
+    val budget = state.coreBudgetChars.coerceAtLeast(1)
+    val used = coreChars.coerceAtMost(budget)
+    val percent = (coreChars * 100 / budget).coerceAtLeast(0)
+    val truncated = coreChars > budget
+    val warning = truncated || percent >= 80
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.memory_core_usage),
+                style = MiuixTheme.textStyles.footnote2,
+                color = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(
+                    R.string.memory_core_usage_value,
+                    formatNumber(used),
+                    formatNumber(budget),
+                    percent,
+                ),
+                style = MiuixTheme.textStyles.footnote2,
+                fontWeight = FontWeight.Medium,
+                color = if (warning) scheme.error else scheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(scheme.surfaceContainerHigh, CircleShape),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth((used.toFloat() / budget).coerceIn(0f, 1f))
+                    .height(4.dp)
+                    .background(if (warning) scheme.error else scheme.primary, CircleShape),
+            )
+        }
+        if (truncated) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.memory_core_truncated_hint),
+                style = MiuixTheme.textStyles.footnote2,
+                color = scheme.error,
+            )
+        }
+    }
+}
 
 @Composable
 private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
