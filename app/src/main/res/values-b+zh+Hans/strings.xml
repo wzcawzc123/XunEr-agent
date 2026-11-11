@@ -1451,4 +1451,5 @@
   <string name="conversation_branch_unavailable">无法从此处分支：仅支持上下文完整且工具调用已结束的轮次。</string>
   <string name="conversation_branch_failed">创建分支失败，原对话已保留，请重试。</string>
   <string name="attachment_camera">拍照</string>
+  <string name="chat_task_interrupted">任务被系统中断，进度已保留。点击继续——若发送、编辑或界面操作已执行，请先确认当前状态。</string>
 </resources>

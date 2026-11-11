@@ -15,6 +15,8 @@ sealed interface AgentHomeAction {
     data class RecallQueuedMessage(val id: String, val currentDraftText: String) : AgentHomeAction
     data class RemoveQueuedMessage(val id: String) : AgentHomeAction
     data object StopRun : AgentHomeAction
+    /** 续跑被系统回收中断、且进度已折叠进会话的任务。 */
+    data object ResumeInterruptedRun : AgentHomeAction
     data class ImageAttached(val uri: String) : AgentHomeAction
     data class RemoveImage(val id: String) : AgentHomeAction
     data class FilesAttached(val uris: List<String>) : AgentHomeAction

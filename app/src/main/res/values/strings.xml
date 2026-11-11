@@ -1470,4 +1470,5 @@
   <string name="conversation_branch_unavailable">Cannot branch here: only turns with complete context and finished tool calls are supported.</string>
   <string name="conversation_branch_failed">Could not create a branch. The original conversation has been kept. Please try again.</string>
   <string name="attachment_camera">Take photo</string>
+  <string name="chat_task_interrupted">The task was interrupted by the system. Progress is kept. Tap to resume — if sending, editing or GUI actions were already involved, check the current state first.</string>
 </resources>

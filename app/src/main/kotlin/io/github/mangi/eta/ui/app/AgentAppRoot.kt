@@ -428,6 +428,7 @@ fun AgentAppRoot(
                                 is AgentHomeAction.RecallQueuedMessage -> agentState.recallQueuedMessage(action.id, action.currentDraftText)
                                 is AgentHomeAction.RemoveQueuedMessage -> agentState.removeQueuedMessage(action.id)
                                 AgentHomeAction.StopRun -> agentState.stopCurrentRun()
+                                AgentHomeAction.ResumeInterruptedRun -> agentState.resumeInterruptedRun()
                                 is AgentHomeAction.ImageAttached -> agentState.attachImage(action.uri)
                                 is AgentHomeAction.RemoveImage -> agentState.removePendingImage(action.id)
                                 is AgentHomeAction.FilesAttached -> agentState.attachFiles(action.uris)
@@ -466,6 +467,8 @@ fun AgentAppRoot(
                         conversationLoadFailed = agentState.conversationLoadFailed,
                         historyLoadState = agentState.historyLoadState,
                         isDrawerOpen = conversationPaneOpen,
+                        // 被系统回收中断且进度已保存时才出现「继续」入口。
+                        resumableInterrupted = agentState.resumableInterrupted != null,
                     )
                 }
             }
