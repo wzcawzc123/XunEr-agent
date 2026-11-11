@@ -1475,4 +1475,7 @@
   <string name="memory_search_hits">%1$d matches · %2$d lines</string>
   <string name="memory_search_empty">No matches for “%1$s” · try other keywords</string>
   <string name="memory_search_truncated">Showing first %1$d lines of %2$d matched lines</string>
+  <string name="memory_core_usage">Core memory usage</string>
+  <string name="memory_core_usage_value">%1$s / %2$s · %3$d%%</string>
+  <string name="memory_core_truncated_hint">Over budget: the excess is not injected. Trim the core section or move old entries to the archive.</string>
 </resources>
