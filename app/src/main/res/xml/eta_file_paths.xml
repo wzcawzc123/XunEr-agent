@@ -6,4 +6,5 @@
     <cache-path
         name="shared_images"
         path="shared_images/" />
+    <cache-path name="camera" path="camera/" />
 </paths>

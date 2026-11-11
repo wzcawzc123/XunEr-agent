@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import io.github.mangi.eta.agent.model.AgentModelClient
@@ -219,16 +220,46 @@ internal object AgentModelImageEncoder {
         val decoded = openStream().use { input ->
             BitmapFactory.decodeStream(input, null, options)
         } ?: return null
+        // 解码器不应用 EXIF 方向：竖拍照片原样重编码会躺着，按 EXIF 转正后再按预算编码。
+        val oriented = applyOrientation(decoded, readExifOrientation(openStream))
         return try {
             encodeBitmapWithinBudget(
-                bitmap = decoded,
+                bitmap = oriented,
                 source = source,
                 budget = budget,
                 flattenAlpha = !bounds.mimeType.equals("image/jpeg", ignoreCase = true),
             )
         } finally {
+            if (!oriented.isRecycled && oriented !== decoded) oriented.recycle()
             if (!decoded.isRecycled) decoded.recycle()
         }
+    }
+
+    /** EXIF 方向；读不到或格式不支持时按正常方向处理。 */
+    private fun readExifOrientation(openStream: () -> InputStream): Int = runCatching {
+        openStream().use { input ->
+            ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+    /** 按 EXIF 方向转正位图；已经是正常方向时原样返回同一个对象（不额外拷贝）。 */
+    private fun applyOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        if (orientation == ExifInterface.ORIENTATION_NORMAL || orientation == ExifInterface.ORIENTATION_UNDEFINED) return bitmap
+        val matrix = android.graphics.Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            // 5/7 是带镜像的 90°/270°，与 6/8 区分开，否则会左右颠倒。
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(270f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+            else -> return bitmap
+        }
+        return runCatching {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }.getOrDefault(bitmap)
     }
 
     private fun encodeBitmapWithinBudget(
