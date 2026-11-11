@@ -679,7 +679,7 @@
     <string name="model_err_mandatory_thinking">目前模型強制啟用思考，不能選擇 Off 或停用思考權限</string>
     <string name="model_err_extra_body_invalid">額外請求主體 JSON 無效：%1$s</string>
 
-    <string name="model_err_context_overflow">模型上下文超過容量限制。</string>
+    <string name="model_err_context_overflow">模型上下文超過容量限制。建議先手動壓縮歷史，或新建會話繼續目前任務。</string>
     <string name="model_err_http_400_details">模型請求參數無效（HTTP 400；%1$s），請檢查模型設定。</string>
     <string name="model_err_http_quota">模型介面額度或計費受限（HTTP %1$d），請檢查供應商帳號。</string>
     <string name="model_err_http_400">模型請求參數無效（HTTP 400），請檢查模型設定。</string>
