@@ -16,6 +16,8 @@ internal class AgentModelFailure(
     cause: Throwable? = null,
 ) : IllegalStateException(message, cause) {
     companion object {
+        /** HTTP 标准的 Payment Required；服务商普遍用它表示余额/额度不足。 */
+        private const val PAYMENT_REQUIRED_STATUS = 402
         private val transientStatus = setOf(408, 429, 500, 502, 503, 504, 524, 529)
         private val permanentCodes = setOf(
             "insufficient_quota", "quota_exceeded", "billing_error", "usage_limit_reached",
@@ -40,7 +42,8 @@ internal class AgentModelFailure(
                 false,
                 AppStrings.get(R.string.model_err_context_overflow, "模型上下文超过容量限制。"),
             )
-            val permanent = isPermanent(error, body)
+            // 402 是 HTTP 标准的 Payment Required，服务商普遍用它表示余额/额度不足。
+            val permanent = isPermanent(error, body) || status == PAYMENT_REQUIRED_STATUS
             if (status == 400 && includeParameterDetails && !permanent) {
                 ProviderParameterDiagnostics.describe(error)?.let { details ->
                     return AgentModelFailure(
@@ -58,11 +61,16 @@ internal class AgentModelFailure(
                 code = "HTTP_$status",
                 retryable = status in transientStatus && !permanent,
                 message = if (permanent) {
-                    AppStrings.get(
-                        R.string.model_err_http_quota,
-                        "模型接口额度或计费受限（HTTP %1\$d），请检查服务商账户。",
-                        status,
-                    )
+                    // 402 必须点明「余额」，否则用户只看到状态码无从下手。
+                    if (status == PAYMENT_REQUIRED_STATUS) {
+                        AppStrings.get(R.string.model_err_http_402, "模型接口余额或额度不足（HTTP 402），请到服务商账户充值，或更换可用的 API Key。")
+                    } else {
+                        AppStrings.get(
+                            R.string.model_err_http_quota,
+                            "模型接口额度或计费受限（HTTP %1\$d），请检查服务商账户。",
+                            status,
+                        )
+                    }
                 } else when (status) {
                     400 -> AppStrings.get(R.string.model_err_http_400, "模型请求参数无效（HTTP 400），请检查模型配置。")
                     401 -> AppStrings.get(R.string.model_err_http_401, "模型接口认证失败（HTTP 401），请检查 API Key。")
