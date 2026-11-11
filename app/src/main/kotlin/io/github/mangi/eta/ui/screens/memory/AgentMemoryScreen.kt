@@ -49,7 +49,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.itos.coui.layout.CouiPageDefaults
@@ -57,6 +61,7 @@ import com.itos.coui.layout.Divider
 import com.itos.coui.layout.Group
 import com.itos.coui.scroll.rememberCouiOverscrollEffect
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.memory.AgentMemorySearch
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.MiuixDialogActions
@@ -85,6 +90,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -103,6 +109,8 @@ internal fun AgentMemoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     // 记忆 v2 写前快照：给一条显式回滚入口，模型改坏记忆时不必靠整机备份。
     var showHistoryDialog by remember { mutableStateOf(false) }
+    // 搜索是纯展示态（不落盘、不影响草稿），留在页面内即可，不必经 Store/Action 绕一圈。
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable {
         mutableStateOf(
             if (!state.isLoading && state.savedContent.isBlank()) MemoryViewMode.Edit else MemoryViewMode.Preview,
@@ -154,6 +162,15 @@ internal fun AgentMemoryScreen(
                     MemoryDocumentCard(
                         state = state,
                         mode = currentMode,
+                        searchQuery = searchQuery,
+                        onSearchChange = { query ->
+                            searchQuery = query
+                            // 编辑区是输入框、没法过滤正文：输入搜索词时自动切预览看命中，
+                            // 否则搜索在编辑模式下是死区（草稿保留，可切回继续编辑）。
+                            if (query.isNotBlank() && currentMode == MemoryViewMode.Edit) {
+                                mode = MemoryViewMode.Preview
+                            }
+                        },
                         onModeChange = { mode = it },
                         onDraftChange = { onAction(AgentMemoryAction.DraftChanged(it)) },
                         modifier = Modifier
@@ -211,6 +228,15 @@ internal fun AgentMemoryScreen(
                     MemoryDocumentCard(
                         state = state,
                         mode = currentMode,
+                        searchQuery = searchQuery,
+                        onSearchChange = { query ->
+                            searchQuery = query
+                            // 编辑区是输入框、没法过滤正文：输入搜索词时自动切预览看命中，
+                            // 否则搜索在编辑模式下是死区（草稿保留，可切回继续编辑）。
+                            if (query.isNotBlank() && currentMode == MemoryViewMode.Edit) {
+                                mode = MemoryViewMode.Preview
+                            }
+                        },
                         onModeChange = { mode = it },
                         onDraftChange = { onAction(AgentMemoryAction.DraftChanged(it)) },
                         modifier = Modifier
@@ -418,6 +444,8 @@ private fun MemorySettingsGroup(
 private fun MemoryDocumentCard(
     state: AgentMemoryUiState,
     mode: MemoryViewMode,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
     onModeChange: (MemoryViewMode) -> Unit,
     onDraftChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -469,6 +497,10 @@ private fun MemoryDocumentCard(
                     .background(colors.dividerLine),
             )
         }
+        // 搜索只在预览态出现：编辑区是输入框，过滤正文会把正在编辑的内容「藏起来」。
+        if (mode == MemoryViewMode.Preview && !state.isLoading) {
+            MemorySearchField(query = searchQuery, onQueryChange = onSearchChange)
+        }
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -478,6 +510,7 @@ private fun MemoryDocumentCard(
                     when (current) {
                         MemoryViewMode.Preview -> MemoryPreview(
                             content = state.draft,
+                            query = searchQuery,
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(
@@ -511,8 +544,111 @@ private fun MemoryDocumentCard(
     }
 }
 
+/**
+ * 记忆搜索框。
+ */
 @Composable
-private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
+private fun MemorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        label = stringResource(R.string.memory_search_label),
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * 搜索结果：纯文本逐行渲染，不走 Markdown。
+ *
+ * 命中行脱离上下文后，标题/列表/代码块的结构已被切断，交给 Markdown 渲染可能得到
+ * 与原文完全不同的结果；高亮也不必往原文插星号（那样会破坏语法）。行号还能让用户
+ * 切到编辑后自己定位。
+ */
+@Composable
+private fun MemorySearchResults(content: String, query: String) {
+    val result = remember(content, query) { AgentMemorySearch.search(content, query) }
+    if (result.isEmpty) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.memory_search_empty, query),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        return
+    }
+    val scheme = MiuixTheme.colorScheme
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.memory_search_hits, result.total, result.matchedLines),
+            style = MiuixTheme.textStyles.footnote2,
+            color = scheme.onSurfaceVariantSummary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        result.hits.forEach { hit ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text(
+                    text = hit.line.toString(),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = scheme.onSurfaceVariantSummary,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(38.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = highlightHit(hit, scheme.primary),
+                    style = MiuixTheme.textStyles.body2,
+                    color = scheme.onSurface,
+                )
+            }
+        }
+        if (result.truncated) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.memory_search_truncated, result.hits.size, result.matchedLines),
+                style = MiuixTheme.textStyles.footnote2,
+                color = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** 命中片段加粗着色（区间由 AgentMemorySearch 算好，这里只负责拼样式）。 */
+private fun highlightHit(hit: AgentMemorySearch.Hit, color: androidx.compose.ui.graphics.Color) =
+    buildAnnotatedString {
+        var cursor = 0
+        for (range in hit.ranges) {
+            if (range.first > cursor) append(hit.text, cursor, range.first)
+            withStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold)) {
+                append(hit.text, range.first, range.last + 1)
+            }
+            cursor = range.last + 1
+        }
+        if (cursor < hit.text.length) append(hit.text, cursor, hit.text.length)
+    }
+
+@Composable
+private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
     if (content.isBlank()) {
         Column(
             modifier = Modifier
@@ -535,6 +671,12 @@ private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
+        return
+    }
+    // 搜索优先：命中行自成一套渲染，不参与下面的全文虚拟化。
+    val trimmedQuery = query.trim()
+    if (trimmedQuery.isNotEmpty()) {
+        MemorySearchResults(content = content, query = trimmedQuery)
         return
     }
     val overscroll = if (LocalUiStyle.current == AppearanceUiStyle.COUI) {
