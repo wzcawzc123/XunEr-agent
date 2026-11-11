@@ -1374,4 +1374,5 @@
   <string name="settings_keep_screen_on">執行期間保持螢幕恆亮</string>
   <string name="assistant_role_status_unset">未設定</string>
   <string name="assistant_role_status_other">其他應用程式</string>
+  <string name="attachment_camera">拍照</string>
 </resources>
