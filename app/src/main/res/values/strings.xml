@@ -1556,4 +1556,5 @@
   <string name="scheduled_notification_gui_ready_title">Ready to run: %1$s</string>
   <string name="scheduled_action_run_now">Run now</string>
   <string name="scheduled_action_stop">Stop</string>
+  <string name="attachment_camera">Take photo</string>
 </resources>

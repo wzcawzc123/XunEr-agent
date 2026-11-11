@@ -24,31 +24,31 @@ internal class AgentImageTools(
         val sourceKind = when {
             source.startsWith("content://") -> ImageSourceKind.ContentUri
             source.startsWith("/") && !source.contains('\u0000') -> ImageSourceKind.File
-            else -> return sensitive(error("IMAGE_PATH_DENIED", "图片路径必须是绝对路径、file URI 或已授权的 content URI"))
+            else -> return result(error("IMAGE_PATH_DENIED", "图片路径必须是绝对路径、file URI 或已授权的 content URI"))
         }
         val temporaryFile = runCatching {
             File.createTempFile("eta-read-image-", ".img", imageCacheDirectory())
         }.getOrElse {
-            return sensitive(error("IMAGE_TEMPORARY_FILE_FAILED", "无法创建图片临时文件"))
+            return result(error("IMAGE_TEMPORARY_FILE_FAILED", "无法创建图片临时文件"))
         }
         return try {
             val staged = copyAsApp(source, sourceKind, temporaryFile)
             if (!staged) {
                 if (!rootAvailable()) {
-                    return sensitive(error("IMAGE_ACCESS_DENIED", "Eta 无法读取此图片；请先通过文件选择器导入或授予读取权限"))
+                    return result(error("IMAGE_ACCESS_DENIED", "Eta 无法读取此图片；请先通过文件选择器导入或授予读取权限"))
                 }
                 val copyResult = root.execute(
                     imageCopyCommand(source, sourceKind, temporaryFile),
                     timeoutMillis = READ_TIMEOUT_MS,
                     maxOutputBytes = 8 * 1024,
                 )
-                if (!copyResult.ok) return sensitive(copyFailure(copyResult))
+                if (!copyResult.ok) return result(copyFailure(copyResult))
             }
             val image = AgentImageCodec.fromToolFile(
                 file = temporaryFile,
                 source = "tool_read_image",
-            ) ?: return sensitive(error("IMAGE_UNSUPPORTED", "文件不是可识别的图片"))
-            sensitive(
+            ) ?: return result(error("IMAGE_UNSUPPORTED", "文件不是可识别的图片"))
+            result(
                 content = JSONObject()
                     .put("ok", true)
                     .put("tool", "read_image")
@@ -58,7 +58,7 @@ internal class AgentImageTools(
                 images = listOf(image),
             )
         } catch (_: BoundedFileCopy.TooLargeException) {
-            sensitive(error("IMAGE_TOO_LARGE", "图片超过大小限制"))
+            result(error("IMAGE_TOO_LARGE", "图片超过大小限制"))
         } finally {
             temporaryFile.delete()
         }
@@ -117,10 +117,11 @@ internal class AgentImageTools(
     private fun error(code: String, message: String): String =
         JSONObject().put("ok", false).put("code", code).put("message", message).toString()
 
-    private fun sensitive(
+    /** read_image 的参数（图片路径）与结果不视为敏感：脱敏会让下一轮模型拿到占位符无法归因，功能优先于隐私。 */
+    private fun result(
         content: String,
         images: List<AgentModelClient.ModelImage> = emptyList(),
-    ) = AgentModelClient.ToolResult(content = content, images = images, sensitive = true)
+    ) = AgentModelClient.ToolResult(content = content, images = images, sensitive = false)
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
