@@ -90,6 +90,28 @@ class AgentPromptBuilderTest {
         }
     }
 
+    /**
+     * 两条真机驱动的约束，都属于「模型在不掌握事实时编造」：
+     * 1. 断言上下文用量（界面 36.9%，模型称 99%）——系统提示不注入用量，它没有数据来源
+     * 2. 在 Android 环境里用 Linux 路径试探（terminal 失败的高频来源）
+     * 提示词重构时容易顺手删掉，所以钉住。
+     */
+    @Test
+    fun deviceRulesForbidUsageGuessAndLinuxPathProbing() {
+        val messages = AgentPromptBuilder.buildSystemMessages(
+            config = modelConfig("", terminalTools = true, browserTools = false),
+            skillContext = SkillContext.EMPTY,
+            memoryContext = AgentMemoryContext.DISABLED,
+            rootAvailable = false,
+        )
+        val device = messages.systemContents().single { it.contains("当前配置的模型：") }
+        assertTrue(device.contains("你无法感知当前上下文的占用百分比"))
+        assertTrue(device.contains("应以界面显示的用量为准"))
+        assertTrue(device.contains("先确认 environment 与工作目录"))
+        assertTrue(device.contains("Android 环境没有 /workspace"))
+        assertTrue(device.contains("不要反复换命令试探"))
+    }
+
     @Test
     fun messagesKeepSystemHistoryAndCurrentImageInputInStableOrder() {
         val image = AgentModelClient.ModelImage(
