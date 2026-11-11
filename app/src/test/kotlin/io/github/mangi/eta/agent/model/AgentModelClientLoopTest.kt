@@ -893,6 +893,82 @@ class AgentModelClientLoopTest {
         assertEquals(1, events.filterIsInstance<AgentEvent.ToolStarted>().size)
     }
 
+    /**
+     * 只产出思考、没有正文也没有工具调用的回合，等于什么都没做。
+     * 直接判失败会让此前的工具工作白做，所以先用一轮纠偏把它拉回正文。
+     */
+    @Test
+    fun emptyRoundIsNudgedBeforeProducingText() {
+        val requests = mutableListOf<String>()
+        val provider = object : AgentProviderClient by ScriptedProvider(emptyList()) {
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                requests += request.messages.toString()
+                onEvent(ProviderEvent.RequestStarted)
+                return when (requests.size) {
+                    1 -> ProviderResponse(assistant(finishReason = "stop", reasoning = "只想没写"))
+                    2 -> ProviderResponse(assistant(content = "补上的正文", finishReason = "stop"))
+                    else -> error("纠偏后不应再有第三次请求")
+                }
+            }
+        }
+        val messages = JSONArray().put(AgentConversationCodec.userTextMessage("开始"))
+        val loop = AgentLoop(
+            config = modelConfig(), messages = messages,
+            tools = AgentToolCatalog.build(terminalTools = false, browserTools = false),
+            provider = provider,
+            toolExecutor = AgentModelClient.ToolExecutor { AgentModelClient.ToolResult("""{"ok":true}""") },
+            runController = AgentRunController(), traceFormatter = AgentTraceFormatter(),
+            onEvent = {}, modelRetry = AgentModelRetry { _, _ -> },
+            sessionId = "conversation-empty-round",
+        )
+        val result = loop.run()
+        assertEquals("补上的正文", result.content)
+        assertEquals(2, requests.size)
+        assertTrue(requests[1].contains("上一轮只产生了思考内容"))
+        // 纠偏话术只随请求发出，不写回持久历史（否则会污染后续上下文与缓存前缀）。
+        assertFalse(messages.toString().contains("上一轮只产生了思考内容"))
+    }
+
+    /**
+     * 纠偏预算用尽后按「运行完成但没有返回文字」收尾：不抛异常，
+     * 让它退化成一次空回答，而不是让整次运行失败、丢掉已完成的工具工作。
+     */
+    @Test
+    fun emptyRoundsStopAfterNudgeBudgetWithoutFailingTheRun() {
+        val requests = mutableListOf<String>()
+        val provider = object : AgentProviderClient by ScriptedProvider(emptyList()) {
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                requests += request.messages.toString()
+                onEvent(ProviderEvent.RequestStarted)
+                return ProviderResponse(assistant(finishReason = "stop", reasoning = "只想没写"))
+            }
+        }
+        val messages = JSONArray().put(AgentConversationCodec.userTextMessage("开始"))
+        val events = mutableListOf<AgentEvent>()
+        val loop = AgentLoop(
+            config = modelConfig(), messages = messages,
+            tools = AgentToolCatalog.build(terminalTools = false, browserTools = false),
+            provider = provider,
+            toolExecutor = AgentModelClient.ToolExecutor { AgentModelClient.ToolResult("""{"ok":true}""") },
+            runController = AgentRunController(), traceFormatter = AgentTraceFormatter(),
+            onEvent = events::add, modelRetry = AgentModelRetry { _, _ -> },
+            sessionId = "conversation-empty-round-budget",
+        )
+        val result = loop.run()
+        // 1 次原始 + 2 次纠偏
+        assertEquals(3, requests.size)
+        assertEquals("", result.content)
+        assertEquals(0, events.filterIsInstance<AgentEvent.RunFinished>().single().contentChars)
+    }
+
     private class ScriptedProvider(
         private val responses: List<(ProviderRequest, AgentRunController) -> JSONObject>,
     ) : AgentProviderClient {
