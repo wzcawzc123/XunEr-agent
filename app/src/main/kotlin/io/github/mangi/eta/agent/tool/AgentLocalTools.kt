@@ -20,6 +20,8 @@ import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.device.LocalNetworkPermission
 import io.github.mangi.eta.agent.web.AgentWebTools
 import io.github.mangi.eta.agent.web.WebHttpTransport
+import io.github.mangi.eta.agent.model.AgentToolCallValidator
+import io.github.mangi.eta.agent.model.AgentToolCatalog
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
 import io.github.mangi.eta.agent.model.AgentTerminalToolCatalog
@@ -134,6 +136,30 @@ internal class AgentLocalTools(
     @Volatile
     private var activeDisplayId: Int = Display.DEFAULT_DISPLAY
     private val browserSessionRef = lazy { browserSession ?: AgentBrowserSession() }
+    /** schema 无关的参数体检器：畸形 JSON / 脱敏重放 / XML 粘包残渣的运行时拦截。 */
+    private val argumentGuard = AgentToolCallValidator(JSONArray())
+
+    /**
+     * schema 级参数校验器：把目录里声明的 minLength / 枚举 / additionalProperties 约束
+     * 在运行时真正执行。schema 用全量能力目录构建（参数形状与能力开关无关），
+     * 能力门控由各工具入口单独把守。
+     */
+    private val schemaGuard: AgentToolCallValidator by lazy {
+        AgentToolCallValidator(
+            AgentToolCatalog.build(
+                terminalTools = true,
+                browserTools = true,
+                deviceDirectTools = true,
+                deviceSensitiveReadTools = true,
+                deviceSensitiveActionTools = true,
+                skillGitHubDiscovery = true,
+                skillGitHubInstall = true,
+                memoryTools = true,
+                memoryWritable = true,
+                localWebSearch = true,
+            ),
+        )
+    }
     private val deviceController = RootShellDeviceController(logger, screenshotExcludedPackages, rootAvailable)
     private val rootCommandExecutor = BoundedRootCommandExecutor(logger, rootAvailable = rootAvailable)
     private val structuredDeviceTools = AgentStructuredDeviceTools(
@@ -221,8 +247,18 @@ internal class AgentLocalTools(
                     sensitive = AgentSensitiveToolPolicy.isSensitive(toolCall.name),
                 )
             }
+            // 参数体检（无 schema）：畸形 JSON / 脱敏重放 / XML 粘包残渣，给出可执行引导。
+            // 顺序在权限门禁之前：参数畸形时连「该不该执行」都无从判断，先给出可执行的修正指引。
+            argumentGuard.validateArguments(toolCall)?.let { guidance ->
+                return@runCatching textResult(errorResult("INVALID_ARGUMENT", guidance))
+            }
             deviceToolPermissionError(toolCall.name)?.let { return@runCatching it }
             memoryToolPermissionError(toolCall.name)?.let { return@runCatching it }
+            familyToolPermissionError(toolCall.name)?.let { return@runCatching it }
+            // schema 级校验（只校验已声明工具；legacy 兼容名与未知名交给派发处理）。
+            schemaGuard.validateDeclared(toolCall)?.let { guidance ->
+                return@runCatching textResult(errorResult("INVALID_ARGUMENT", guidance))
+            }
             if (guiGeneration != null && publishedObservation.get().generation != guiGeneration) {
                 publishedObservation.set(PublishedObservation())
                 if (AgentToolRequirements.requiresFreshObservation(toolCall.name)) {
@@ -409,6 +445,24 @@ internal class AgentLocalTools(
         )
     }
 
+    /**
+     * 终端/浏览器工具族的权限门禁（与派发分支内的检查同源）：
+     * 让「未启用」优先于 schema 参数校验报错——权限错误比「参数不合法」更可执行，
+     * 派发分支内的检查继续兜底（executeLocal 与派发各查一次，幂等）。
+     */
+    private fun familyToolPermissionError(toolName: String): AgentModelClient.ToolResult? = when {
+        toolName == "read_image" ||
+            toolName in AgentTerminalToolCatalog.names ||
+            toolName in AgentFileToolCatalog.names ->
+            if (!terminalToolsEnabled()) {
+                textResult(errorResult("TERMINAL_TOOLS_DISABLED", "请先启用终端/文件工具"))
+            } else null
+        toolName == "web_search" || toolName == "fetch_url" ->
+            if (!browserToolsEnabled()) {
+                textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页搜索、读取与浏览器工具"))
+            } else null
+        else -> null
+    }
 
     private fun memoryGet(args: JSONObject): String = try {
         val maxChars = args.optInt("max_chars", 12_000)
