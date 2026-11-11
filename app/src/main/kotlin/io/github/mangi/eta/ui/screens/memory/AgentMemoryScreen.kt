@@ -46,7 +46,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
@@ -70,6 +74,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.glass.GlassDialog
@@ -94,6 +99,7 @@ internal fun AgentMemoryScreen(
     var showHistoryDialog by remember { mutableStateOf(false) }
     var retainedNotice by remember { mutableStateOf(state.notice) }
     if (state.notice != null) retainedNotice = state.notice
+
     var mode by rememberSaveable {
         mutableStateOf(
             if (!state.isLoading && state.savedContent.isBlank()) MemoryViewMode.Edit else MemoryViewMode.Preview,
@@ -301,6 +307,8 @@ private fun MemorySettingsGroup(
 private fun MemoryDocumentCard(
     state: AgentMemoryUiState,
     mode: MemoryViewMode,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
     onModeChange: (MemoryViewMode) -> Unit,
     onDraftChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -356,6 +364,7 @@ private fun MemoryDocumentCard(
                     when (current) {
                         MemoryViewMode.Preview -> MemoryPreview(
                             content = state.draft,
+                            query = searchQuery,
                             onStartEditing = { onModeChange(MemoryViewMode.Edit) },
                         )
                         MemoryViewMode.Edit -> MemoryEditor(
@@ -370,8 +379,111 @@ private fun MemoryDocumentCard(
     }
 }
 
+/**
+ * 记忆搜索框。
+ */
 @Composable
-private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
+private fun MemorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        label = stringResource(R.string.memory_search_label),
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * 搜索结果：纯文本逐行渲染，不走 Markdown。
+ *
+ * 命中行脱离上下文后，标题/列表/代码块的结构已被切断，交给 Markdown 渲染可能得到
+ * 与原文完全不同的结果；高亮也不必往原文插星号（那样会破坏语法）。行号还能让用户
+ * 切到编辑后自己定位。
+ */
+@Composable
+private fun MemorySearchResults(content: String, query: String) {
+    val result = remember(content, query) { AgentMemorySearch.search(content, query) }
+    if (result.isEmpty) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.memory_search_empty, query),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        return
+    }
+    val scheme = MiuixTheme.colorScheme
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.memory_search_hits, result.total, result.matchedLines),
+            style = MiuixTheme.textStyles.footnote2,
+            color = scheme.onSurfaceVariantSummary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        result.hits.forEach { hit ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text(
+                    text = hit.line.toString(),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = scheme.onSurfaceVariantSummary,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(38.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = highlightHit(hit, scheme.primary),
+                    style = MiuixTheme.textStyles.body2,
+                    color = scheme.onSurface,
+                )
+            }
+        }
+        if (result.truncated) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.memory_search_truncated, result.hits.size, result.matchedLines),
+                style = MiuixTheme.textStyles.footnote2,
+                color = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** 命中片段加粗着色（区间由 AgentMemorySearch 算好，这里只负责拼样式）。 */
+private fun highlightHit(hit: AgentMemorySearch.Hit, color: androidx.compose.ui.graphics.Color) =
+    buildAnnotatedString {
+        var cursor = 0
+        for (range in hit.ranges) {
+            if (range.first > cursor) append(hit.text, cursor, range.first)
+            withStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold)) {
+                append(hit.text, range.first, range.last + 1)
+            }
+            cursor = range.last + 1
+        }
+        if (cursor < hit.text.length) append(hit.text, cursor, hit.text.length)
+    }
+
+@Composable
+private fun MemoryPreview(content: String, query: String, onStartEditing: () -> Unit) {
     if (content.isBlank()) {
         Column(
             modifier = Modifier
@@ -396,6 +508,7 @@ private fun MemoryPreview(content: String, onStartEditing: () -> Unit) {
         }
         return
     }
+
     LazyStaticMarkdown(
         content = content,
         tone = MarkdownTone.Answer,
