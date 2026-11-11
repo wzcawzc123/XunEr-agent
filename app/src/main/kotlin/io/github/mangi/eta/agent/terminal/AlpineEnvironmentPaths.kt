@@ -47,23 +47,4 @@ internal object AlpineEnvironmentPaths {
         }.getOrDefault(false)
     }
 
-    /** Androguard 安装完成标记文件（内含 revision=N）。 */
-    const val ANDROGUARD_MARKER = ".eta-androguard-ready"
-    const val ANDROGUARD_REVISION = 1
-
-    /** Androguard 就绪：基础工具集已就绪 + 版本标记匹配。 */
-    fun androguardReady(rootfsPath: String?): Boolean {
-        if (!commonToolsReady(rootfsPath)) return false
-        val rootfs = File(rootfsPath ?: return false)
-        val marker = File(rootfs, ANDROGUARD_MARKER)
-        if (!marker.isFile) return false
-        return runCatching {
-            marker.useLines { lines ->
-                lines.any { line -> line.trim() == "revision=$ANDROGUARD_REVISION" }
-            }
-        }.getOrDefault(false)
-    }
-
-    /** Androguard venv python（chroot 内路径）。 */
-    fun androguardPythonPath(): String = "/opt/eta/uv-tools/androguard/bin/python"
 }

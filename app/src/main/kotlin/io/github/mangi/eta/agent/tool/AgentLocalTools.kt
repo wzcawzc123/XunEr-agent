@@ -339,7 +339,6 @@ internal class AgentLocalTools(
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
-                "androguard_analyze" -> textResult(terminalTool { androguardAnalyze(args) })
                 in AgentTerminalToolCatalog.names -> textResult(terminalTool {
                     if (toolCall.name == "terminal" && args.optString("action").equals("check_root", ignoreCase = true)) checkRoot()
                     else terminalController.executeTool(toolCall.name, args)
@@ -453,7 +452,6 @@ internal class AgentLocalTools(
      */
     private fun familyToolPermissionError(toolName: String): AgentModelClient.ToolResult? = when {
         toolName == "read_image" ||
-            toolName == "androguard_analyze" ||
             toolName in AgentTerminalToolCatalog.names ||
             toolName in AgentFileToolCatalog.names ->
             if (!terminalToolsEnabled()) {
@@ -464,56 +462,6 @@ internal class AgentLocalTools(
                 textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页搜索、读取与浏览器工具"))
             } else null
         else -> null
-    }
-
-    /**
-     * androguard_analyze：Linux 工具环境里的 APK 静态分析。
-     *
-     * axml / apkid / sign 走 CLI 子命令（白名单，避免任意子命令注入）；
-     * dex_strings 走 venv python 内联脚本（不是 CLI 子命令）。
-     * 命令构造在 [AndroguardCommand]（纯逻辑、可单测），这里只做就绪检查与执行。
-     */
-    private fun androguardAnalyze(args: JSONObject): String {
-        val apkPath = args.optString("apk_path")
-        if (apkPath.isBlank()) return errorResult("MISSING_APK", "缺少 apk_path 参数")
-        val operation = args.optString("operation", "axml")
-        val extraArgs = args.optString("args")
-        val rootfsPath = terminalExecutionContext.linuxRootfsPath
-        if (!AlpineEnvironmentPaths.androguardReady(rootfsPath)) {
-            return errorResult(
-                "ANDROGUARD_NOT_READY",
-                "Linux 工具环境未安装 Androguard，请先在工具环境页安装 Androguard 工具后再调用。",
-            )
-        }
-        val command = when {
-            AndroguardCommand.isDexScan(operation) ->
-                AndroguardCommand.buildDexScan(
-                    apkPath,
-                    Regex("limit=(\\d+)").find(extraArgs)?.groupValues?.get(1)?.toIntOrNull() ?: 50,
-                )
-            // 只看签名时补 -a（androguard 默认不打印全部证书信息）。
-            operation.trim().lowercase() == "sign" && extraArgs.isBlank() ->
-                AndroguardCommand.build("sign", apkPath, "-a")
-            else -> AndroguardCommand.build(operation, apkPath, extraArgs)
-        }
-        val result = runBlocking {
-            InstallerShellRunner.run(
-                command = command,
-                timeoutSeconds = 300L,
-                environment = terminalExecutionContext.linuxEnvironment,
-                linuxRootfsPath = rootfsPath,
-            )
-        }
-        val output = result.output.ifBlank { "(no output)" }
-        if (result.exitCode != 0) {
-            return errorResult("ANDROGUARD_FAILED", "exit=${result.exitCode}:\n${output.take(2000)}")
-        }
-        return JSONObject()
-            .put("ok", true)
-            .put("operation", operation)
-            .put("exit_code", result.exitCode)
-            .put("output", output.take(4000))
-            .toString()
     }
 
     private fun memoryGet(args: JSONObject): String = try {
