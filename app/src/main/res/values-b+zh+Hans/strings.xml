@@ -1504,4 +1504,12 @@
   <string name="memory_core_usage">核心区水位</string>
   <string name="memory_core_usage_value">%1$s / %2$s · %3$d%%</string>
   <string name="memory_core_truncated_hint">已超预算：超出部分不会被注入，建议精简核心区或把旧条目移到归档区</string>
+  <string name="context_history_title">上下文压缩历史</string>
+  <string name="context_history_empty">还没有发生压缩 · 这段对话仍在窗口内</string>
+  <string name="context_history_count">共 %1$d 次压缩</string>
+  <string name="context_history_ordinal">第 %1$d 次压缩</string>
+  <string name="context_history_coverage">覆盖 %1$d 轮</string>
+  <string name="context_history_expand">展开全文</string>
+  <string name="context_history_collapse">收起</string>
+  <string name="context_history_open">查看压缩历史</string>
 </resources>
