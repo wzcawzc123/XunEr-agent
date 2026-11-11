@@ -1390,4 +1390,12 @@
   <string name="memory_core_usage">核心區水位</string>
   <string name="memory_core_usage_value">%1$s / %2$s · %3$d%%</string>
   <string name="memory_core_truncated_hint">已超預算：超出部分不會被注入，建議精簡核心區或把舊條目移到封存區</string>
+  <string name="context_history_title">上下文壓縮歷史</string>
+  <string name="context_history_empty">還沒有發生壓縮 · 這段對話仍在視窗內</string>
+  <string name="context_history_count">共 %1$d 次壓縮</string>
+  <string name="context_history_ordinal">第 %1$d 次壓縮</string>
+  <string name="context_history_coverage">覆蓋 %1$d 輪</string>
+  <string name="context_history_expand">展開全文</string>
+  <string name="context_history_collapse">收合</string>
+  <string name="context_history_open">查看壓縮歷史</string>
 </resources>
