@@ -99,7 +99,13 @@ internal data class RoleplayRunContext(
             appendLine("需要持久更新剧情时调用 character_memory_write；按需读取详情或刷新 revision 时调用 character_memory_get。")
             appendLine("character_memory_revision=${memory.revision}")
             if (memory.coreContent.isNotBlank()) appendLine("<character_memory_core>\n${memory.coreContent}\n</character_memory_core>")
-            if (memory.coreTruncated) appendLine("[剧情核心记忆超出预算，按需读取其余内容]")
+            if (memory.coreTruncated) {
+                appendLine(
+                    "[剧情核心记忆已注入 ${memory.coreInjectedLines}/${memory.coreTotalLines} 行，" +
+                        (memory.coreNextLine?.let { "需要时用 character_memory_get(start_line=$it) 从第 $it 行继续读" }
+                            ?: "其余内容按需读取") + "]",
+                )
+            }
             if (memory.headingIndex.isNotBlank()) appendLine("<character_memory_headings>\n${memory.headingIndex}\n</character_memory_headings>")
         }
     }.trim()
