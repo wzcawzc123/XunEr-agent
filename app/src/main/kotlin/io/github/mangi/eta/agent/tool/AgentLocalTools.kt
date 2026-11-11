@@ -26,6 +26,15 @@ import io.github.mangi.eta.agent.skill.SkillIndexService
 import io.github.mangi.eta.agent.skill.SkillLoader
 import io.github.mangi.eta.agent.skill.SkillPackageInstaller
 import io.github.mangi.eta.agent.skill.SkillResourceReader
+import io.github.mangi.eta.agent.skill.SkillResourceReadResult
+import io.github.mangi.eta.agent.skill.GitHubSkillRepositoryParser
+import io.github.mangi.eta.agent.skill.GitHubSkillInspection
+import io.github.mangi.eta.agent.skill.GitHubSkillRepository
+import io.github.mangi.eta.agent.skill.GitHubSkillSourceException
+import io.github.mangi.eta.agent.skill.PublicGitHubSkillSource
+import io.github.mangi.eta.agent.terminal.linux.AlpineEnvironmentPaths
+import io.github.mangi.eta.agent.terminal.linux.InstallerShellRunner
+import io.github.mangi.eta.agent.terminal.TerminalExecutionContext
 import io.github.mangi.eta.agent.terminal.DetachedTaskSupervisor
 import io.github.mangi.eta.agent.terminal.RootShellTerminalController
 import io.github.mangi.eta.agent.terminal.TerminalExecutionContext
@@ -423,6 +432,7 @@ internal class AgentLocalTools(
             sensitive = true,
         )
     }
+
 
     private fun memoryGet(args: JSONObject): String = try {
         val maxChars = args.optInt("max_chars", 12_000)

@@ -211,6 +211,8 @@
             </intent-filter>
         </receiver>
 
+        <!-- 拍照入口：TakePicture() 需要可写 Uri；与其他 provider 共用同一 authority，
+             统一由 EtaFileProvider（FileProvider 子类）发出，路径见 eta_file_paths.xml。 -->
         <provider
             android:name=".agent.imagegen.EtaFileProvider"
             android:authorities="${applicationId}.fileprovider"

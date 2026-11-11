@@ -1537,4 +1537,5 @@
   <string name="scheduled_notification_gui_ready_title">定时任务就绪：%1$s</string>
   <string name="scheduled_action_run_now">立即试跑</string>
   <string name="scheduled_action_stop">停止运行</string>
+  <string name="attachment_camera">拍照</string>
 </resources>

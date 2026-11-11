@@ -642,10 +642,16 @@ internal class AgentLoop(
         if (provider.capabilities.toolResultImages) {
             pendingToolResultImages = imageOutcomes.associate { it.call.id to it.result.images }
         } else {
-            val toolNames = imageOutcomes.map { it.call.name }.distinct().joinToString(", ")
+            val images = imageOutcomes.flatMap { outcome -> outcome.result.images }
+            val toolNames = imageOutcomes
+                .map { outcome -> outcome.call.name }
+                .distinct()
+                .joinToString(", ")
             pendingToolImageMessage = AgentConversationCodec.userMessage(
-                text = "Latest observation image(s) returned by tool(s): $toolNames.",
-                images = imageOutcomes.flatMap { it.result.images },
+                text = "图片观察：以下 ${images.size} 张图片是工具 $toolNames 刚刚实际返回的结果，" +
+                    "是本次对话中最新的图片内容。用户之前发送的附件图片不是工具返回，不要把它们当成工具结果。" +
+                    "若与历史图片或用户附件混淆，以本条消息内的图片为准。",
+                images = images,
             ).put("_eta_observation", true).also(messages::put)
         }
 

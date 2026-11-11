@@ -1,6 +1,10 @@
 package io.github.mangi.eta.ui.components.chat
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,6 +186,9 @@ internal fun rememberInputBarPopupLayout(
     }
 }
 
+/** 相册多选上限：一次 9 张封顶，防止误选海量图片拖垮编码与发送。 */
+internal val maxMediaItems: Int = 9
+
 @Composable
 internal fun AgentAttachmentPickerButton(
     glassBackdrop: Backdrop?,
@@ -200,8 +207,17 @@ internal fun AgentAttachmentPickerButton(
     var buttonBottomPx by remember { mutableFloatStateOf(0f) }
     var measuredPopupHeightPx by remember { mutableFloatStateOf(0f) }
     val popupAnchor = rememberGlassPopupAnchor()
+
+    // 拍照：先生成缓存文件的 content Uri 交给系统相机，成功后作为图片附件回填。
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+    ) { success ->
+        if (success) cameraUri?.let { onAttachImage(it.toString()) }
+        cameraUri = null
+    }
     val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxMediaItems),
     ) { uris ->
         uris.forEach { uri ->
             runCatching {
@@ -225,6 +241,7 @@ internal fun AgentAttachmentPickerButton(
     }
 
     val options = listOf(
+        stringResource(R.string.attachment_camera),
         stringResource(R.string.attachment_image),
         stringResource(R.string.attachment_file),
         stringResource(R.string.attachment_folder),
@@ -232,12 +249,20 @@ internal fun AgentAttachmentPickerButton(
     )
     val onSelectOption: (Int) -> Unit = { index ->
         when (index) {
-            0 -> photoPicker.launch(
+            0 -> {
+                // 拍照：先生成缓存文件的 content Uri 交给系统相机，成功后作为图片附件回填。
+                val uri = createCameraImageUri(context)
+                if (uri != null) {
+                    cameraUri = uri
+                    cameraLauncher.launch(uri)
+                }
+            }
+            1 -> photoPicker.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
             )
-            1 -> filePicker.launch(arrayOf("*/*"))
-            2 -> folderPicker.launch(null)
-            3 -> {
+            2 -> filePicker.launch(arrayOf("*/*"))
+            3 -> folderPicker.launch(null)
+            4 -> {
                 pathInputState.clearText()
                 showPathDialog = true
             }
@@ -556,3 +581,10 @@ internal class InputPopupPositionProvider(
 
     override fun getMargins(): PaddingValues = PaddingValues(vertical = ChatInputPopupMargin)
 }
+
+/** 拍照输出的缓存 Uri。失败返回 null，调用方保持静默即可（用户可改用「图片」入口）。 */
+private fun createCameraImageUri(context: Context): Uri? = runCatching {
+    val dir = File(context.cacheDir, "camera").apply { if (!exists()) mkdirs() }
+    val file = File(dir, "cam_" + System.currentTimeMillis() + ".jpg")
+    FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+}.getOrNull()
