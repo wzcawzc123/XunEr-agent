@@ -39,8 +39,10 @@ android {
         minSdk = 33
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026111302
-        versionName = "3.4.4"
+        // 5.1.1：换上游 3.4.4 基座（DeepSeek 语音 / COUI 侧边栏 / 依赖升级）。
+        // 上游 3.4.4 占用了 2026111302（与 5.1.0 同号），本版取 11-14 的 01。
+        versionCode = 2026111401
+        versionName = "5.1.1"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
