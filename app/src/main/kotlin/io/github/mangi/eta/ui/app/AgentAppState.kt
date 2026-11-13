@@ -806,7 +806,10 @@ internal class AgentAppState(
         entryLabel: String,
     ): Boolean {
         if (prefix.isEmpty()) return false
-        val guardWindow = AgentModelClient.loadConfig().contextWindow ?: GUARD_FALLBACK_WINDOW_TOKENS
+        // 会话绑定的模型窗口优先：run 用的是 effectiveModelId，不是全局选中的那个。
+        val boundWindow = providers.enabledModel(homeState.effectiveModelId)
+            ?.model?.let { it.contextWindowOverride ?: it.contextWindow }
+        val guardWindow = guardContextWindow(boundWindow, AgentModelClient.loadConfig().contextWindow)
         val estimate = estimateHistoryTokens(prefix) + TOOL_SCHEMA_RESERVE_TOKENS
         // 阈值留 5% 余量（与硬裁剪 0.95 对齐），避免在窗口边界处发出必败请求。
         if (guardWindow > 0 && estimate >= (guardWindow * 0.95).toInt()) {
@@ -2764,9 +2767,6 @@ internal class AgentAppState(
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif",
         )
 
-        /** 不知道真实窗口时的保守回退值：宁可早拦，也别发出必败请求。 */
-        private const val GUARD_FALLBACK_WINDOW_TOKENS = 128_000
-
         /**
          * 工具 schema 的固定开销预留（token）。
          *
@@ -2846,3 +2846,13 @@ internal fun textTokens(text: String): Int {
     // 向上取整：残留的 1-2 个 ASCII 也按 1 token 计，避免估算系统性偏小。
     return (ascii + 2) / 3 + other
 }
+
+/**
+ * 前缀守卫使用的上下文窗口。会话绑定的模型优先，其次才是全局选中模型。
+ *
+ * 只看 `loadConfig()` 会算错：它读的是全局运行时配置（当前选中的模型），
+ * 而 run 实际用的是会话记住的 `effectiveModelId`。两个模型窗口不同时，
+ * 守卫会误拦合法重发，或者漏放必败请求。
+ */
+internal fun guardContextWindow(bound: Int?, global: Int?): Int =
+    bound?.takeIf { it > 0 } ?: global?.takeIf { it > 0 } ?: 128_000

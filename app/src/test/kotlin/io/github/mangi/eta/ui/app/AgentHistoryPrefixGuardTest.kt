@@ -66,4 +66,19 @@ class AgentHistoryPrefixGuardTest {
             estimateHistoryTokens(listOf(AgentModelClient.ConversationMessage(role = "user"))),
         )
     }
+
+    /**
+     * 窗口取值：会话绑定的模型优先于全局选中模型。
+     *
+     * run 用的是 effectiveModelId，而 loadConfig() 读的是全局运行时配置——
+     * 两者窗口不同时，守卫会误拦或漏拦。
+     */
+    @Test
+    fun guardWindowPrefersConversationModel() {
+        assertEquals(32_000, guardContextWindow(bound = 32_000, global = 200_000))
+        assertEquals(200_000, guardContextWindow(bound = null, global = 200_000))
+        // 非法窗口（0 / 负数）不当作有效值，继续回退
+        assertEquals(200_000, guardContextWindow(bound = 0, global = 200_000))
+        assertEquals(128_000, guardContextWindow(bound = null, global = null))
+    }
 }
