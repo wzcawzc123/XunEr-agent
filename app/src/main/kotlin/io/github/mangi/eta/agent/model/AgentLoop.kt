@@ -296,9 +296,10 @@ internal class AgentLoop(
                     continue
                 }
                 publishTranscript()
-                onEvent(AgentEvent.RunFinished(round = round, contentChars = 0))
+                // 静默返回空正文会让用户以为「点了没反应」；给一句解释，进度仍完整保留。
+                onEvent(AgentEvent.RunFinished(round = round, contentChars = EMPTY_ROUND_FALLBACK.length))
                 return Result(
-                    content = "",
+                    content = EMPTY_ROUND_FALLBACK,
                     reasoningContent = reasoningSnapshot(),
                     sensitiveToolCallIds = sensitiveToolCallIds.toSet(),
                 )
@@ -795,3 +796,13 @@ private const val MAX_EMPTY_ROUND_NUDGES = 2
 private const val EMPTY_ROUND_NUDGE =
     "上一轮只产生了思考内容，既没有正文也没有工具调用。" +
         "请直接输出给用户的答复正文；如果任务还需要继续执行，请给出工具调用。"
+
+/**
+ * 纠偏预算用尽后的收尾正文。
+ *
+ * 不返回空串：空正文在界面上等于「什么都没发生」，用户只能重述需求；
+ * 而此前跑过的工具与结果其实都还在会话里。这里明确说明现状与下一步可做什么。
+ */
+private const val EMPTY_ROUND_FALLBACK =
+    "（模型这一轮只产生了思考内容，没有生成正文。）\n\n" +
+        "此前已完成的操作和结果都保留在会话里，可以直接说「继续」，或者换个说法再问一次。"
