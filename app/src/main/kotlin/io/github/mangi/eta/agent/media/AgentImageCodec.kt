@@ -110,8 +110,11 @@ internal object AgentImageCodec {
             if (raw.isEmpty() || raw.size > MAX_AGENT_IMAGE_BYTES) return null
             val mimeHint = trimmed.substring("data:".length).substringBefore(";")
             return if (preserveOriginal) fromScreenBytes(raw, source, mimeHint)
-            else if (raw.size <= MAX_AGENT_IMAGE_BYTES) AgentModelImageEncoder.attachment(raw, source, mimeHint)
-            else AgentModelImageEncoder.userAttachment(raw, source, mimeHint)
+            else if (AgentModelImageEncoder.exceedsUserAttachmentLimits(raw)) {
+                AgentModelImageEncoder.userAttachment(raw, source, mimeHint)
+            } else {
+                AgentModelImageEncoder.attachment(raw, source, mimeHint)
+            }
         }
 
         if (context != null) {
@@ -123,7 +126,7 @@ internal object AgentImageCodec {
                 val file = uri.path?.let(::File)
                 return file?.takeIf(File::isFile)?.let { candidate ->
                     runCatching {
-                        fromBytes(candidate.readBytesLimited(), source).copy(preserveOriginal = preserveOriginal)
+                        fromUserAttachmentFile(candidate, source, preserveOriginal)
                     }.getOrNull()
                 }
             }
@@ -131,7 +134,7 @@ internal object AgentImageCodec {
             runCatching {
                 val file = File(trimmed)
                 if (file.isFile) {
-                    return fromBytes(file.readBytesLimited(), source).copy(preserveOriginal = preserveOriginal)
+                    return fromUserAttachmentFile(file, source, preserveOriginal)
                 }
             }
         }
@@ -171,10 +174,11 @@ internal object AgentImageCodec {
             ?: return null
         val mimeHint = runCatching { resolver.getType(uri) }.getOrNull().orEmpty()
         return runCatching {
-            if (bytes.size <= MAX_AGENT_IMAGE_BYTES) {
-                fromBytes(bytes, source, mimeHint)
-            } else {
+            // 相机照片常是 4000×3000 却只有 3–6MiB：只看字节数会让它整张原样发出。
+            if (AgentModelImageEncoder.exceedsUserAttachmentLimits(bytes)) {
                 AgentModelImageEncoder.userAttachment(bytes, source, mimeHint)
+            } else {
+                fromBytes(bytes, source, mimeHint)
             }
         }.getOrNull()
     }
@@ -258,6 +262,24 @@ internal object AgentImageCodec {
             source = source,
         )
     }.getOrNull()
+
+    /**
+     * 本地文件形态的用户附件：与相册/相机走同一套判定。
+     *
+     * 否则同一张 4000×3000 的照片，从相册选会被降到 1600px、从路径传却整张发出，
+     * 排查时完全看不出差别。
+     */
+    private fun fromUserAttachmentFile(
+        file: File,
+        source: String,
+        preserveOriginal: Boolean,
+    ): AgentModelClient.ModelImage {
+        val bytes = file.readUserAttachmentBytes()
+        if (!preserveOriginal && AgentModelImageEncoder.exceedsUserAttachmentLimits(bytes)) {
+            return AgentModelImageEncoder.userAttachment(bytes, source) ?: error("无法解码图片")
+        }
+        return fromBytes(bytes, source).copy(preserveOriginal = preserveOriginal)
+    }
 
     /** 用户附件的读取上限：放宽到 [MAX_USER_ATTACHMENT_INPUT_BYTES]，超限才拒绝。 */
     private fun File.readUserAttachmentBytes(): ByteArray {
