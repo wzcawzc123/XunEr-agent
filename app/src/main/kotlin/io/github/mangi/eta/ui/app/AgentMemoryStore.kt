@@ -210,15 +210,24 @@ internal class AgentMemoryStore(
         if (memoryState.isSaving) return
         memoryState = memoryState.copy(isSaving = true, notice = null)
         scope.launch(Dispatchers.IO) {
-            runCatching { AgentMemoryRepository.replaceAll("") }
+            runCatching {
+                // 清空也是一次写入：revision 会变。旧实现丢了新 revision，
+                // 于是清空后的第一次保存必然拿旧 revision 去比、误报「记忆已被修改」。
+                val snapshot = AgentMemoryRepository.replaceAll("")
+                // 清空前的快照已经落盘，不重拉 history 的话用户想撤销时看不到它。
+                val history = runCatching { AgentMemoryRepository.listHistory() }.getOrDefault(emptyList())
+                snapshot to history
+            }
                 .fold(
-                    onSuccess = {
+                    onSuccess = { (snapshot, history) ->
                         withContext(Dispatchers.Main) {
                             memoryState = memoryState.copy(
                                 isSaving = false,
                                 draft = "",
                                 savedContent = "",
+                                savedRevision = snapshot.revision,
                                 draftBytes = 0,
+                                history = history,
                                 notice = appContext.getString(R.string.state_ui_memory_cleared_b415bb),
                             )
                         }
