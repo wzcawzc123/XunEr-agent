@@ -271,6 +271,78 @@ class AgentImageCodecTest {
         }
     }
 
+    /** 相机常见规格：1200 万像素但字节数远低于 12MiB，必须按像素降级而不是整张发出。 */
+    @Test
+    fun cameraSizedAttachmentIsDownscaledByPixels() {
+        val bitmap = patternedBitmap(width = 4_000, height = 3_000)
+        val original = ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, output)
+            output.toByteArray()
+        }
+        bitmap.recycle()
+        assertTrue("测试素材应低于字节门槛", original.size <= MAX_AGENT_IMAGE_BYTES)
+        assertTrue(AgentModelImageEncoder.exceedsUserAttachmentLimits(original))
+
+        val image = AgentImageCodec.fromReference(
+            context = null,
+            value = "data:image/jpeg;base64,${Base64.encodeToString(original, Base64.NO_WRAP)}",
+            source = "user_attach",
+        ) ?: error("无法解析测试图片")
+
+        assertTrue("长边应降到视觉档内：${image.width}x${image.height}",
+            maxOf(image.width!!, image.height!!) <= USER_ATTACHMENT_MAX_LONG_EDGE)
+        val encoded = image.reference.decodeDataUrl()
+        val decoded = BitmapFactory.decodeByteArray(encoded, 0, encoded.size)
+            ?: error("降级结果无法解码")
+        try {
+            assertTrue(decoded.width.toLong() * decoded.height <= USER_ATTACHMENT_MAX_PIXELS)
+        } finally {
+            decoded.recycle()
+        }
+    }
+
+    /** 竖长截图（873×1920）像素不高，按长边判会白丢清晰度，必须原样保留。 */
+    @Test
+    fun tallScreenshotAttachmentKeepsResolution() {
+        val bitmap = patternedBitmap(width = 873, height = 1_920)
+        val original = ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
+            output.toByteArray()
+        }
+        bitmap.recycle()
+        org.junit.Assert.assertFalse(AgentModelImageEncoder.exceedsUserAttachmentLimits(original))
+
+        val image = AgentImageCodec.fromReference(
+            context = null,
+            value = "data:image/jpeg;base64,${Base64.encodeToString(original, Base64.NO_WRAP)}",
+            source = "user_attach",
+        ) ?: error("无法解析测试图片")
+
+        assertEquals(873, image.width)
+        assertEquals(1_920, image.height)
+    }
+
+    /** 4MP 以下的普通照片不降级：避免「凡附件都缩到 1600」的过度处理。 */
+    @Test
+    fun mediumPhotoUnderFourMegapixelsIsNotDownscaled() {
+        val bitmap = patternedBitmap(width = 2_400, height = 1_600)
+        val original = ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
+            output.toByteArray()
+        }
+        bitmap.recycle()
+        org.junit.Assert.assertFalse(AgentModelImageEncoder.exceedsUserAttachmentLimits(original))
+
+        val image = AgentImageCodec.fromReference(
+            context = null,
+            value = "data:image/jpeg;base64,${Base64.encodeToString(original, Base64.NO_WRAP)}",
+            source = "user_attach",
+        ) ?: error("无法解析测试图片")
+
+        assertEquals(2_400, image.width)
+        assertEquals(1_600, image.height)
+    }
+
     private fun patternedBitmap(width: Int, height: Int): Bitmap =
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
             val canvas = Canvas(bitmap)
