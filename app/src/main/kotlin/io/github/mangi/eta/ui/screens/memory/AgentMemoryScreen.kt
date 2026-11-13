@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -84,6 +85,9 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -576,7 +580,14 @@ private fun MemorySearchField(
  */
 @Composable
 private fun MemorySearchResults(content: String, query: String) {
-    val result = remember(content, query) { AgentMemorySearch.search(content, query) }
+    // 记忆文件上限 1MB（真机有 242KB 实例）：主线程同步全量扫 + 每个按键重算会掉帧。
+    // 防抖 120ms 后放到 Default 线程扫描；空值表示「还没结算」，用来区分「还在搜」与「没搜到」，
+    // 否则第一个字符会先闪一下「无匹配」。
+    val state by produceState<AgentMemorySearch.Result?>(initialValue = null, content, query) {
+        delay(SEARCH_DEBOUNCE_MS)
+        value = withContext(Dispatchers.Default) { AgentMemorySearch.search(content, query) }
+    }
+    val result = state ?: return
     if (result.isEmpty) {
         Column(
             modifier = Modifier
@@ -923,3 +934,6 @@ private fun formatNumber(value: Int): String = NumberFormat.getIntegerInstance()
 /** 历史快照时间：本地时区，精确到分钟（秒级差异对「选哪一版」没有帮助）。 */
 private fun formatTimestamp(millis: Long): String =
     SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
+
+/** 搜索防抖窗口：够短到感觉即时，够长到合并连续输入。 */
+private const val SEARCH_DEBOUNCE_MS = 120L
