@@ -965,8 +965,13 @@ class AgentModelClientLoopTest {
         val result = loop.run()
         // 1 次原始 + 2 次纠偏
         assertEquals(3, requests.size)
-        assertEquals("", result.content)
-        assertEquals(0, events.filterIsInstance<AgentEvent.RunFinished>().single().contentChars)
+        // 不再静默返回空串：用户要能看到「只产生了思考」的解释，否则等同于点按无反应。
+        assertTrue(result.content.contains("思考"))
+        assertTrue(result.content.contains("继续"))
+        assertEquals(
+            result.content.length,
+            events.filterIsInstance<AgentEvent.RunFinished>().single().contentChars,
+        )
     }
 
     private class ScriptedProvider(
