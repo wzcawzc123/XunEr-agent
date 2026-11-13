@@ -149,7 +149,9 @@ internal object AgentMemoryToolCatalog {
                                         .put("maxLength", AgentMemoryStore.MAX_WRITE_CONTENT_CHARS)
                                         .put(
                                             "description",
-                                            "Required for replace_text. The replacement for old_text; empty deletes it.",
+                                            "Required for replace_text. The replacement for old_text; " +
+                                                "pass an empty string to delete it. Omitting the field is rejected " +
+                                                "so a forgotten argument can never silently delete content.",
                                         ),
                                 )
                                 .put(
@@ -186,7 +188,8 @@ internal object AgentMemoryToolCatalog {
                                             "description",
                                             "Markdown for replace_section / replace_range / append, at most 3500 characters. " +
                                                 "For clear pass \"${AgentMemoryStore.CLEAR_CONFIRMATION}\". " +
-                                                "An empty content deletes the section or the line range.",
+                                                "For replace_section an empty content deletes the section, and omitting " +
+                                                "the field is rejected — pass \"\" explicitly to delete.",
                                         ),
                                 ),
                         )

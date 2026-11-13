@@ -502,12 +502,14 @@ internal class AgentLocalTools(
             "replace_text" -> AgentMemoryMutation.ReplaceText(
                 revision = revision,
                 oldText = args.requiredText("old_text"),
-                newText = args.optString("new_text"),
+                // 缺省即删除太危险：模型漏传 new_text 会静默删掉一段内容。要求显式给出。
+                newText = args.explicitText("new_text"),
             )
             "replace_section" -> AgentMemoryMutation.ReplaceSection(
                 revision = revision,
                 section = args.requiredText("section"),
-                content = args.optString("content"),
+                // 同上：缺省即删整节，必须显式传空串表示「确实要删」。
+                content = args.explicitText("content"),
             )
             "replace_range" -> AgentMemoryMutation.ReplaceRange(
                 revision = revision,
