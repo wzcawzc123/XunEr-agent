@@ -39,10 +39,10 @@ android {
         minSdk = 33
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.1.2：相机附件按像素降级 + EXIF 转正；修三处静默缺陷（空回合收尾、记忆缺字段即删、
-        // 清空后 revision 不更新）。同日第二版，取 11-14 的 02。
-        versionCode = 2026111402
-        versionName = "5.1.2"
+        // 5.1.3：删 placement_hint（-60 行）、记忆搜索防抖、压缩历史对话框横屏高度、
+        // glow 旋转后补取尺寸。同日第三版，取 11-14 的 03。
+        versionCode = 2026111403
+        versionName = "5.1.3"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
