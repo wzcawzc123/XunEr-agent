@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.media.ExifInterface
@@ -23,6 +24,18 @@ import kotlin.math.sqrt
 
 internal const val MAX_SCREEN_IMAGE_BYTES = 32 * 1024 * 1024
 internal const val CHAT_PREVIEW_MAX_LONG_EDGE = 1_920
+
+/** 用户附件视觉发送档的上限：长边与像素。超限即降级，不看字节数。 */
+internal const val USER_ATTACHMENT_MAX_LONG_EDGE = 1_600
+internal const val USER_ATTACHMENT_MAX_PIXELS = 1_500_000L
+
+/**
+ * 触发降级的像素门槛（约 400 万）。
+ *
+ * 定在 4MP 而不是 1.5MP：竖长截图（如 873×1920）像素低但长边高，按长边判会白白丢掉 17% 清晰度；
+ * 而相机照片 4000×3000 = 1200 万像素远超此线，正是需要降级的那一类。
+ */
+internal const val USER_ATTACHMENT_DOWNSCALE_PIXELS = 4_000_000L
 
 /**
  * 模型发送前的图片预算约束：将「用户原图大小」与「模型协议上限」解耦。
