@@ -5,8 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import io.github.mangi.eta.agent.model.AgentModelClient
@@ -19,6 +21,18 @@ import kotlin.math.sqrt
 
 internal const val MAX_AGENT_IMAGE_BYTES = 12 * 1024 * 1024
 internal const val CHAT_PREVIEW_MAX_LONG_EDGE = 1_920
+
+/** 用户附件视觉发送档的上限：长边与像素。超限即降级，不看字节数。 */
+internal const val USER_ATTACHMENT_MAX_LONG_EDGE = 1_600
+internal const val USER_ATTACHMENT_MAX_PIXELS = 1_500_000L
+
+/**
+ * 触发降级的像素门槛（约 400 万）。
+ *
+ * 定在 4MP 而不是 1.5MP：竖长截图（如 873×1920）像素低但长边高，按长边判会白白丢掉 17% 清晰度；
+ * 而相机照片 4000×3000 = 1200 万像素远超此线，正是需要降级的那一类。
+ */
+internal const val USER_ATTACHMENT_DOWNSCALE_PIXELS = 4_000_000L
 
 /**
  * 用户附件（相机/相册）的输入上限：40MiB。发送前经 userAttachmentProfile 降到 ≤12MiB，
@@ -53,15 +67,9 @@ internal object AgentModelImageEncoder {
         quality = 100,
     )
     /**
-     * 用户附件的视觉发送档：长边 ≤1600px、总像素 ≤150 万（超过就按需采样降级）。
+     * 保持原始像素尺寸的附件档（已编码附件的跨进程传输用）。
      *
-     * ★ 不能复用 attachmentProfile / toolVisionProfile：那些档要求保持原尺寸
-     * （有回归测试断言 3200×2400 不被缩放），而这里必须降级。历史 bug 就是复用导致的：
-     * scale 恒为 1.0、采样比恒为 1，文档写着「按需采样解码到 1600px」实际从不降级，
-     * 超大附件整张原样发出，到 Provider 那里被拒/静默丢。
-     */
-    /**
-     * 保持原始像素尺寸的附件档（工具图片路径用）：有回归测试断言 3200×2400 不被缩放。
+     * 有回归测试断言 2400×1600 不被缩放（[io.github.mangi.eta.agent.media.AgentImageCodecTest]）。
      * 用户附件不要走这里，见 [userAttachmentProfile]。
      */
     private val attachmentProfile = EncodingProfile(
@@ -71,9 +79,16 @@ internal object AgentModelImageEncoder {
     )
     // 聊天图片支持点击全屏缩放查看文字细节（如聊天记录与终端长截图），保留高清边长上限。
 
+    /**
+     * 用户附件的视觉发送档：长边 ≤1600px、总像素 ≤150 万（超过就按需采样降级）。
+     *
+     * ★ 不能复用 [attachmentProfile] / [toolVisionProfile]：那些档要求保持原尺寸，而这里必须降级。
+     * 历史 bug 就是复用导致的：scale 恒为 1.0、采样比恒为 1，文档写着「按需采样解码到 1600px」
+     * 实际从不降级，超大附件整张原样发出，到 Provider 那里被拒或静默丢。
+     */
     private val userAttachmentProfile = EncodingProfile(
-        maxLongEdge = 1_600,
-        maxPixels = 1_500_000L,
+        maxLongEdge = USER_ATTACHMENT_MAX_LONG_EDGE,
+        maxPixels = USER_ATTACHMENT_MAX_PIXELS,
         format = Bitmap.CompressFormat.JPEG,
         mimeType = "image/jpeg",
         quality = MODEL_JPEG_QUALITY,
@@ -131,6 +146,23 @@ internal object AgentModelImageEncoder {
     }.getOrNull()
 
     /**
+     * 用户附件是否超出视觉发送档，需要走降级编码。
+     *
+     * 只看字节数的判定漏掉了最常见的一种：手机相机 4000×3000 的 JPEG 通常只有 3–6MiB，
+     * 字节数远低于 12MiB，却按原图整张发出（Provider 侧像素超限、请求体虚高）。
+     * 这里按总像素兜住：4MP 以下原样保真，之上降到 [userAttachmentProfile]。
+     * 不按长边判——竖长截图（873×1920）像素很低，按长边判会白丢清晰度。
+     */
+    fun exceedsUserAttachmentLimits(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return false
+        if (bytes.size > MAX_AGENT_IMAGE_BYTES) return true
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return false
+        return options.outWidth.toLong() * options.outHeight > USER_ATTACHMENT_DOWNSCALE_PIXELS
+    }
+
+    /**
      * 用户附件（相机/相册）统一走视觉尺寸发送档：输入可能超过 12MiB，按需采样解码到 1600px，
      * 避免超大原图撑大请求体，也避免因单张超过 12MiB 而整张失败。
      */
@@ -184,17 +216,53 @@ internal object AgentModelImageEncoder {
             inSampleSize = sampleSize(bounds.width, bounds.height, target)
         }
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        // 解码不应用 EXIF 方向：竖拍照片原样重编码会躺着。降级路径必须自己转正。
+        val oriented = applyOrientation(bitmap, readExifOrientation(bytes))
         return try {
             encodeBitmap(
-                bitmap = bitmap,
+                bitmap = oriented,
                 source = source,
                 profile = profile,
                 flattenAlpha = profile.format == Bitmap.CompressFormat.JPEG &&
                     !bounds.mimeType.equals("image/jpeg", ignoreCase = true),
             )
         } finally {
+            if (!oriented.isRecycled && oriented !== bitmap) oriented.recycle()
             if (!bitmap.isRecycled) bitmap.recycle()
         }
+    }
+
+    /** EXIF 方向；读不到或格式不支持时按正常方向处理。 */
+    private fun readExifOrientation(bytes: ByteArray): Int = runCatching {
+        ExifInterface(ByteArrayInputStream(bytes))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+    /**
+     * 按 EXIF 方向转正位图；已经是正常方向时原样返回同一个对象（不额外拷贝）。
+     */
+    private fun applyOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            // 5/7 是带镜像的 90°/270°，与 6/8 区分开，否则会左右颠倒。
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+            else -> return bitmap
+        }
+        return runCatching {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }.getOrDefault(bitmap)
     }
 
     private fun encodeBitmap(
