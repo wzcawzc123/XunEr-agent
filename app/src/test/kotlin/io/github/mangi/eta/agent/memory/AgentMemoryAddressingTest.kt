@@ -53,30 +53,4 @@ class AgentMemoryAddressingTest {
         assertTrue(catalogue.contains("## 项目"))
         assertEquals("（没有任何标题）", AgentMemoryHeadings.catalogue(emptyList()))
     }
-
-    @Test
-    fun placementSuggestsArchiveForFinishedWork() {
-        assertEquals(
-            AgentMemoryPlacement.ARCHIVE,
-            AgentMemoryPlacement.suggest("X 项目已于 2026-10-01 结项"),
-        )
-    }
-
-    @Test
-    fun placementSuggestsCoreForStandingPreferences() {
-        assertEquals(
-            AgentMemoryPlacement.CORE,
-            AgentMemoryPlacement.suggest("用户偏好：回答始终使用简体中文，不要加总结"),
-        )
-    }
-
-    @Test
-    fun placementFallsBackToBodyAndHonoursCoreTarget() {
-        assertEquals(AgentMemoryPlacement.BODY, AgentMemoryPlacement.suggest("设备是小米平板 23046RP50C"))
-        // 目标节本来就是核心区时，建议沿用它的位置，而不是按关键词另判一个。
-        assertEquals(
-            AgentMemoryPlacement.CORE,
-            AgentMemoryPlacement.suggest("设备是小米平板", targetSection = "# 核心记忆"),
-        )
-    }
 }

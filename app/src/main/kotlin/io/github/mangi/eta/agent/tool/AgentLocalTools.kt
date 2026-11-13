@@ -60,7 +60,6 @@ import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AgentLogger
 import io.github.mangi.eta.core.HookSupport
 import io.github.mangi.eta.agent.memory.AgentMemoryGauge
-import io.github.mangi.eta.agent.memory.AgentMemoryPlacement
 import io.github.mangi.eta.data.repository.AgentMemoryException
 import io.github.mangi.eta.data.repository.AgentMemoryMutation
 import io.github.mangi.eta.data.repository.AgentMemoryRepository
@@ -543,18 +542,6 @@ internal class AgentLocalTools(
                 .put("bytes", result.snapshot.byteSize)
                 .put("line_count", result.snapshot.lineCount)
                 .put("core_usage", AgentMemoryGauge.report(result.snapshot, memoryContextWindow()))
-                // 落点建议只做提示，不阻断：位置对不对最终由模型/用户判断。
-                .put(
-                    "placement_hint",
-                    args.optString("content").ifBlank { args.optString("new_text") }
-                        .let { content ->
-                            val placement = AgentMemoryPlacement.suggest(content, args.optString("section"))
-                            JSONObject()
-                                .put("suggested", placement.wire)
-                                .put("label", placement.label)
-                                .put("rationale", AgentMemoryPlacement.rationale(placement))
-                        },
-                )
                 .apply { result.warning?.let { put("warning", it) } }
                 .toString()
             is AgentMemoryWriteResult.Conflict -> JSONObject()
