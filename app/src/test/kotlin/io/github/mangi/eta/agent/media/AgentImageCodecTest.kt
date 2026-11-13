@@ -343,6 +343,48 @@ class AgentImageCodecTest {
         assertEquals(1_600, image.height)
     }
 
+    /**
+     * 竖拍照片：EXIF Orientation=6 表示需要顺时针转 90°。转码路径若不应用它，
+     * 重编码后的图会横躺——相机入口正是这种图的主要来源。
+     */
+    @Test
+    fun exifRotatedAttachmentIsSentUpright() {
+        val context = RuntimeEnvironment.getApplication()
+        val file = File(context.cacheDir, "exif-photo-${System.nanoTime()}.jpg")
+        val bitmap = patternedBitmap(width = 400, height = 200)
+        FileOutputStream(file).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
+        }
+        bitmap.recycle()
+        try {
+            val exif = android.media.ExifInterface(file.absolutePath)
+            exif.setAttribute(
+                android.media.ExifInterface.TAG_ORIENTATION,
+                android.media.ExifInterface.ORIENTATION_ROTATE_90.toString(),
+            )
+            exif.saveAttributes()
+
+            val bytes = file.readBytes()
+            // 环境不支持写 EXIF 时直接跳过，避免把平台差异当成代码缺陷。
+            org.junit.Assume.assumeTrue(
+                "当前测试环境不支持写入 EXIF 方向",
+                android.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                    .getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION,
+                        android.media.ExifInterface.ORIENTATION_NORMAL,
+                    ) == android.media.ExifInterface.ORIENTATION_ROTATE_90,
+            )
+
+            val image = AgentModelImageEncoder.userAttachment(bytes, "user_attach")
+                ?: error("无法编码测试图片")
+            // 400×200 转 90° 后应为 200×400。
+            assertEquals(200, image.width)
+            assertEquals(400, image.height)
+        } finally {
+            file.delete()
+        }
+    }
+
     private fun patternedBitmap(width: Int, height: Int): Bitmap =
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
             val canvas = Canvas(bitmap)
