@@ -192,17 +192,22 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         super.onConfigurationChanged(newConfig)
         val wm = windowManager ?: return
         // 横竖屏切换后旧的 glow 高度是上一方向的，不重算会只渲染半屏。
-        glowView?.let { view ->
-            glowParams?.let { lp ->
-                lp.height = runCatching {
-                    val point = android.graphics.Point()
-                    @Suppress("DEPRECATION")
-                    wm.defaultDisplay.getRealSize(point)
-                    point.y
-                }.getOrDefault(WindowManager.LayoutParams.MATCH_PARENT)
-                runCatching { wm.updateViewLayout(view, lp) }
-            }
-        }
+        applyGlowHeight(wm)
+        // 部分 ROM 在本回调之后才把新尺寸落到 Display：下一帧再取一次，避免偶发仍半屏。
+        glowView?.post { if (!destroyed) applyGlowHeight(wm) }
+    }
+
+    /** 把 glow 窗口高度对齐当前屏幕；取不到尺寸时退回 MATCH_PARENT。 */
+    private fun applyGlowHeight(wm: WindowManager) {
+        val view = glowView ?: return
+        val lp = glowParams ?: return
+        lp.height = runCatching {
+            val point = android.graphics.Point()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealSize(point)
+            point.y
+        }.getOrDefault(WindowManager.LayoutParams.MATCH_PARENT)
+        runCatching { wm.updateViewLayout(view, lp) }
     }
 
     override fun onDestroy() {
