@@ -108,8 +108,9 @@ class AgentPromptBuilderTest {
         assertTrue(device.contains("你无法感知当前上下文的占用百分比"))
         assertTrue(device.contains("应以界面显示的用量为准"))
         assertTrue(device.contains("先确认 environment 与工作目录"))
-        assertTrue(device.contains("Android 环境没有 /workspace"))
         assertTrue(device.contains("不要反复换命令试探"))
+        // 环境与 /workspace 的对应关系由上游的环境契约负责，fork 不再重复解释。
+        assertFalse(device.contains("Android 环境没有 /workspace"))
     }
 
     @Test
