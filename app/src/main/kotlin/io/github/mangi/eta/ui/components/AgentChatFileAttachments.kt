@@ -3,6 +3,7 @@ package io.github.mangi.eta.ui.components
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -105,12 +106,18 @@ internal fun AgentAttachmentPickerButton(
     var showPathDialog by remember { mutableStateOf(false) }
     var pathInput by remember { mutableStateOf("") }
     // 拍照：先生成缓存文件的 content Uri 交给系统相机，成功后作为图片附件回填。
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    // 同时记住本地文件，取消/失败时删掉，避免 cam_*.jpg 在缓存里堆积。
+    var cameraTarget by remember { mutableStateOf<CameraTarget?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
     ) { success ->
-        if (success) cameraUri?.let { onAttachImage(it.toString()) }
-        cameraUri = null
+        val target = cameraTarget
+        if (success) {
+            target?.let { onAttachImage(it.uri.toString()) }
+        } else {
+            target?.file?.delete()
+        }
+        cameraTarget = null
     }
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxMediaItems),
@@ -148,10 +155,17 @@ internal fun AgentAttachmentPickerButton(
         when (index) {
             0 -> {
                 // 拍照：先生成缓存文件的 content Uri 交给系统相机，成功后作为图片附件回填。
-                val uri = createCameraImageUri(context)
-                if (uri != null) {
-                    cameraUri = uri
-                    cameraLauncher.launch(uri)
+                val target = createCameraTarget(context)
+                if (target == null) {
+                    Toast.makeText(context, R.string.attachment_camera_unavailable, Toast.LENGTH_SHORT).show()
+                } else {
+                    cameraTarget = target
+                    // 没有相机应用时 launch 会抛 ActivityNotFoundException，不能让整个界面崩掉。
+                    runCatching { cameraLauncher.launch(target.uri) }.onFailure {
+                        cameraTarget = null
+                        target.file.delete()
+                        Toast.makeText(context, R.string.attachment_camera_unavailable, Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             1 -> photoPicker.launch(
@@ -490,9 +504,21 @@ internal class InputPopupPositionProvider(
     override fun getMargins(): PaddingValues = PaddingValues(vertical = ChatInputPopupMargin)
 }
 
-/** 拍照输出的缓存 Uri。失败返回 null，调用方保持静默即可（用户可改用「图片」入口）。 */
-private fun createCameraImageUri(context: Context): Uri? = runCatching {
+private data class CameraTarget(val uri: Uri, val file: File)
+
+/**
+ * 拍照输出的缓存目标。失败返回 null，调用方给一次提示即可（用户可改用「图片」入口）。
+ *
+ * 顺手清理一天前的残留：进程被杀时回调不会回来，历史文件没有别的地方会删。
+ */
+private fun createCameraTarget(context: Context): CameraTarget? = runCatching {
     val dir = File(context.cacheDir, "camera").apply { if (!exists()) mkdirs() }
+    val expireBefore = System.currentTimeMillis() - CAMERA_CACHE_TTL_MS
+    dir.listFiles()?.forEach { stale ->
+        if (stale.isFile && stale.lastModified() < expireBefore) stale.delete()
+    }
     val file = File(dir, "cam_" + System.currentTimeMillis() + ".jpg")
-    FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+    CameraTarget(FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file), file)
 }.getOrNull()
+
+private const val CAMERA_CACHE_TTL_MS = 24 * 60 * 60 * 1000L

@@ -1403,6 +1403,7 @@
   <string name="assistant_overlay_settings_reasoning_follow_default">跟隨預設</string>
   <string name="assistant_overlay_settings_note">單獨設定電源鍵或系統助手喚起的全域對話浮窗所使用的模型與思考等級；日常輕量指令可選用回應更快的輕量模型並降低或關閉思考，主對話仍保留主力模型。</string>
   <string name="attachment_camera">拍照</string>
+  <string name="attachment_camera_unavailable">這台裝置上沒有可用的相機應用</string>
   <string name="chat_task_interrupted">任務被系統中斷，進度已保留。點擊繼續——若傳送、編輯或介面操作已執行，請先確認目前狀態。</string>
   <string name="memory_search_label">搜尋記憶內容</string>
   <string name="memory_search_hits">%1$d 處命中 · %2$d 行</string>
