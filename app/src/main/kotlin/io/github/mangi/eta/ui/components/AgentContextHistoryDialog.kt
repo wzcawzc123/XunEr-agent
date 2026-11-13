@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,10 +84,12 @@ internal fun AgentContextHistoryDialog(
 
 @Composable
 private fun HistoryRecordList(records: List<AgentContextHistory.Record>) {
+    // 横屏手机可用高度只有约 360dp，写死 420dp 会顶出屏幕。
+    val listMaxHeight = minOf(420.dp, LocalConfiguration.current.screenHeightDp.dp * 0.6f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 420.dp)
+            .heightIn(max = listMaxHeight)
             .verticalScroll(rememberScrollState()),
     ) {
         records.forEachIndexed { index, record ->
