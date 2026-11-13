@@ -25,6 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.data.model.AppearanceUiStyle
+import io.github.mangi.eta.ui.app.LocalUiStyle
+import io.github.mangi.eta.ui.components.coui.CouiNoticeDialog
 import io.github.mangi.eta.ui.model.AgentContextHistory
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -43,35 +46,53 @@ internal fun AgentContextHistoryDialog(
     records: List<AgentContextHistory.Record>,
     onDismiss: () -> Unit,
 ) {
-    WindowDialog(
-        show = true,
-        title = stringResource(R.string.context_history_title),
-        summary = if (records.isEmpty()) {
-            stringResource(R.string.context_history_empty)
-        } else {
-            stringResource(R.string.context_history_count, records.size)
-        },
-        onDismissRequest = onDismiss,
-    ) {
-        if (records.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                records.forEachIndexed { index, record ->
-                    if (index > 0) Spacer(Modifier.height(8.dp))
-                    HistoryRecordCard(record)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
+    val title = stringResource(R.string.context_history_title)
+    val summary = if (records.isEmpty()) {
+        stringResource(R.string.context_history_empty)
+    } else {
+        stringResource(R.string.context_history_count, records.size)
+    }
+    when (LocalUiStyle.current) {
+        AppearanceUiStyle.COUI -> CouiNoticeDialog(
+            visible = true,
+            title = title,
+            message = summary,
+            confirmText = stringResource(R.string.action_close),
+            onDismissRequest = onDismiss,
+        ) {
+            if (records.isNotEmpty()) HistoryRecordList(records)
         }
-        TextButton(
-            text = stringResource(R.string.action_close),
-            onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        AppearanceUiStyle.MIUIX -> WindowDialog(
+            show = true,
+            title = title,
+            summary = summary,
+            onDismissRequest = onDismiss,
+        ) {
+            if (records.isNotEmpty()) {
+                HistoryRecordList(records)
+                Spacer(Modifier.height(12.dp))
+            }
+            TextButton(
+                text = stringResource(R.string.action_close),
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryRecordList(records: List<AgentContextHistory.Record>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 420.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        records.forEachIndexed { index, record ->
+            if (index > 0) Spacer(Modifier.height(8.dp))
+            HistoryRecordCard(record)
+        }
     }
 }
 
@@ -79,8 +100,9 @@ internal fun AgentContextHistoryDialog(
 private fun HistoryRecordCard(record: AgentContextHistory.Record) {
     val scheme = MiuixTheme.colorScheme
     var expanded by remember { mutableStateOf(false) }
-    // 卡片正文通常 1-3 千字，折叠后只留前几行；展开才渲染全文（避免一次测量太多行）。
-    val collapsed = record.summaryText.length > COLLAPSED_CHARS
+    // 是否真的被折叠：用排版结果判断，而不是猜字符数——
+    // 按字符数猜会出现「点了展开什么也没变」（160 个中文字符其实不足 4 行）。
+    var overflows by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -108,8 +130,9 @@ private fun HistoryRecordCard(record: AgentContextHistory.Record) {
             color = scheme.onSurfaceVariantSummary,
             maxLines = if (expanded) Int.MAX_VALUE else COLLAPSED_LINES,
             overflow = TextOverflow.Ellipsis,
+            onTextLayout = { result -> if (!expanded) overflows = result.hasVisualOverflow },
         )
-        if (collapsed) {
+        if (overflows || expanded) {
             Spacer(Modifier.height(4.dp))
             Text(
                 text = stringResource(
@@ -124,5 +147,4 @@ private fun HistoryRecordCard(record: AgentContextHistory.Record) {
     }
 }
 
-private const val COLLAPSED_CHARS = 160
 private const val COLLAPSED_LINES = 4
