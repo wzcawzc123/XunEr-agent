@@ -43,10 +43,11 @@ android {
         minSdk = 33
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.1.3：删 placement_hint（-60 行）、记忆搜索防抖、压缩历史对话框横屏高度、
-        // glow 旋转后补取尺寸。同日第三版，取 11-14 的 03。
-        versionCode = 2026111403
-        versionName = "5.1.3"
+        // 5.2.0：换上游 3.4.4 + 39 提交基座（语音长按、思考深度、Miuix 0.9.5 玻璃重构、
+        // RaTeX 公式、Steer 插话等），fork 侧补丁全部重放；schema 34 → 35。
+        // 上游仍停在 2026111302 未发版，本版取 11-19 的 01。
+        versionCode = 2026111901
+        versionName = "5.2.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
