@@ -31,9 +31,10 @@ import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.coui.CouiNoticeDialog
 import io.github.mangi.eta.ui.model.AgentContextHistory
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import top.yukonga.miuix.kmp.glass.GlassDialogButton
+import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 上下文压缩历史：把「模型现在记得什么」摊开给用户看。
@@ -63,21 +64,29 @@ internal fun AgentContextHistoryDialog(
         ) {
             if (records.isNotEmpty()) HistoryRecordList(records)
         }
-        AppearanceUiStyle.MIUIX -> WindowDialog(
+        AppearanceUiStyle.MIUIX -> GlassDialog(
             show = true,
             title = title,
             summary = summary,
+            backdrop = currentGlassOverlayBackdrop(),
             onDismissRequest = onDismiss,
         ) {
             if (records.isNotEmpty()) {
                 HistoryRecordList(records)
                 Spacer(Modifier.height(12.dp))
             }
-            TextButton(
-                text = stringResource(R.string.action_close),
+            GlassDialogButton(
                 onClick = onDismiss,
+                role = GlassDialogButtonRole.Normal,
                 modifier = Modifier.fillMaxWidth(),
-            )
+            ) {
+                Text(
+                    text = stringResource(R.string.action_close),
+                    style = MiuixTheme.textStyles.button,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
