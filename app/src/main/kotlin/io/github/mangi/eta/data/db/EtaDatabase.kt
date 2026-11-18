@@ -44,10 +44,10 @@ internal abstract class EtaDatabase : RoomDatabase() {
         /**
          * 当前 schema 版本。
          *
-         * 必须高于所有已发布血统：旧 fork ≤29、4.2.0=31、4.3.x=32、5.0.x=33、上游 3.4.3=26。
-         * 同一号码在不同血统含义不同，且上游会抢占号码（3.4.2 占了 24/25、3.4.3 占了 26）。
+         * 必须高于所有已发布血统：旧 fork ≤29、4.2.0=31、4.3.x=32、5.0.x=33、5.1.x=34、上游 3.4.4=27。
+         * 同一号码在不同血统含义不同，且上游会抢占号码（3.4.2 占了 24/25、3.4.3 占了 26、3.4.4 占了 27）。
          */
-        internal const val SCHEMA_VERSION = 34
+        internal const val SCHEMA_VERSION = 35
 
         @Volatile
         private var instance: EtaDatabase? = null
@@ -132,6 +132,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
 
         internal val MIGRATION_26_27 = Migration(26, 27) { database ->
             database.execSQL("ALTER TABLE mcp_servers ADD COLUMN tools_truncation_reason TEXT")
+        }
 
         /**
          * 列是否存在（PRAGMA table_info）；用于幂等地补列。
@@ -181,6 +182,8 @@ internal abstract class EtaDatabase : RoomDatabase() {
             addColumnIfMissing("conversation_messages", "ttft_steps", "INTEGER")
             addColumnIfMissing("conversation_messages", "decode_ms", "INTEGER")
             addColumnIfMissing("conversation_messages", "decode_tokens", "INTEGER")
+            // 上游 3.4.4（27）：工具发现被截断时的原因，仅用于提示分页。
+            addColumnIfMissing("mcp_servers", "tools_truncation_reason", "TEXT")
             addColumnIfMissing("conversation_messages", "cache_write_tokens", "INTEGER")
             addColumnIfMissing("conversation_messages", "compaction_archive_id", "TEXT")
         }
@@ -188,17 +191,18 @@ internal abstract class EtaDatabase : RoomDatabase() {
         internal fun upgradeSchemaToLatest(from: Int): Migration =
             Migration(from, SCHEMA_VERSION) { database -> database.convergeToCurrentSchema() }
 
-        internal val MIGRATION_23_34 = upgradeSchemaToLatest(23)
-        internal val MIGRATION_24_34 = upgradeSchemaToLatest(24)
-        internal val MIGRATION_25_34 = upgradeSchemaToLatest(25)
-        internal val MIGRATION_26_34 = upgradeSchemaToLatest(26)
-        internal val MIGRATION_27_34 = upgradeSchemaToLatest(27)
-        internal val MIGRATION_28_34 = upgradeSchemaToLatest(28)
-        internal val MIGRATION_29_34 = upgradeSchemaToLatest(29)
-        internal val MIGRATION_30_34 = upgradeSchemaToLatest(30)
-        internal val MIGRATION_31_34 = upgradeSchemaToLatest(31)
-        internal val MIGRATION_32_34 = upgradeSchemaToLatest(32)
-        internal val MIGRATION_33_34 = upgradeSchemaToLatest(33)
+        internal val MIGRATION_23_35 = upgradeSchemaToLatest(23)
+        internal val MIGRATION_24_35 = upgradeSchemaToLatest(24)
+        internal val MIGRATION_25_35 = upgradeSchemaToLatest(25)
+        internal val MIGRATION_26_35 = upgradeSchemaToLatest(26)
+        internal val MIGRATION_27_35 = upgradeSchemaToLatest(27)
+        internal val MIGRATION_28_35 = upgradeSchemaToLatest(28)
+        internal val MIGRATION_29_35 = upgradeSchemaToLatest(29)
+        internal val MIGRATION_30_35 = upgradeSchemaToLatest(30)
+        internal val MIGRATION_31_35 = upgradeSchemaToLatest(31)
+        internal val MIGRATION_32_35 = upgradeSchemaToLatest(32)
+        internal val MIGRATION_33_35 = upgradeSchemaToLatest(33)
+        internal val MIGRATION_34_35 = upgradeSchemaToLatest(34)
 
         /**
          * 全部迁移（单一来源）。
@@ -217,9 +221,9 @@ internal abstract class EtaDatabase : RoomDatabase() {
                 MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                 MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
                 MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-                MIGRATION_23_34, MIGRATION_24_34, MIGRATION_25_34, MIGRATION_26_34,
-                MIGRATION_27_34, MIGRATION_28_34, MIGRATION_29_34, MIGRATION_30_34,
-                MIGRATION_31_34, MIGRATION_32_34, MIGRATION_33_34,
+                MIGRATION_23_35, MIGRATION_24_35, MIGRATION_25_35, MIGRATION_26_35,
+                MIGRATION_27_35, MIGRATION_28_35, MIGRATION_29_35, MIGRATION_30_35,
+                MIGRATION_31_35, MIGRATION_32_35, MIGRATION_33_35, MIGRATION_34_35,
             )
         }
 
