@@ -210,6 +210,7 @@ internal fun AgentMemoryScreen(
     }
 
     if (showHistoryDialog) {
+
         GlassDialog(
             show = true,
             title = stringResource(R.string.memory_history_title),
