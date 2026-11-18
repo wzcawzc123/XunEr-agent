@@ -63,6 +63,7 @@ import io.github.mangi.eta.agent.memory.AgentMemorySearch
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.MiuixDialogActions
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import io.github.mangi.eta.ui.components.MiuixScaffold
 import io.github.mangi.eta.ui.components.MiuixTopBarActionButton
 import io.github.mangi.eta.ui.components.coui.CouiButton
@@ -355,12 +356,13 @@ internal fun AgentMemoryScreen(
     }
 
     if (showHistoryDialog) {
-        // 两套样式共用 Miuix 弹窗：COUI 的 CouiNoticeDialog 只能摆纯文本，
+        // 两套样式共用玻璃弹窗：COUI 的 CouiNoticeDialog 只能摆纯文本，
         // 承载不了「每条快照一个恢复按钮」的列表。
-        WindowDialog(
+        GlassDialog(
             show = true,
             title = stringResource(R.string.memory_history_title),
             summary = stringResource(R.string.memory_history_note),
+            backdrop = currentGlassOverlayBackdrop(),
             onDismissRequest = { showHistoryDialog = false },
         ) {
             Column(
@@ -402,11 +404,17 @@ internal fun AgentMemoryScreen(
                     }
                 }
             }
-            TextButton(
-                text = stringResource(R.string.action_close),
+            GlassDialogButton(
                 onClick = { showHistoryDialog = false },
+                role = GlassDialogButtonRole.Normal,
                 modifier = Modifier.fillMaxWidth(),
-            )
+            ) {
+                Text(
+                    text = stringResource(R.string.action_close),
+                    style = MiuixTheme.textStyles.button,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
