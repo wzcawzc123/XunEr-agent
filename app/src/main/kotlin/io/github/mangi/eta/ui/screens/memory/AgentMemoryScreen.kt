@@ -464,7 +464,6 @@ private fun MemorySettingsGroup(
                     )
                 }
             }
-            }
         }
         AppearanceUiStyle.MIUIX -> {
             Card(
