@@ -18,9 +18,10 @@ if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
 fi
 
 yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
-# 版本与 app/build.gradle.kts 对齐：compileSdk 37（平台目录名 android-37.0）、build-tools 36/37
+# 版本与 app/build.gradle.kts 对齐：compileSdk release(37){minorApiLevel=2}（平台目录名 android-37.2）、
+# build-tools 36/37。上游 3.4.4 起升到 37.2，两套平台都装，避免回退时缺包。
 "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" \
-    "platforms;android-37.0" "build-tools;36.0.0" "build-tools;37.0.0" "platform-tools"
+    "platforms;android-37.0" "platforms;android-37.2" "build-tools;36.0.0" "build-tools;37.0.0" "platform-tools"
 
 echo "== WSL SDK 就绪：$SDK =="
 ls "$SDK/platforms" "$SDK/build-tools"
