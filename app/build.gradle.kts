@@ -43,11 +43,11 @@ android {
         minSdk = 34
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.3.0：换上游基座至 5e048c5a（11-21，Miuix 0.9.5-beta03 / COUI 迁移到 suqi8 2.1.0 /
-        // Glass 迁移规范 / 角色侧栏头像修复等 22 提交），fork 50 提交全部重放；
-        // 并按决策摘除 fork 独有的「中断续跑」板块，回归上游语义。
-        versionCode = 2026112101
-        versionName = "5.3.0"
+        // 5.3.1：修复 5.2→5.3 升级闪退。5.3.0 把上游新增的 scheduled_tasks 表与
+        // vertex 列并入 @Entity 但 SCHEMA_VERSION 仍是 35，Room 认为 35=35 不迁移，
+        // 打开旧库时 schema 校验失败闪退。schema 升至 36 并补 35→36 收敛器迁移。
+        versionCode = 2026112102
+        versionName = "5.3.1"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
