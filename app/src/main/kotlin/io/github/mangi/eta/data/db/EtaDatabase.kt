@@ -186,6 +186,68 @@ internal abstract class EtaDatabase : RoomDatabase() {
             addColumnIfMissing("mcp_servers", "tools_truncation_reason", "TEXT")
             addColumnIfMissing("conversation_messages", "cache_write_tokens", "INTEGER")
             addColumnIfMissing("conversation_messages", "compaction_archive_id", "TEXT")
+            // 上游 3.4.4+（27）：Vertex AI 端点配置列。
+            addColumnIfMissing("model_providers", "vertex_project", "TEXT NOT NULL DEFAULT ''")
+            addColumnIfMissing("model_providers", "vertex_location", "TEXT NOT NULL DEFAULT 'global'")
+            // 上游 3.4.4+（28-30）：定时任务表。收敛器只补列不建表，从旧版本直达 35 时
+            // scheduled_tasks / scheduled_task_runs 缺失会让 Room 校验失败，故显式补建。
+            execSQL(
+                "CREATE TABLE IF NOT EXISTS scheduled_tasks (" +
+                    "id TEXT NOT NULL PRIMARY KEY, " +
+                    "name TEXT NOT NULL, " +
+                    "prompt TEXT NOT NULL, " +
+                    "enabled INTEGER NOT NULL, " +
+                    "trigger_kind TEXT NOT NULL, " +
+                    "schedule_json TEXT NOT NULL, " +
+                    "misfire_policy TEXT NOT NULL, " +
+                    "misfire_window_minutes INTEGER NOT NULL, " +
+                    "quiet_hours_json TEXT NOT NULL, " +
+                    "delivery_mode TEXT NOT NULL, " +
+                    "session_mode TEXT NOT NULL, " +
+                    "dedicated_conversation_key TEXT, " +
+                    "model_id TEXT, " +
+                    "reasoning_effort TEXT, " +
+                    "capabilities_json TEXT NOT NULL, " +
+                    "timeout_seconds INTEGER NOT NULL, " +
+                    "memo TEXT NOT NULL, " +
+                    "memo_updated_at INTEGER NOT NULL, " +
+                    "next_run_at INTEGER, " +
+                    "last_run_at INTEGER, " +
+                    "last_status TEXT, " +
+                    "last_summary TEXT NOT NULL, " +
+                    "consecutive_failures INTEGER NOT NULL, " +
+                    "auto_disabled_reason TEXT, " +
+                    "created_at INTEGER NOT NULL, " +
+                    "updated_at INTEGER NOT NULL)"
+            )
+            execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_tasks_enabled_next_run_at " +
+                    "ON scheduled_tasks (enabled, next_run_at)"
+            )
+            execSQL(
+                "CREATE TABLE IF NOT EXISTS scheduled_task_runs (" +
+                    "id TEXT NOT NULL PRIMARY KEY, " +
+                    "task_id TEXT NOT NULL, " +
+                    "trigger_source TEXT NOT NULL, " +
+                    "scheduled_for_at INTEGER, " +
+                    "started_at INTEGER NOT NULL, " +
+                    "finished_at INTEGER, " +
+                    "status TEXT NOT NULL, " +
+                    "summary TEXT NOT NULL, " +
+                    "notified INTEGER NOT NULL, " +
+                    "archive_conversation_key TEXT, " +
+                    "model_label TEXT NOT NULL, " +
+                    "FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE)"
+            )
+            execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_task_runs_task_id_started_at " +
+                    "ON scheduled_task_runs (task_id, started_at)"
+            )
+            execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_task_runs_status " +
+                    "ON scheduled_task_runs (status)"
+            )
+            addColumnIfMissing("scheduled_tasks", "show_running_notification", "INTEGER NOT NULL DEFAULT 0")
         }
 
         internal fun upgradeSchemaToLatest(from: Int): Migration =
