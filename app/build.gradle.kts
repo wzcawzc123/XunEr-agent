@@ -43,11 +43,11 @@ android {
         minSdk = 34
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.2.0：换上游 3.4.4 + 39 提交基座（语音长按、思考深度、Miuix 0.9.5 玻璃重构、
-        // RaTeX 公式、Steer 插话等），fork 侧补丁全部重放；schema 34 → 35。
-        // 上游仍停在 2026111302 未发版，本版取 11-19 的 01。
-        versionCode = 2026111901
-        versionName = "5.2.0"
+        // 5.3.0：换上游基座至 5e048c5a（11-21，Miuix 0.9.5-beta03 / COUI 迁移到 suqi8 2.1.0 /
+        // Glass 迁移规范 / 角色侧栏头像修复等 22 提交），fork 50 提交全部重放；
+        // 并按决策摘除 fork 独有的「中断续跑」板块，回归上游语义。
+        versionCode = 2026112101
+        versionName = "5.3.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
