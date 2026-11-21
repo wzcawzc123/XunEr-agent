@@ -38,7 +38,6 @@ internal fun AgentHomeScreen(
     isDrawerOpen: Boolean = false,
     isBranching: Boolean = false,
     topInset: Dp = 0.dp,
-    resumableInterrupted: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // key 内保持完整分支，避免提前返回遗留无法转换为 DEX 的编译器标记。
@@ -108,8 +107,6 @@ internal fun AgentHomeScreen(
                     historyLoadState = historyLoadState,
                     onLoadEarlierMessages = { onAction(AgentHomeAction.LoadEarlierMessages) },
                     onHistoryViewportChanged = { onAction(AgentHomeAction.HistoryViewportChanged(it)) },
-                    resumableInterrupted = resumableInterrupted,
-                    onResumeInterrupted = { onAction(AgentHomeAction.ResumeInterruptedRun) },
                     // 压缩记录从 history 里的摘要消息投影：不新增落库字段也能还原每次压缩。
                     compactionRecords = remember(state.history) {
                         AgentContextHistory.records(state.history)

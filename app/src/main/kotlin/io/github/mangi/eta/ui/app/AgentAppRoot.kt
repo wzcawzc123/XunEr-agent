@@ -421,7 +421,6 @@ fun AgentAppRoot(
                                 state = agentState.homeState,
                                 modelPickerState = agentState.modelPickerState,
                                 isBranching = agentState.isBranchingCurrentConversation,
-                                resumableInterrupted = agentState.resumableInterrupted != null,
                                 conversationKey = agentState.conversationPaneState.selectedConversationId,
                                 topInset = shellPadding.calculateTopPadding(),
                                 onAction = { action ->
@@ -439,7 +438,6 @@ fun AgentAppRoot(
                                         is AgentHomeAction.RecallQueuedMessage -> agentState.recallQueuedMessage(action.id, action.currentDraftText)
                                         is AgentHomeAction.RemoveQueuedMessage -> agentState.removeQueuedMessage(action.id)
                                         AgentHomeAction.StopRun -> agentState.stopCurrentRun()
-                                        AgentHomeAction.ResumeInterruptedRun -> agentState.resumeInterruptedRun()
                                         is AgentHomeAction.ImageAttached -> agentState.attachImage(action.uri)
                                         is AgentHomeAction.RemoveImage -> agentState.removePendingImage(action.id)
                                         is AgentHomeAction.FilesAttached -> agentState.attachFiles(action.uris)
