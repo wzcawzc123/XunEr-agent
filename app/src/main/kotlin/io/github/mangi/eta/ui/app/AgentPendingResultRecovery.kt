@@ -95,11 +95,6 @@ internal object AgentPendingResultRecovery {
                     id = resultId,
                     code = SystemNoticeCode.EmptyResult,
                 )
-                result.error == AgentRuntimeWire.SYSTEM_INTERRUPTED -> SystemNoticeMessageUi(
-                    id = resultId,
-                    code = SystemNoticeCode.Interrupted,
-                    detail = "任务被系统中断，进度已保留，可继续",
-                )
                 else -> SystemNoticeMessageUi(
                     id = resultId,
                     code = SystemNoticeCode.RuntimeFailed,

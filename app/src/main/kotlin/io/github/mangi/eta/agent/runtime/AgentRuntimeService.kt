@@ -233,9 +233,9 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         setKeepScreenOn(false)
         runs.all().forEach { run ->
             run.releaseIncoming()
-            // 系统回收导致的中断：用可识别标记而非普通文案，
-            // 恢复层据此区分「被系统杀掉」与「真的跑失败」，前者才给续跑入口。
-            run.session.cancel(AgentRuntimeWire.SYSTEM_INTERRUPTED)
+            run.session.cancel(
+                AppStrings.get(R.string.runtime_err_service_stopped, "Agent Runtime 服务已停止")
+            )
         }
         displayedRun = null
         serviceScope.cancel()
