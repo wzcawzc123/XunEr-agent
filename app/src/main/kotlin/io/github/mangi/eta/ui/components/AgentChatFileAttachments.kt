@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -343,6 +344,7 @@ internal fun AgentAttachmentPickerButton(
                 val overlayBackdrop = currentGlassOverlayBackdrop() ?: glassBackdrop
                 val optionIcons = remember {
                     listOf(
+                        Icons.Rounded.PhotoCamera,
                         MiuixIcons.Glass.ImageOutline,
                         MiuixIcons.Glass.File,
                         MiuixIcons.Glass.FolderOutline,
