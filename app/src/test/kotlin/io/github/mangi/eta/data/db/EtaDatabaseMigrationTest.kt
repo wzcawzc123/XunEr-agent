@@ -60,8 +60,8 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_23_24,
                 EtaDatabase.MIGRATION_24_25,
                 EtaDatabase.MIGRATION_25_26,
-                // 23 → 当前版本（35）：幂等收敛器（上游 26 的列也在其中补齐）
-                EtaDatabase.MIGRATION_23_35,
+                // 23 → 当前版本（36）：幂等收敛器（上游 26 的列也在其中补齐）
+                EtaDatabase.MIGRATION_23_36,
             )
             .build()
         try {

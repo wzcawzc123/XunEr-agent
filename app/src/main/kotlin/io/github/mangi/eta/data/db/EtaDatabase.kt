@@ -47,7 +47,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
          * 必须高于所有已发布血统：旧 fork ≤29、4.2.0=31、4.3.x=32、5.0.x=33、5.1.x=34、上游 3.4.4=27。
          * 同一号码在不同血统含义不同，且上游会抢占号码（3.4.2 占了 24/25、3.4.3 占了 26、3.4.4 占了 27）。
          */
-        internal const val SCHEMA_VERSION = 35
+        internal const val SCHEMA_VERSION = 36
 
         @Volatile
         private var instance: EtaDatabase? = null
@@ -253,18 +253,19 @@ internal abstract class EtaDatabase : RoomDatabase() {
         internal fun upgradeSchemaToLatest(from: Int): Migration =
             Migration(from, SCHEMA_VERSION) { database -> database.convergeToCurrentSchema() }
 
-        internal val MIGRATION_23_35 = upgradeSchemaToLatest(23)
-        internal val MIGRATION_24_35 = upgradeSchemaToLatest(24)
-        internal val MIGRATION_25_35 = upgradeSchemaToLatest(25)
-        internal val MIGRATION_26_35 = upgradeSchemaToLatest(26)
-        internal val MIGRATION_27_35 = upgradeSchemaToLatest(27)
-        internal val MIGRATION_28_35 = upgradeSchemaToLatest(28)
-        internal val MIGRATION_29_35 = upgradeSchemaToLatest(29)
-        internal val MIGRATION_30_35 = upgradeSchemaToLatest(30)
-        internal val MIGRATION_31_35 = upgradeSchemaToLatest(31)
-        internal val MIGRATION_32_35 = upgradeSchemaToLatest(32)
-        internal val MIGRATION_33_35 = upgradeSchemaToLatest(33)
-        internal val MIGRATION_34_35 = upgradeSchemaToLatest(34)
+        internal val MIGRATION_23_36 = upgradeSchemaToLatest(23)
+        internal val MIGRATION_24_36 = upgradeSchemaToLatest(24)
+        internal val MIGRATION_25_36 = upgradeSchemaToLatest(25)
+        internal val MIGRATION_26_36 = upgradeSchemaToLatest(26)
+        internal val MIGRATION_27_36 = upgradeSchemaToLatest(27)
+        internal val MIGRATION_28_36 = upgradeSchemaToLatest(28)
+        internal val MIGRATION_29_36 = upgradeSchemaToLatest(29)
+        internal val MIGRATION_30_36 = upgradeSchemaToLatest(30)
+        internal val MIGRATION_31_36 = upgradeSchemaToLatest(31)
+        internal val MIGRATION_32_36 = upgradeSchemaToLatest(32)
+        internal val MIGRATION_33_36 = upgradeSchemaToLatest(33)
+        internal val MIGRATION_34_36 = upgradeSchemaToLatest(34)
+        internal val MIGRATION_35_36 = upgradeSchemaToLatest(35)
 
         /**
          * 全部迁移（单一来源）。
@@ -283,9 +284,10 @@ internal abstract class EtaDatabase : RoomDatabase() {
                 MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                 MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
                 MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-                MIGRATION_23_35, MIGRATION_24_35, MIGRATION_25_35, MIGRATION_26_35,
-                MIGRATION_27_35, MIGRATION_28_35, MIGRATION_29_35, MIGRATION_30_35,
-                MIGRATION_31_35, MIGRATION_32_35, MIGRATION_33_35, MIGRATION_34_35,
+                MIGRATION_23_36, MIGRATION_24_36, MIGRATION_25_36, MIGRATION_26_36,
+                MIGRATION_27_36, MIGRATION_28_36, MIGRATION_29_36, MIGRATION_30_36,
+                MIGRATION_31_36, MIGRATION_32_36, MIGRATION_33_36, MIGRATION_34_36,
+                MIGRATION_35_36,
             )
         }
 
