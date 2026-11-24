@@ -43,11 +43,11 @@ android {
         minSdk = 34
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.3.2：修复聊天输入栏「+」附件菜单在 MIUIX 风格下点击闪退。
-        // 菜单 options 有 5 项（拍照/相册/文件/文件夹/输入路径），但 MIUIX 分支的
-        // optionIcons 只配了 4 个图标，遍历时 optionIcons[4] 越界。
-        versionCode = 2026112103
-        versionName = "5.3.2"
+        // 5.4.0：换上游基座 5e048c5a → bbab1b76（7 提交：图片三层流式管线重构、
+        // 生图页/画廊点图修复、miuix 主题与弹窗动画、定时任务 COUI 弹窗）；fork 55 提交重放。
+        // 图片管线跟随上游 budget 机制，并保留 fork 独有的 EXIF 方向转正（上游无此处理）。
+        versionCode = 2026112401
+        versionName = "5.4.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
