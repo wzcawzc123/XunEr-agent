@@ -1,6 +1,9 @@
 package io.github.mangi.eta.ui.app
 
-import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.ui.state.guardContextWindow
+import io.github.mangi.eta.ui.state.estimateHistoryTokens
+import io.github.mangi.eta.ui.state.textTokens
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

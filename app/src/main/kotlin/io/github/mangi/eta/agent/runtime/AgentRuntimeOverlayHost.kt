@@ -522,6 +522,26 @@ internal class AgentRuntimeOverlayHost(
     }
 
     /**
+     * 配置变更（如横竖屏切换）后，把 glow 窗口高度对齐当前屏幕；取不到尺寸时退回 MATCH_PARENT。
+     * nextFrame=true 时延后一帧再取一次，兼容部分 ROM 在本回调之后才把新尺寸落到 Display。
+     */
+    fun refreshGlowHeight(nextFrame: Boolean = false) {
+        if (nextFrame) {
+            glowView?.post { refreshGlowHeight() }
+            return
+        }
+        val view = glowView ?: return
+        val lp = glowParams ?: return
+        lp.height = runCatching {
+            val point = Point()
+            @Suppress("DEPRECATION")
+            windowManager?.defaultDisplay?.getRealSize(point)
+            point.y
+        }.getOrDefault(WindowManager.LayoutParams.MATCH_PARENT)
+        runCatching { windowManager?.updateViewLayout(view, lp) }
+    }
+
+    /**
      * 屏幕四角的物理圆角半径。光效窗口覆盖整屏，直接取 Display 上报的值；
      * 部分 ROM 不上报时用 0，兜底按常见大圆角机型估一个保守值，宁可略小也不让光带越出屏幕。
      */

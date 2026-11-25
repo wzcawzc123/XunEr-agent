@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import java.math.BigDecimal
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
 import org.json.JSONArray
 import org.json.JSONObject
 

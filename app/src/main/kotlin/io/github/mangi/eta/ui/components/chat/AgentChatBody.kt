@@ -101,6 +101,7 @@ import io.github.mangi.eta.ui.model.UserMessageUi
 import io.github.mangi.eta.ui.model.branchMessageOutline
 import io.github.mangi.eta.ui.model.latestContextUsage
 import io.github.mangi.eta.ui.components.SpeechAutoReadAloud
+import io.github.mangi.eta.ui.components.AgentContextHistoryDialog
 import io.github.mangi.eta.ui.components.SpeechPlaybackHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel

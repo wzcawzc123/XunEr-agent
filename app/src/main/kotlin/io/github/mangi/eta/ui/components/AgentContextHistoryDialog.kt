@@ -26,9 +26,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
-import io.github.mangi.eta.data.model.AppearanceUiStyle
-import io.github.mangi.eta.ui.app.LocalUiStyle
-import io.github.mangi.eta.ui.components.coui.CouiNoticeDialog
 import io.github.mangi.eta.ui.model.AgentContextHistory
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.glass.GlassDialog
@@ -54,39 +51,28 @@ internal fun AgentContextHistoryDialog(
     } else {
         stringResource(R.string.context_history_count, records.size)
     }
-    when (LocalUiStyle.current) {
-        AppearanceUiStyle.COUI -> CouiNoticeDialog(
-            visible = true,
-            title = title,
-            message = summary,
-            confirmText = stringResource(R.string.action_close),
-            onDismissRequest = onDismiss,
-        ) {
-            if (records.isNotEmpty()) HistoryRecordList(records)
+    GlassDialog(
+        show = true,
+        title = title,
+        summary = summary,
+        backdrop = currentGlassOverlayBackdrop(),
+        onDismissRequest = onDismiss,
+    ) {
+        if (records.isNotEmpty()) {
+            HistoryRecordList(records)
+            Spacer(Modifier.height(12.dp))
         }
-        AppearanceUiStyle.MIUIX -> GlassDialog(
-            show = true,
-            title = title,
-            summary = summary,
-            backdrop = currentGlassOverlayBackdrop(),
-            onDismissRequest = onDismiss,
+        GlassDialogButton(
+            onClick = onDismiss,
+            role = GlassDialogButtonRole.Normal,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            if (records.isNotEmpty()) {
-                HistoryRecordList(records)
-                Spacer(Modifier.height(12.dp))
-            }
-            GlassDialogButton(
-                onClick = onDismiss,
-                role = GlassDialogButtonRole.Normal,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = stringResource(R.string.action_close),
-                    style = MiuixTheme.textStyles.button,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                text = stringResource(R.string.action_close),
+                style = MiuixTheme.textStyles.button,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

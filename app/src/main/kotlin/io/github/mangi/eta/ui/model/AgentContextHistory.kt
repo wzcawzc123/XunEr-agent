@@ -1,6 +1,6 @@
 package io.github.mangi.eta.ui.model
 
-import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
 
 /**
  * 压缩历史投影：从会话 history 里的摘要消息（`contextSummary = true`）还原

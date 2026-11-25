@@ -1,5 +1,7 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.agent.model.catalog.AgentFileToolCatalog
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

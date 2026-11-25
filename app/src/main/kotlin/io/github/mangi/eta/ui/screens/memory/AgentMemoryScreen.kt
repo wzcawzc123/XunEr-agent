@@ -55,6 +55,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.memory.AgentMemoryPreview
+import io.github.mangi.eta.agent.memory.AgentMemorySearch
 import io.github.mangi.eta.ui.components.DialogActions
 import io.github.mangi.eta.ui.components.PageScaffold
 import io.github.mangi.eta.ui.components.TopBarActionButton
@@ -103,7 +105,8 @@ internal fun AgentMemoryScreen(
     var showHistoryDialog by remember { mutableStateOf(false) }
     var retainedNotice by remember { mutableStateOf(state.notice) }
     if (state.notice != null) retainedNotice = state.notice
-
+    // 搜索是纯展示态（不落盘、不影响草稿），留在页面内即可，不必经 Store/Action 绕一圈。
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable {
         mutableStateOf(
             if (!state.isLoading && state.savedContent.isBlank()) MemoryViewMode.Edit else MemoryViewMode.Preview,
@@ -194,6 +197,15 @@ internal fun AgentMemoryScreen(
             MemoryDocumentCard(
                 state = state,
                 mode = currentMode,
+                searchQuery = searchQuery,
+                onSearchChange = { query ->
+                    searchQuery = query
+                    // 编辑区是输入框、没法过滤正文：输入搜索词时自动切预览看命中，
+                    // 否则搜索在编辑模式下是死区（草稿保留，可切回继续编辑）。
+                    if (query.isNotBlank() && currentMode == MemoryViewMode.Edit) {
+                        mode = MemoryViewMode.Preview
+                    }
+                },
                 onModeChange = { mode = it },
                 onDraftChange = { onAction(AgentMemoryAction.DraftChanged(it)) },
                 modifier = Modifier
@@ -299,6 +311,7 @@ private fun MemorySettingsGroup(
             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
         )
+        MemoryCoreUsageBar(state = state)
         ArrowPreference(
             title = stringResource(R.string.memory_history_title),
             summary = historyText,
@@ -360,6 +373,10 @@ private fun MemoryDocumentCard(
                 .height(0.5.dp)
                 .background(colors.dividerLine),
         )
+        // 搜索只在预览态出现：编辑区是输入框，过滤正文会把正在编辑的内容「藏起来」。
+        if (mode == MemoryViewMode.Preview && !state.isLoading) {
+            MemorySearchField(query = searchQuery, onQueryChange = onSearchChange)
+        }
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -582,6 +599,12 @@ private fun MemoryPreview(content: String, query: String, onStartEditing: () -> 
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
+        return
+    }
+    // 搜索优先：命中行自成一套渲染，不参与下面的全文虚拟化。
+    val trimmedQuery = query.trim()
+    if (trimmedQuery.isNotEmpty()) {
+        MemorySearchResults(content = content, query = trimmedQuery)
         return
     }
 
