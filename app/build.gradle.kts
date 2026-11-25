@@ -43,11 +43,11 @@ android {
         minSdk = 34
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        // 5.4.0：换上游基座 5e048c5a → bbab1b76（7 提交：图片三层流式管线重构、
-        // 生图页/画廊点图修复、miuix 主题与弹窗动画、定时任务 COUI 弹窗）；fork 55 提交重放。
-        // 图片管线跟随上游 budget 机制，并保留 fork 独有的 EXIF 方向转正（上游无此处理）。
-        versionCode = 2026112401
-        versionName = "5.4.0"
+        // 5.5.0：换上游基座 bbab1b76 → 26e98351（17 提交：移除 COUI 统一 Miuix、
+        // 包边界重构、AgentLocalTools/浮窗拆分、角色会话自动标题、常亮修复等）；fork 56 提交重放。
+        // 上游移除 COUI，fork 双皮肤收敛为单 Miuix，49 个 COUI 文件在重放中收敛。
+        versionCode = 2026112501
+        versionName = "5.5.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
