@@ -315,10 +315,10 @@ internal fun AgentAttachmentPickerButton(
                 tint = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
         }
-<<<<<<< HEAD:app/src/main/kotlin/io/github/mangi/eta/ui/components/chat/AgentChatFileAttachments.kt
         val overlayBackdrop = currentGlassOverlayBackdrop() ?: glassBackdrop
         val optionIcons = remember {
             listOf(
+                Icons.Rounded.PhotoCamera,
                 MiuixIcons.Glass.ImageOutline,
                 MiuixIcons.Glass.File,
                 MiuixIcons.Glass.FolderOutline,
@@ -340,33 +340,6 @@ internal fun AgentAttachmentPickerButton(
                         contentDescription = null,
                         modifier = Modifier.size(23.dp),
                         tint = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-=======
-        when (uiStyle) {
-            AppearanceUiStyle.COUI -> {
-                val menuItems = remember(options) {
-                    options.mapIndexed { index, label -> CouiMenuItem(value = index, text = label) }
-                }
-                CouiMenu(
-                    expanded = showPopup,
-                    onDismissRequest = { showPopup = false },
-                    items = menuItems,
-                    onItemClick = { item ->
-                        showPopup = false
-                        onSelectOption(item.value)
-                    },
-                    anchor = anchor,
-                )
-            }
-            AppearanceUiStyle.MIUIX -> {
-                val overlayBackdrop = currentGlassOverlayBackdrop() ?: glassBackdrop
-                val optionIcons = remember {
-                    listOf(
-                        Icons.Rounded.PhotoCamera,
-                        MiuixIcons.Glass.ImageOutline,
-                        MiuixIcons.Glass.File,
-                        MiuixIcons.Glass.FolderOutline,
-                        MiuixIcons.Glass.Edit,
->>>>>>> 074472dc (fix(ui): 修复附件菜单「+」在 MIUIX 风格下点击闪退):app/src/main/kotlin/io/github/mangi/eta/ui/components/AgentChatFileAttachments.kt
                     )
                 },
             ) {
