@@ -46,8 +46,8 @@ android {
         // 5.5.0：换上游基座 bbab1b76 → 26e98351（17 提交：移除 COUI 统一 Miuix、
         // 包边界重构、AgentLocalTools/浮窗拆分、角色会话自动标题、常亮修复等）；fork 56 提交重放。
         // 上游移除 COUI，fork 双皮肤收敛为单 Miuix，49 个 COUI 文件在重放中收敛。
-        versionCode = 2026112501
-        versionName = "5.5.0"
+        versionCode = 2026112701
+        versionName = "5.5.1"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
