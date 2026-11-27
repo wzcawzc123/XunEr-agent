@@ -46,10 +46,13 @@ internal fun AgentContextHistoryDialog(
     onDismiss: () -> Unit,
 ) {
     val title = stringResource(R.string.context_history_title)
+    // 条数只是「还留着几份正文」：早期卡片被吸收进新摘要后不再单独成条，
+    // 所以次数要取代数（fold-N 的 N），否则压过 5 次也只会显示「共 1 次」。
+    val total = AgentContextHistory.total(records)
     val summary = if (records.isEmpty()) {
         stringResource(R.string.context_history_empty)
     } else {
-        stringResource(R.string.context_history_count, records.size)
+        stringResource(R.string.context_history_count, total)
     }
     GlassDialog(
         show = true,
@@ -59,6 +62,15 @@ internal fun AgentContextHistoryDialog(
         onDismissRequest = onDismiss,
     ) {
         if (records.isNotEmpty()) {
+            val merged = total - records.size
+            if (merged > 0) {
+                Text(
+                    text = stringResource(R.string.context_history_merged, merged),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             HistoryRecordList(records)
             Spacer(Modifier.height(12.dp))
         }

@@ -295,7 +295,7 @@ internal fun AgentChatBody(
             onReasoningEffortChange = onReasoningEffortChange,
             onCompactContext = onCompactContext,
             canCompactContext = canCompactContext,
-            compactionCount = compactionRecords.size,
+            compactionCount = AgentContextHistory.total(compactionRecords),
             onShowCompactionHistory = { showCompactionHistory = true },
             onModelSelected = onModelSelected,
             onStop = onStop,

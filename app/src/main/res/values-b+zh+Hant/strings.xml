@@ -1451,4 +1451,5 @@
   <string name="context_history_expand">展開全文</string>
   <string name="context_history_collapse">收合</string>
   <string name="context_history_open">查看壓縮歷史</string>
+  <string name="context_history_merged">更早的 %1$d 張交接卡已併入最新摘要，此處只保留最近一張的正文。</string>
 </resources>

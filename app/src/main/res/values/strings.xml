@@ -1573,4 +1573,5 @@
   <string name="context_history_expand">Show full card</string>
   <string name="context_history_collapse">Collapse</string>
   <string name="context_history_open">View compaction history</string>
+  <string name="context_history_merged">%1$d earlier cards were folded into the latest summary; only the newest card body is kept here.</string>
 </resources>
